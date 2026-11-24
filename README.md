@@ -8,6 +8,7 @@ Unofficial MCP server for [APCOA Flow](https://flow.apcoa.com) parking sessions,
 
 | Tool | Description |
 |---|---|
+| `find_parking` | Parkings near a coordinate, optionally filtered by name (e.g. "Carrefour"), nearest first |
 | `get_parking_zones` | All available parking zones with their IDs |
 | `get_active_session` | Currently running parking session, or none |
 | `start_session` | Start a parking session at a zone for a license plate |
@@ -33,8 +34,15 @@ services:
       - .env
     environment:
       - ASPNETCORE_ENVIRONMENT=Production
+    volumes:
+      - apcoa-parking-data:/data/parking
     restart: unless-stopped
+
+volumes:
+  apcoa-parking-data:
 ```
+
+> The `apcoa-parking-data` volume caches the parking dataset (downloaded and decrypted from APCOA's public S3 bucket) so the server warm-starts after a restart instead of re-downloading. It is optional — without it the server still works, but rebuilds the dataset from S3 on every start. See [Parking data](#parking-data).
 
 **2. Create a `.env` next to it:**
 
@@ -141,6 +149,35 @@ Example client configuration:
   }
 }
 ```
+
+## Parking data
+
+`find_parking` searches an offline dataset, because APCOA has no live search API — the app downloads static, encrypted parking tiles from a public S3 bucket and searches them on-device. This server does the same: on first use it downloads and decrypts every country tile, builds an in-memory spatial index (~1 MB), and persists a compact snapshot to disk.
+
+The snapshot lives at `ParkingData:StorePath` (default `/data/parking`). Map that path to a Docker volume (see the compose example above) so the index warm-starts after a restart instead of re-downloading from S3.
+
+Freshness is tunable via the `ParkingData` configuration section (defaults shown):
+
+```json
+{
+  "ParkingData": {
+    "StorePath": "/data/parking",
+    "SoftRefreshAge": "12:00:00",
+    "HardRefreshAge": "72:00:00",
+    "BackgroundRefreshInterval": "48:00:00",
+    "GeohashPrecision": 6,
+    "CompanyId": 9
+  }
+}
+```
+
+- **SoftRefreshAge** — past this, a search returns current data immediately and refreshes in the background.
+- **HardRefreshAge** — past this, the next search blocks on a rebuild before answering.
+- **BackgroundRefreshInterval** — how often the web host proactively rebuilds (not used in stdio mode).
+- **GeohashPrecision** — spatial bucket size; 6 ≈ 1.2 × 0.6 km cells.
+- **CompanyId** — APCOA tenant used to fetch the dataset decryption key.
+
+Override any of these with environment variables, e.g. `ParkingData__HardRefreshAge=96:00:00`.
 
 ## Running tests
 
