@@ -23,7 +23,7 @@ propose the next version:
 - **minor** — any `feat:` commit
 - **major** — breaking changes
 
-Always confirm the chosen version with the user.
+Confirm the chosen version with the user before proceeding.
 
 **Normalize the version.** The user may or may not type a leading `v`
 (`1.0.0` or `v1.0.0`). Strip any leading `v`/`V` to get the bare version, then
@@ -37,9 +37,12 @@ Substitute `<version>` and `<tag>` in every command below.
 
 ## Confirmation gates
 
-Pushing, tagging and releasing are outward-facing and hard to undo. Show the
-exact commands and get the user's go-ahead before each of: the `git push` in
-step 1, the tag push in step 2, and `gh release create` in step 4.
+Only two things require user confirmation:
+
+1. **Version** — only when no version argument was given (after proposing the inferred version).
+2. **Release notes** — show the draft "What's changed" bullets and get the user's go-ahead before running `gh release create`.
+
+All other steps (csproj edit, commit, push, tag, tag push, waiting for the workflow, `gh release create` itself) run automatically without stopping.
 
 ## Steps
 
@@ -68,7 +71,7 @@ Edit `src/ApcoaFlowMcp/ApcoaFlowMcp.csproj`:
 <Version><version></Version>
 ```
 
-Commit and push (after confirmation):
+Commit and push:
 
 ```bash
 git add src/ApcoaFlowMcp/ApcoaFlowMcp.csproj
@@ -78,8 +81,7 @@ git push
 
 ### 2. Tag and push
 
-Create a **signed, annotated** tag on the version-bump commit and push it
-(after confirmation):
+Create a **signed, annotated** tag on the version-bump commit and push it:
 
 ```bash
 git tag -s <tag> -m "<tag>" HEAD
@@ -134,8 +136,8 @@ Only after the workflow is green and both tags are confirmed present.
 
 Draft the "What's changed" bullets from `git log <prev>..<tag> --oneline`
 (`<prev>` = the previous release tag): group related commits, drop noise like
-CI-only tweaks unless they matter to users, and **show the draft to the user**
-before publishing. Then (after confirmation):
+CI-only tweaks unless they matter to users, and **show the draft to the user
+and wait for confirmation before running `gh release create`**. Then:
 
 ```bash
 gh release create <tag> --title "<tag>" --notes "$(cat <<'EOF'

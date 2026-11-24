@@ -20,13 +20,13 @@ public static class ServiceCollectionExtensions
             .ConfigureHttpClient(c => c.BaseAddress = new Uri(ApcoaFlowClientOptions.BaseUrl))
             .AddHttpMessageHandler<ApcoaFlowAuthHandler>()
             // Client-side rate limit (outermost handler) so we never hammer the backend and trip its
-            // 403 lockout. Token bucket: a short burst of up to 5 requests is allowed, then it settles
+            // 403 lockout. Token bucket: a short burst of up to 10 requests is allowed, then it settles
             // to a long-run average of 1 request/second as tokens refill one per second. Requests over
             // the limit queue (FIFO) rather than fail, so callers just slow down.
             .AddResilienceHandler("apcoa-rate-limit", builder =>
                 builder.AddRateLimiter(new TokenBucketRateLimiter(new TokenBucketRateLimiterOptions
                 {
-                    TokenLimit = 5,
+                    TokenLimit = 10,
                     TokensPerPeriod = 1,
                     ReplenishmentPeriod = TimeSpan.FromSeconds(1),
                     QueueProcessingOrder = QueueProcessingOrder.OldestFirst,
