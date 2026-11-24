@@ -1,46 +1,23 @@
 namespace ApcoaFlowApiClient.Tests;
 
-// Placeholder live-API tests (still stubbed). The constant-assertion analyzer warning is
-// expected until these are implemented; suppress it narrowly for this file.
-#pragma warning disable TUnitAssertions0005
+/// <summary>
+/// Live-API smoke test for authentication. The full read-only, pricing, and session-lifecycle flows
+/// are covered by <see cref="LiveApiCaptureTests"/> and <see cref="LiveApiSessionTests"/>.
+/// </summary>
 [Category("LiveApi")]
 public class ApcoaFlowApiTests
 {
     private readonly IApcoaFlowApi _api = ApiClientFactory.Api;
 
     [Test]
-    public async Task Login_WithValidCredentials_Succeeds()
+    public async Task Login_And_GetConsumer_Succeeds()
     {
-        // TODO: implement once API is known
-        await Assert.That(true).IsTrue();
-    }
+        // Exercises the login flow (the auth handler logs in and attaches the token) via an
+        // authenticated call, and confirms the consumer profile comes back for the test account.
+        var consumer = await _api.GetConsumerAsync();
 
-    [Test]
-    public async Task GetParkingZones_ReturnsSuccessfully()
-    {
-        // TODO: implement once API is known
-        await Assert.That(true).IsTrue();
-    }
-
-    [Test]
-    public async Task StartSession_AndEndSession_Succeeds()
-    {
-        // TODO: implement once API is known
-        await Assert.That(true).IsTrue();
-    }
-
-    [Test]
-    public async Task GetActiveSession_WhenNoSession_ReturnsNull()
-    {
-        // TODO: implement once API is known
-        await Assert.That(true).IsTrue();
-    }
-
-    [Test]
-    public async Task GetSessionHistory_ReturnsSuccessfully()
-    {
-        // TODO: implement once API is known
-        await Assert.That(true).IsTrue();
+        await Assert.That(consumer).IsNotNull().Because("an authenticated consumer profile should be returned");
+        await Assert.That(consumer.Id).IsGreaterThan(0).Because("the consumer must have a valid id");
+        await Assert.That(consumer.EmailAddress).IsNotNull().Because("the profile should include the account email");
     }
 }
-#pragma warning restore TUnitAssertions0005

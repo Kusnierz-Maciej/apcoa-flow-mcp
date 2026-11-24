@@ -16,13 +16,13 @@ namespace ApcoaFlowApiClient.Tests;
 /// before implementing cost-aware session tools.
 ///
 /// SAFETY: these calls never start, extend, or stop a session. Everything targets the free
-/// test parking (id 616319 / lot 41905) or is a pure GET. Run explicitly with the "Capture"
+/// test parking (id 616319 / lot 41905) or is a pure GET. Run explicitly with the "LiveApi"
 /// category; it is not part of the normal test run.
 /// </summary>
-[Category("Capture")]
-public class LiveCaptureHarness
+[Category("LiveApi")]
+public class LiveApiCaptureTests
 {
-    // Free test parking — unlimited free sessions, safe to query. See API-NOTES.md.
+    // Free test parking — unlimited free sessions, safe to query. See docs/API-NOTES.md.
     private const int TestParkingId = 616319;
     private const int TestParkingLotId = 41905;
     private const int TestTariffId = 108014;
@@ -40,7 +40,7 @@ public class LiveCaptureHarness
     private static HttpClient BuildRawClient()
     {
         var config = new ConfigurationBuilder()
-            .AddUserSecrets<LiveCaptureHarness>(optional: true)
+            .AddUserSecrets<LiveApiCaptureTests>(optional: true)
             .AddEnvironmentVariables()
             .Build();
 
@@ -66,7 +66,7 @@ public class LiveCaptureHarness
     private static (IApcoaFlowApi Api, IApcoaParkingDataSource Data) BuildClients()
     {
         var config = new ConfigurationBuilder()
-            .AddUserSecrets<LiveCaptureHarness>(optional: true)
+            .AddUserSecrets<LiveApiCaptureTests>(optional: true)
             .AddEnvironmentVariables()
             .Build();
         var options = new ApcoaFlowClientOptions
@@ -92,7 +92,8 @@ public class LiveCaptureHarness
     {
         var (api, _) = BuildClients();
         var config = await api.GetAppConfigAsync(9);
-        await Assert.That(config).IsNotNull();
+        await Assert.That(config).IsNotNull()
+            .Because("app config is a public endpoint and must return without a bearer token (419 if one is sent)");
     }
 
     // Verifies the public parking-lookup fix without hardcoding an id: discover a real parking near
@@ -108,20 +109,25 @@ public class LiveCaptureHarness
         // Precondition this test depends on: the parking data source needs the app-config key.
         // Assert it directly so a precondition failure is reported here, not masked inside FindNearbyAsync.
         var config = await api.GetAppConfigAsync(9);
-        await Assert.That(config).IsNotNull();
+        await Assert.That(config).IsNotNull()
+            .Because("precondition: FindNearbyAsync needs the app-config decryption key, so app config must be reachable");
 
         // Tarnowskie Góry town centre; 5 km covers the local parkings.
         var nearby = await data.FindNearbyAsync(50.4453, 18.8617, radiusKm: 5.0);
-        await Assert.That(nearby.Count).IsGreaterThan(0);
+        await Assert.That(nearby.Count).IsGreaterThan(0)
+            .Because("the offline index should return parkings near Tarnowskie Góry");
 
         var picked = nearby[Random.Shared.Next(nearby.Count)].Parking;
 
         var lots = await api.GetParkingLotsAsync(picked.Id);
-        await Assert.That(lots).IsNotNull();
+        await Assert.That(lots).IsNotNull()
+            .Because($"parkingLots for parking {picked.Id} is public and must return without a bearer token");
 
         var detail = await api.GetParkingAsync(picked.Id);
-        await Assert.That(detail).IsNotNull();
-        await Assert.That(detail.Id).IsEqualTo(picked.Id);
+        await Assert.That(detail).IsNotNull()
+            .Because($"parking detail for {picked.Id} is public and must return without a bearer token");
+        await Assert.That(detail.Id).IsEqualTo(picked.Id)
+            .Because("the returned detail should be for the requested parking id");
     }
 
     private static async Task DumpAsync(string label, HttpClient http, string url)
