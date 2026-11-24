@@ -10,7 +10,7 @@ services:
     environment:
       - ASPNETCORE_ENVIRONMENT=Production
       # Non-secret settings — all overridable via env (Section__Key convention).
-      # Defaults shown; uncomment to change. StorePath is fixed to the mounted volume below.
+      # Defaults shown; uncomment to change. StorePath must match the mount target below.
       - ApcoaFlow__MaxSessionCostPln=100
       - ApcoaFlow__CurrentLocationRadiusMeters=300
       - ParkingData__CompanyId=9
@@ -20,8 +20,11 @@ services:
       - ParkingData__BackgroundRefreshInterval=24:00:00
       - ParkingData__StorePath=/data/parking
     volumes:
-      - apcoa-parking-data:/data/parking
+      # Bind mount: point the left side at a directory on the NAS. The app runs as UID 1654, so
+      # that host directory must be writable by 1654 (e.g. `mkdir -p ./data/parking &&
+      # chown -R 1654:1654 ./data/parking`), OR run the container as your NAS user by uncommenting
+      # `user:` below. If the directory isn't writable the server still runs, serving the parking
+      # dataset from memory and re-downloading it on each restart (no warm-start).
+      - ./data/parking:/data/parking
+    # user: "1000:1000"   # optional: run as your NAS user instead of chowning the directory to 1654
     restart: unless-stopped
-
-volumes:
-  apcoa-parking-data:

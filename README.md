@@ -52,14 +52,14 @@ services:
       - ParkingData__BackgroundRefreshInterval=24:00:00
       - ParkingData__StorePath=/data/parking
     volumes:
-      - apcoa-parking-data:/data/parking
+      # Bind mount to a host directory. It must be writable by the container user (UID 1654):
+      # `mkdir -p ./data/parking && chown -R 1654:1654 ./data/parking`, or run the container as
+      # your own user with `user: "1000:1000"`.
+      - ./data/parking:/data/parking
     restart: unless-stopped
-
-volumes:
-  apcoa-parking-data:
 ```
 
-> The `apcoa-parking-data` volume caches the parking dataset (downloaded and decrypted from APCOA's public S3 bucket) so the server warm-starts after a restart instead of re-downloading. It is optional — without it the server still works, but rebuilds the dataset from S3 on every start. See [Parking data](#parking-data).
+> The bind-mounted directory caches the parking dataset (downloaded and decrypted from APCOA's public S3 bucket) so the server warm-starts after a restart instead of re-downloading. It is optional — if the directory isn't writable (or you omit the mount) the server still works, serving the dataset from memory and rebuilding from S3 on every start. See [Parking data](#parking-data).
 
 **2. Create a `.env` next to it:**
 
@@ -171,7 +171,7 @@ Example client configuration:
 
 `find_parking` searches an offline dataset, because APCOA has no live search API — the app downloads static, encrypted parking tiles from a public S3 bucket and searches them on-device. This server does the same: on first use it downloads and decrypts every country tile, builds an in-memory spatial index (~1 MB), and persists a compact snapshot to disk.
 
-The snapshot lives at `ParkingData:StorePath` (default `/data/parking`). Map that path to a Docker volume (see the compose example above) so the index warm-starts after a restart instead of re-downloading from S3.
+The snapshot lives at `ParkingData:StorePath` (default `/data/parking`). Bind-mount a host directory there (writable by the container user — see the compose example above) so the index warm-starts after a restart instead of re-downloading from S3. If the path isn't writable the server falls back to serving from memory and rebuilding on each start.
 
 Freshness is tunable via the `ParkingData` configuration section (defaults shown):
 
