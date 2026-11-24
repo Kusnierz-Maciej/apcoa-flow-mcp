@@ -101,16 +101,26 @@ public interface IApcoaFlowApi
     // Parking details (no auth required)
     // -------------------------------------------------------------------------
 
-    /// <summary>Returns full details for a single parking location, including address, coordinates, and images.</summary>
+    /// <summary>
+    /// Returns full details for a single parking location, including address, coordinates, lots, and
+    /// the human-readable price description. PUBLIC endpoint — must be called without a bearer token
+    /// (the <c>X-Apcoa-NoAuth</c> header makes <see cref="ApcoaFlowAuthHandler"/> omit Authorization).
+    /// </summary>
     [Get("/authentication/v1/parking/{parkingId}")]
+    [Headers("X-Apcoa-NoAuth: true")]
     Task<ParkingDetail> GetParkingAsync(int parkingId, CancellationToken ct = default);
 
-    /// <summary>Returns the parking lots (bays/areas) within a parking. Pass <c>parkingSessionType=STP_BOOKING</c>.</summary>
+    /// <summary>
+    /// Returns the parking lots (bays/areas) within a parking, including each lot's tariff IDs.
+    /// PUBLIC endpoint — must be called without a bearer token (see <c>X-Apcoa-NoAuth</c>).
+    /// </summary>
     [Get("/authentication/v1/parking/{parkingId}/parkingLots")]
+    [Headers("X-Apcoa-NoAuth: true")]
     Task<List<ParkingLot>> GetParkingLotsAsync(int parkingId, [Query] string parkingSessionType = "STP_BOOKING", CancellationToken ct = default);
 
-    /// <summary>Returns a parking image by its UUID. The image UUID comes from <see cref="ParkingDetail.Images"/>.</summary>
+    /// <summary>Returns a parking image by its UUID. PUBLIC — no bearer token (see <c>X-Apcoa-NoAuth</c>).</summary>
     [Get("/authentication/v1/parking/parkingImages/{imageId}")]
+    [Headers("X-Apcoa-NoAuth: true")]
     Task<HttpContent> GetParkingImageAsync(string imageId, CancellationToken ct = default);
 
     /// <summary>Returns the server's current UTC time. Used immediately before starting a session.</summary>
@@ -123,9 +133,10 @@ public interface IApcoaFlowApi
 
     /// <summary>
     /// Returns in-app sponsor ads for the given company and parking IDs.
-    /// Pass comma-separated IDs when querying multiple.
+    /// Pass comma-separated IDs when querying multiple. PUBLIC — no bearer token.
     /// </summary>
     [Get("/authentication/v1/dashboard/inAppSponsorAds/getInAppSponsorAdsDetails")]
+    [Headers("X-Apcoa-NoAuth: true")]
     Task<List<SponsorAd>> GetSponsorAdsAsync([Query] string companyIdList, [Query] string parkingIdList, CancellationToken ct = default);
 
     // -------------------------------------------------------------------------
@@ -232,15 +243,22 @@ public interface IApcoaFlowApi
     // App configuration (no auth required)
     // -------------------------------------------------------------------------
 
-    /// <summary>Returns company config attributes. Use <c>attributeType=COMPANY_CONFIG</c>.</summary>
+    /// <summary>Returns company config attributes. Use <c>attributeType=COMPANY_CONFIG</c>. PUBLIC — no bearer token.</summary>
     [Get("/authentication/v1/company/{companyId}/companyAttribute")]
+    [Headers("X-Apcoa-NoAuth: true")]
     Task<List<CompanyAttribute>> GetCompanyAttributesAsync(int companyId, [Query] string attributeType, [Query] string entityId, [Query] string entityType, CancellationToken ct = default);
 
-    /// <summary>Returns the app config (feature flags, settings) for a company. Use <c>version=v3</c>.</summary>
+    /// <summary>
+    /// Returns the app config (feature flags, settings, and the parking-data decryption key) for a company.
+    /// Use <c>version=v3</c>. PUBLIC — must be called without a bearer token (see <c>X-Apcoa-NoAuth</c>);
+    /// sending one yields HTTP 419.
+    /// </summary>
     [Get("/authentication/v1/dashboard/tenant/appConfigByCompanyId/{companyId}")]
+    [Headers("X-Apcoa-NoAuth: true")]
     Task<object> GetAppConfigAsync(int companyId, [Query] string version = "v3", CancellationToken ct = default);
 
-    /// <summary>Returns localisation strings for the given ID and epoch timestamp.</summary>
+    /// <summary>Returns localisation strings for the given ID and epoch timestamp. PUBLIC — no bearer token.</summary>
     [Get("/authentication/v1/translation/{id}")]
+    [Headers("X-Apcoa-NoAuth: true")]
     Task<object> GetTranslationsAsync(int id, [Query] long epochTime, CancellationToken ct = default);
 }

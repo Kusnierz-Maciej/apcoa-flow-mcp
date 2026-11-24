@@ -7,6 +7,12 @@ namespace ApcoaFlowApiClient;
 
 public class ApcoaFlowAuthHandler : DelegatingHandler
 {
+    /// <summary>
+    /// Sentinel request header: interface methods marked with it hit PUBLIC endpoints that reject a
+    /// bearer token with HTTP 419. The handler strips this header and omits Authorization for them.
+    /// </summary>
+    public const string NoAuthHeader = "X-Apcoa-NoAuth";
+
     private readonly IApcoaFlowCredentialProvider _credentials;
     private readonly ApcoaFlowTokenStore _tokens;
 
@@ -18,9 +24,18 @@ public class ApcoaFlowAuthHandler : DelegatingHandler
 
     protected override async Task<HttpResponseMessage> SendAsync(HttpRequestMessage request, CancellationToken cancellationToken)
     {
+        ApplyAppHeaders(request);
+
+        // Public endpoints (e.g. parking detail / parkingLots) must NOT carry a bearer token —
+        // the backend returns 419 if they do. They are opted out via the NoAuth sentinel header.
+        if (request.Headers.Contains(NoAuthHeader))
+        {
+            request.Headers.Remove(NoAuthHeader);
+            return await base.SendAsync(request, cancellationToken);
+        }
+
         var credentials = _credentials.GetCredentials();
 
-        ApplyAppHeaders(request);
         var token = await _tokens.GetOrLoginAsync(credentials, ct => LoginAsync(credentials, ct), cancellationToken);
         request.Headers.Authorization = new AuthenticationHeaderValue("Bearer", token);
 
