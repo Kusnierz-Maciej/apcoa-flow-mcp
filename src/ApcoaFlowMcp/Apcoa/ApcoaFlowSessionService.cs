@@ -38,6 +38,9 @@ public sealed class ApcoaFlowSessionService(IApcoaFlowApi api, IApcoaParkingData
 
         /// <summary>Distance from the user to the parking, when started via current location.</summary>
         public int? DistanceMeters { get; init; }
+
+        /// <summary>When non-null, there is already an active session at this parking.</summary>
+        public ParkingSessionV2? ExistingSession { get; init; }
     }
 
     public enum StartMode { Normal, OnlyFree }
@@ -158,20 +161,16 @@ public sealed class ApcoaFlowSessionService(IApcoaFlowApi api, IApcoaParkingData
         var checkIn = DateTimeOffset.UtcNow;
         var checkOut = checkIn.Add(window);
 
-        // 5. If a promo applies, validate it (the app does this before quoting/starting with a promo).
-        if (promo is not null)
-        {
-            await api.ValidatePromotionAsync(new ValidatePromotionRequest
-            {
-                ConsumerID = consumer.Id,
-                VehicleNumber = vehicle.VehicleNumber,
-                PromotionName = promo.Name ?? string.Empty,
-                Company = Company,
-                ParkingLot = lotId,
-                StartTime = checkIn,
-                DurationValue = window,
-            }, ct);
-        }
+        // 5. If a promo applies, VALIDATE it before trusting it. The tariff breakdown (step 6) will
+        //    optimistically zero out the price for a promo even when that promo is actually unusable
+        //    (expired/used-up/not-valid-for-this-account), and the real start then charges full price.
+        //    The promotion/validate endpoint is the authoritative check: a usable coupon returns a 2xx
+        //    whose body carries no error signal; an unusable one returns a non-2xx (e.g. 422
+        //    INVALID_PROMOTION_CODE / 5007) OR a 2xx body that still carries an error code/message.
+        //    If validation does not clearly succeed, DROP the promo and fall back to the base price so
+        //    the quote reflects what will really be charged.
+        if (promo is not null && !await PromotionValidatesAsync(promo, lotId, vehicle.VehicleNumber, consumer.Id, checkIn, window, ct))
+            promo = null;
 
         // 6. Quote the final (promo-applied) price.
         var quote = await QuoteAsync(tariffId, lotId, window, checkIn, vehicle.VehicleNumber, promo, consumer.Id, ct);
@@ -210,23 +209,65 @@ public sealed class ApcoaFlowSessionService(IApcoaFlowApi api, IApcoaParkingData
         }
 
         // 8. Start the session.
-        var response = await api.StartParkingSessionAsync(new StartParkingSessionRequest
+        StartSessionResponse response;
+        try
         {
-            TariffId = tariffId,
-            ParkingId = parkingId,
-            ParkingLotId = lotId,
-            VehicleNumber = vehicle.VehicleNumber,
-            PaymentMethod = payment.PaymentType ?? "BLIK",
-            ConsumerUserPaymentId = payment.Id,
-            ConsumerProfileId = profileId,
-            SessionCheckInTime = checkIn,
-            ScheduledSessionCheckInTime = checkIn,
-            ScheduledSessionCheckOutTime = checkOut,
-            PromotionName = promo?.Name,
-            PromotionId = promo?.Id,
-            OfferDiscountType = promo is null ? null : "PROMOTION",
-            IsAutoApplyPromotion = promo is not null,
-        }, ct);
+            response = await api.StartParkingSessionAsync(new StartParkingSessionRequest
+            {
+                TariffId = tariffId,
+                ParkingId = parkingId,
+                ParkingLotId = lotId,
+                VehicleNumber = vehicle.VehicleNumber,
+                PaymentMethod = payment.PaymentType ?? "BLIK",
+                ConsumerUserPaymentId = payment.Id,
+                ConsumerProfileId = profileId,
+                SessionCheckInTime = checkIn,
+                ScheduledSessionCheckInTime = checkIn,
+                ScheduledSessionCheckOutTime = checkOut,
+                PromotionName = promo?.Name,
+                PromotionId = promo?.Id,
+                OfferDiscountType = promo is null ? null : "PROMOTION",
+                IsAutoApplyPromotion = promo is not null,
+            }, ct);
+        }
+        catch (Refit.ApiException ex) when ((int)ex.StatusCode == 424)
+        {
+            // The API rejects a start with HTTP 424 FailedDependency / LIMIT_EXCEEDED (statusCode 5012)
+            // when a session is already active (one at a time per account). Fetch the active session(s)
+            // and tell the user whether one is already running HERE (so they may just use it) or
+            // ELSEWHERE (so they can end it and retry), including how long each has left.
+            var stillActive = await api.GetParkingSessionsAsync(
+                new ParkingSessionV2Query { Status = "ACTIVE", PageSize = 10 }, ct);
+
+            if (stillActive.Count == 0)
+                return Tag(Refused("The API rejected the start with LIMIT_EXCEEDED, but no active session was found. Try again in a moment, or call get_active_sessions."));
+
+            // Prefer a session at the parking the user was trying to start at.
+            var sameParking = stillActive.FirstOrDefault(s => s.ParkingId == parkingId);
+            var primary = sameParking ?? stillActive[0];
+
+            var sb = new System.Text.StringBuilder();
+            if (sameParking is not null)
+            {
+                sb.Append($"You already have an active session at THIS parking ({DescribeActive(sameParking)}). ");
+                sb.Append($"It is already running here — you can keep using it, or end it with end_session({sameParking.Id}) and start a fresh one.");
+            }
+            else
+            {
+                sb.Append($"Can't start here — a session is already active ELSEWHERE: {DescribeActive(primary)}. ");
+                sb.Append($"Only one session can run at a time. End it with end_session({primary.Id}) and then retry, or keep the current one.");
+            }
+
+            // If there is more than one active session, list the rest so the user sees the full picture.
+            if (stillActive.Count > 1)
+            {
+                sb.Append($" Other active session(s): ");
+                sb.Append(string.Join("; ", stillActive.Where(s => s.Id != primary.Id).Select(DescribeActive)));
+                sb.Append('.');
+            }
+
+            return Tag(new StartResult(false, 0m, 0, null, null, sb.ToString(), null) { ExistingSession = primary });
+        }
 
         var kind = quote.IsFree ? "free" : $"{costPln:0.00} PLN";
         return Tag(new StartResult(true, costPln, minutes, promo?.Name, promo?.FreeMinutes,
@@ -268,8 +309,80 @@ public sealed class ApcoaFlowSessionService(IApcoaFlowApi api, IApcoaParkingData
             offerDiscountType: promo is null ? null : "PROMOTION",
             consumerUserId: consumerId), ct);
 
+    /// <summary>
+    /// Authoritatively checks whether <paramref name="promo"/> can actually be used right now (the
+    /// tariff breakdown applies promos optimistically even when they are unusable, which leads to a
+    /// free quote but a charged start). Returns true only when the promotion/validate endpoint returns
+    /// a success status AND its typed body carries no error marker. Any non-success status, any body
+    /// with an error code/message, or any transport error is treated as "not usable" (returns false).
+    /// </summary>
+    private async Task<bool> PromotionValidatesAsync(
+        Offer promo, int lotId, string plate, int consumerId, DateTimeOffset startTime, TimeSpan window, CancellationToken ct)
+    {
+        try
+        {
+            var response = await api.ValidatePromotionAsync(new ValidatePromotionRequest
+            {
+                ConsumerID = consumerId,
+                VehicleNumber = plate,
+                PromotionName = promo.Name ?? string.Empty,
+                Company = Company,
+                ParkingLot = lotId,
+                StartTime = startTime,
+                DurationValue = window,
+            }, ct);
+
+            // Must be a success status AND the typed body must not carry an error marker: an error
+            // statusCode (outside 2xx, e.g. 5007) or a non-neutral message (e.g. INVALID_PROMOTION_CODE).
+            if (!response.IsSuccessStatusCode)
+                return false;
+
+            var body = response.Content;
+            if (body is null)
+                return true; // success status, no body — nothing says the promo failed
+
+            if (body.StatusCode is { } code && (code < 200 || code > 299))
+                return false;
+
+            if (!string.IsNullOrWhiteSpace(body.Message) &&
+                !body.Message.Equals("SUCCESS", StringComparison.OrdinalIgnoreCase) &&
+                !body.Message.Equals("OK", StringComparison.OrdinalIgnoreCase))
+                return false;
+
+            return true;
+        }
+        catch (Refit.ApiException)
+        {
+            // Transport/deserialisation failure — treat the promo as not usable rather than risk a charge.
+            return false;
+        }
+    }
+
     private static StartResult Refused(string message) =>
         new(false, 0m, 0, null, null, message, null);
 
     private static string Normalize(string? s) => (s ?? string.Empty).Replace(" ", "").Trim();
+
+    /// <summary>
+    /// One-line description of an active session for the "already active" message: id, parking, plate,
+    /// and how long it has left (from its scheduled checkout), or "overdue"/"end time unknown".
+    /// </summary>
+    private static string DescribeActive(ParkingSessionV2 s)
+    {
+        string remaining;
+        if (s.ScheduledCheckoutTime is { } end)
+        {
+            var left = end - DateTimeOffset.UtcNow;
+            remaining = left > TimeSpan.Zero
+                ? $"{(int)left.TotalMinutes} min left"
+                : "overdue (past its scheduled end)";
+        }
+        else
+        {
+            remaining = "end time unknown";
+        }
+
+        var plate = string.IsNullOrWhiteSpace(s.LicensePlate) ? "?" : s.LicensePlate;
+        return $"session {s.Id} at '{s.ParkingName}' [{s.ParkingId}], plate {plate}, {remaining}";
+    }
 }

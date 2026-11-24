@@ -199,11 +199,13 @@ public interface IApcoaFlowApi
     Task<OffersResponse> GetApplicableOffersV2Async([Body] ApplicableOffersV2Request request, CancellationToken ct = default);
 
     /// <summary>
-    /// Validates a chosen promotion before applying it to a session. The 200 response body is opaque
-    /// (merged/consumer blob); only success matters, so the result is read as a raw JSON element.
+    /// Validates a chosen promotion before applying it to a session. A usable coupon returns 2xx; an
+    /// unusable one returns a non-2xx (e.g. 422) whose body carries an error message/code
+    /// (e.g. INVALID_PROMOTION_CODE / 5007). Returned as <see cref="IApiResponse{T}"/> so callers can
+    /// inspect the status and typed body without an exception on the expected failure path.
     /// </summary>
     [Post("/authentication/v1/promotion/validate")]
-    Task<System.Text.Json.JsonElement> ValidatePromotionAsync([Body] ValidatePromotionRequest request, CancellationToken ct = default);
+    Task<IApiResponse<ValidatePromotionResponse>> ValidatePromotionAsync([Body] ValidatePromotionRequest request, CancellationToken ct = default);
 
     // -------------------------------------------------------------------------
     // Permits
