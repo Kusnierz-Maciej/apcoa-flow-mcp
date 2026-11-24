@@ -110,7 +110,7 @@ Resolves the lot, tariff, vehicle, payment method and profile automatically.
 |---|---|---|---|---|
 | `parkingId` | int | yes | — | Parking id from `find_parking`. |
 | `licensePlate` | string | yes | — | Registered plate, e.g. `ABC 123DE`. |
-| `durationMinutes` | int | no | 60 | Desired duration in minutes. Rounded up to the full free window when a shorter value is given and a free-time promotion applies. |
+| `durationMinutes` | int | no | server default | Desired duration in minutes. Omitting it uses the server default (60 min unless changed). Rounded up to the full free window when a shorter value is given and a free-time promotion applies. |
 | `confirmedCostPln` | decimal | no | — | Exact cost being confirmed (paid, second call only). |
 
 **Output**
@@ -178,8 +178,8 @@ behaviour. To guarantee a free-only start here, use `start_free_session_current_
 | `latitude` | number | yes | — | Current latitude (decimal degrees). |
 | `longitude` | number | yes | — | Current longitude (decimal degrees). |
 | `licensePlate` | string | yes | — | Registered plate. |
-| `durationMinutes` | int | no | 60 | Desired duration in minutes. Rounded up to the full free window when a shorter value is given and a free-time promotion applies. |
-| `radiusMeters` | number | no | `CurrentLocationRadiusMeters` (300) | Max distance to search. |
+| `durationMinutes` | int | no | server default | Desired duration in minutes. Omitting it uses the server default (60 min unless changed). Rounded up to the full free window when a shorter value is given and a free-time promotion applies. |
+| `radiusMeters` | number | no | `CurrentLocationRadiusMeters` | Max distance to search. Omitting it uses the configured `ApcoaFlow:CurrentLocationRadiusMeters` (300 m by default). |
 | `confirmedCostPln` | decimal | no | — | Exact cost being confirmed (paid, second call only). |
 
 **Output** — same as `start_session`, and the chosen parking's distance is included:
@@ -207,7 +207,7 @@ incurs a charge.
 | `longitude` | number | yes | — | Current longitude (decimal degrees). |
 | `licensePlate` | string | yes | — | Registered plate. |
 | `durationMinutes` | int | no | full free window | Desired duration in minutes. A shorter value is rounded up to the full free window; longer than the window is refused. |
-| `radiusMeters` | number | no | `CurrentLocationRadiusMeters` (300) | Max distance to search. |
+| `radiusMeters` | number | no | `CurrentLocationRadiusMeters` | Max distance to search. Omitting it uses the configured `ApcoaFlow:CurrentLocationRadiusMeters` (300 m by default). |
 
 **Output** — same shape as `start_free_session`, with the distance included.
 ```

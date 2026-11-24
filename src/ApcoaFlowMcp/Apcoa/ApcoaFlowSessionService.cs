@@ -16,6 +16,12 @@ public sealed class ApcoaFlowSessionService(IApcoaFlowApi api, IApcoaParkingData
 {
     private const string Company = "PL";
 
+    /// <summary>
+    /// Default session length (minutes) used by the Normal start path when the caller omits a duration.
+    /// Compile-time constant (not config) — the single source of truth for the "no duration given" case.
+    /// </summary>
+    public const int DefaultDurationMinutes = 60;
+
     /// <summary>Outcome of a start attempt: either started, or a quote that needs confirmation/was refused.</summary>
     public sealed record StartResult(
         bool Started,
@@ -139,7 +145,7 @@ public sealed class ApcoaFlowSessionService(IApcoaFlowApi api, IApcoaParkingData
         }
         else
         {
-            window = requested ?? TimeSpan.FromHours(1);
+            window = requested ?? TimeSpan.FromMinutes(DefaultDurationMinutes);
 
             // If a free promo applies, never park for less than the full free window — fill the slot,
             // then any paid overage runs after it.

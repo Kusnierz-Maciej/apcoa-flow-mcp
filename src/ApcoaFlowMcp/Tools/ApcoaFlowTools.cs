@@ -90,7 +90,7 @@ public sealed class ApcoaFlowTools(
     public async Task<string> StartSessionAsync(
         [Description("Parking id (from find_parking)")] int parkingId,
         [Description("Registered license plate, e.g. \"ABC 123DE\" (see get_registered_cars)")] string licensePlate,
-        [Description("Desired duration in minutes. Omit for a default of 60. If a free-time promotion applies and this is shorter than the free window, it is rounded up to the full free window so none of the free time is wasted.")] int? durationMinutes = null,
+        [Description("Desired duration in minutes. Omit to use the server's default duration. If a free-time promotion applies and this is shorter than the free window, it is rounded up to the full free window so none of the free time is wasted.")] int? durationMinutes = null,
         [Description("For a PAID session: the exact cost in PLN you are confirming (from a prior call's quote). Must match the live cost exactly. Omit on the first call.")] decimal? confirmedCostPln = null,
         CancellationToken ct = default)
     {
@@ -121,7 +121,7 @@ public sealed class ApcoaFlowTools(
     [McpServerTool(Name = "start_session_current_location")]
     [Description(
         "Start a parking session at the closest parking to the user's current GPS location (within a " +
-        "radius, default 300 m), for a registered license plate. May cost money. Same FREE/PAID behaviour as " +
+        "search radius), for a registered license plate. May cost money. Same FREE/PAID behaviour as " +
         "start_session: free starts immediately; paid returns the cost and needs a second call with " +
         "confirmedCostPln set to EXACTLY that cost. Use this when the user wants to park 'here'/'where I am'. " +
         "(To guarantee a free-only start here, use start_free_session_current_location.)")]
@@ -129,8 +129,8 @@ public sealed class ApcoaFlowTools(
         [Description("Your current latitude (decimal degrees)")] double latitude,
         [Description("Your current longitude (decimal degrees)")] double longitude,
         [Description("Registered license plate, e.g. \"ABC 123DE\" (see get_registered_cars)")] string licensePlate,
-        [Description("Desired duration in minutes. Omit for a default of 60. If a free-time promotion applies and this is shorter than the free window, it is rounded up to the full free window so none of the free time is wasted.")] int? durationMinutes = null,
-        [Description("Search radius in metres for the closest parking. Omit to use the configured default (300 m).")] double? radiusMeters = null,
+        [Description("Desired duration in minutes. Omit to use the server's default duration. If a free-time promotion applies and this is shorter than the free window, it is rounded up to the full free window so none of the free time is wasted.")] int? durationMinutes = null,
+        [Description("Search radius in metres for the closest parking. Omit to use the server's configured default.")] double? radiusMeters = null,
         [Description("For a PAID session: the exact cost in PLN you are confirming (from a prior call's quote). Omit on the first call.")] decimal? confirmedCostPln = null,
         CancellationToken ct = default)
     {
@@ -144,7 +144,7 @@ public sealed class ApcoaFlowTools(
     [McpServerTool(Name = "start_free_session_current_location")]
     [Description(
         "Start a FREE parking session at the closest parking to the user's current GPS location (within a " +
-        "radius, default 300 m), for a registered license plate. Auto-applies an active free-time promotion and " +
+        "search radius), for a registered license plate. Auto-applies an active free-time promotion and " +
         "starts only if the session is actually free; refused (nothing started) if it would cost anything. Safe: " +
         "never incurs a charge. Use this for 'park free here/where I am'.")]
     public async Task<string> StartFreeSessionCurrentLocationAsync(
@@ -152,7 +152,7 @@ public sealed class ApcoaFlowTools(
         [Description("Your current longitude (decimal degrees)")] double longitude,
         [Description("Registered license plate, e.g. \"ABC 123DE\" (see get_registered_cars)")] string licensePlate,
         [Description("Desired duration in minutes. Omit to use the full free window.")] int? durationMinutes = null,
-        [Description("Search radius in metres for the closest parking. Omit to use the configured default (300 m).")] double? radiusMeters = null,
+        [Description("Search radius in metres for the closest parking. Omit to use the server's configured default.")] double? radiusMeters = null,
         CancellationToken ct = default)
     {
         var result = await sessions.StartAtLocationAsync(
@@ -167,7 +167,7 @@ public sealed class ApcoaFlowTools(
     public async Task<string> StartExpensiveSessionAsync(
         [Description("Parking id (from find_parking)")] int parkingId,
         [Description("Registered license plate, e.g. \"ABC 123DE\"")] string licensePlate,
-        [Description("Desired duration in minutes. Omit for a default of 60. If a free-time promotion applies and this is shorter than the free window, it is rounded up to the full free window so none of the free time is wasted.")] int? durationMinutes = null,
+        [Description("Desired duration in minutes. Omit to use the server's default duration. If a free-time promotion applies and this is shorter than the free window, it is rounded up to the full free window so none of the free time is wasted.")] int? durationMinutes = null,
         [Description("The exact cost in PLN you are confirming (from a prior call's quote). Must match the live cost exactly. Omit on the first call.")] decimal? confirmedCostPln = null,
         CancellationToken ct = default)
     {
