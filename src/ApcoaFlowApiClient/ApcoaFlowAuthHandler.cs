@@ -47,10 +47,11 @@ public class ApcoaFlowAuthHandler : DelegatingHandler
         var response = await loginApi.LoginAsync(new LoginRequest
         {
             Email = credentials.Email,
-            Password = credentials.Password
+            Password = credentials.Password,
+            LocationCode = "PL"
         }, cancellationToken);
 
-        return response.AccessToken;
+        return response.AuthToken;
     }
 
     private static async Task<HttpRequestMessage> CloneRequestAsync(HttpRequestMessage original)
