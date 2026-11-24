@@ -220,10 +220,21 @@ public sealed class ApcoaS3ParkingDataSource : IApcoaParkingDataSource, IDisposa
             Entries = byId.Values.ToList(),
         };
 
-        await _store.SaveAsync(snapshot, ct);
+        // Serve from memory first; persisting is a warm-start optimization, not a hard requirement.
+        // A read-only or non-writable StorePath (e.g. a misconfigured volume) must not break parking.
         _index = new ParkingSpatialIndex(snapshot, _options.GeohashPrecision);
-
         _logger.LogInformation("Parking index built: {Count} entries.", snapshot.Entries.Count);
+
+        try
+        {
+            await _store.SaveAsync(snapshot, ct);
+        }
+        catch (Exception ex)
+        {
+            _logger.LogWarning(ex,
+                "Could not persist the parking snapshot (serving from memory only). " +
+                "Check that StorePath is writable to warm-start after a restart.");
+        }
     }
 
     /// <summary>
