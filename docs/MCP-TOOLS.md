@@ -98,6 +98,11 @@ Resolves the lot, tariff, vehicle, payment method and profile automatically.
   second call with `confirmedCostPln` set to **exactly** that cost (any mismatch is refused).
 - A paid cost above `MaxSessionCostPln` (default 100 zł) is refused — use `start_expensive_session`.
 - To guarantee a free-only start, use `start_free_session` instead.
+- **Free-time promotions are auto-applied.** If the parking has an active free-time promotion, it is
+  applied to the quote (so you are only charged for time beyond the free window), and the
+  confirmation message says how many minutes are free. A one-use free promo is never partly wasted:
+  if `durationMinutes` is shorter than the free window, it is rounded **up** to the full free window
+  (capped by the lot's max duration).
 
 **Inputs**
 
@@ -105,7 +110,7 @@ Resolves the lot, tariff, vehicle, payment method and profile automatically.
 |---|---|---|---|---|
 | `parkingId` | int | yes | — | Parking id from `find_parking`. |
 | `licensePlate` | string | yes | — | Registered plate, e.g. `ABC 123DE`. |
-| `durationMinutes` | int | no | 60 | Desired duration in minutes. |
+| `durationMinutes` | int | no | 60 | Desired duration in minutes. Rounded up to the full free window when a shorter value is given and a free-time promotion applies. |
 | `confirmedCostPln` | decimal | no | — | Exact cost being confirmed (paid, second call only). |
 
 **Output**
@@ -117,6 +122,10 @@ Parking: Tarnowskie Góry ul. Oświęcimska [616319]. Started a free session for
 First call, paid — returns the cost, does not start:
 ```
 Parking: Carrefour Tarnowskie Góry ul. Kościuszki 5 [9882]. This is a PAID session: 6.00 PLN for 180 min. Re-invoke with confirmedCostPln=6.00 to start.
+```
+First call, paid but a free-time promotion applies — the free window is spelled out:
+```
+Parking: Carrefour Tarnowskie Góry ul. Kościuszki 5 [9882]. This is a PAID session: 3.00 PLN for 180 min. Re-invoke with confirmedCostPln=3.00 to start. A 120-min free promotion ('FREE120') is applied, so you are only charged for the time beyond it.
 ```
 Second call with matching `confirmedCostPln=6.00` — starts:
 ```
@@ -133,7 +142,9 @@ Parking: … [10584]. Cost 150.00 PLN exceeds the limit of 100.00 PLN. Use start
 
 Start a **free-only** session at a parking (by id). Auto-applies an active free-time promotion and
 starts only if the session is actually free (cost 0); if it would cost anything, it is **refused** and
-nothing is started. Never incurs a charge — the safe default for "park free at this parking".
+nothing is started. Never incurs a charge — the safe default for "park free at this parking". The
+session always fills the whole free window: a `durationMinutes` shorter than the free window is
+rounded up to it (capped by the lot's max duration), and a longer one is refused.
 
 **Inputs**
 
@@ -141,7 +152,7 @@ nothing is started. Never incurs a charge — the safe default for "park free at
 |---|---|---|---|---|
 | `parkingId` | int | yes | — | Parking id from `find_parking`. |
 | `licensePlate` | string | yes | — | Registered plate. |
-| `durationMinutes` | int | no | full free window | Desired duration in minutes. |
+| `durationMinutes` | int | no | full free window | Desired duration in minutes. A shorter value is rounded up to the full free window; longer than the window is refused. |
 
 **Output**
 ```
@@ -167,7 +178,7 @@ behaviour. To guarantee a free-only start here, use `start_free_session_current_
 | `latitude` | number | yes | — | Current latitude (decimal degrees). |
 | `longitude` | number | yes | — | Current longitude (decimal degrees). |
 | `licensePlate` | string | yes | — | Registered plate. |
-| `durationMinutes` | int | no | 60 | Desired duration in minutes. |
+| `durationMinutes` | int | no | 60 | Desired duration in minutes. Rounded up to the full free window when a shorter value is given and a free-time promotion applies. |
 | `radiusMeters` | number | no | `CurrentLocationRadiusMeters` (300) | Max distance to search. |
 | `confirmedCostPln` | decimal | no | — | Exact cost being confirmed (paid, second call only). |
 
@@ -195,7 +206,7 @@ incurs a charge.
 | `latitude` | number | yes | — | Current latitude (decimal degrees). |
 | `longitude` | number | yes | — | Current longitude (decimal degrees). |
 | `licensePlate` | string | yes | — | Registered plate. |
-| `durationMinutes` | int | no | full free window | Desired duration in minutes. |
+| `durationMinutes` | int | no | full free window | Desired duration in minutes. A shorter value is rounded up to the full free window; longer than the window is refused. |
 | `radiusMeters` | number | no | `CurrentLocationRadiusMeters` (300) | Max distance to search. |
 
 **Output** — same shape as `start_free_session`, with the distance included.
@@ -209,7 +220,8 @@ Parking: Tarnowskie Góry ul. Oświęcimska [616319], 237 m away. Started a free
 
 Identical to `start_session` but **bypasses the maximum-cost cap**. Exposed as a separate tool so a
 host can allow/deny or require extra confirmation for over-cap sessions independently. Still uses the
-two-step exact-cost confirmation for paid sessions.
+two-step exact-cost confirmation for paid sessions, auto-applies free-time promotions, and fills the
+free window the same way.
 
 **Inputs** — `parkingId`, `licensePlate`, `durationMinutes?`, `confirmedCostPln?` (same types/defaults
 as `start_session`; no `onlyFree`).

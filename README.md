@@ -10,7 +10,7 @@ Unofficial MCP server for [APCOA Flow](https://www.apcoa.pl/krotkotrwale-parkowa
 | `get_registered_cars` | License plates registered on the account, with the default flagged. |
 | `get_active_sessions` | Currently running session(s), or a message if none. |
 | `get_session_history` | Recent completed sessions, most recent first, with cost. |
-| `start_session` | Start a session at a parking (by id) for a plate. **May cost money.** Free starts immediately; paid returns the cost and requires a second call with the exact `confirmedCostPln`. Resolves lot/tariff automatically and enforces a max-cost cap. |
+| `start_session` | Start a session at a parking (by id) for a plate. **May cost money.** Free starts immediately; paid returns the cost and requires a second call with the exact `confirmedCostPln`. Resolves lot/tariff automatically, auto-applies free-time promotions (filling the whole free window), and enforces a max-cost cap. |
 | `start_free_session` | Start a session at a parking only if it is actually **free** (auto-applies a free-time promotion); refused if it would cost anything. Never charges — the safe default. |
 | `start_session_current_location` | Like `start_session` (may cost money), but at the closest parking to a given GPS location within a radius (metres, default 300). |
 | `start_free_session_current_location` | Free-only variant of the above — closest parking by location, started only if free. |
@@ -111,7 +111,7 @@ docker compose up -d
 ### Connecting from claude.ai
 
 1. Go to **claude.ai** → Settings → **Connectors** → **Add custom connector**
-2. Enter your server URL: `http://your-host:9012/mcp`
+2. Enter your server URL, **including the `/mcp` suffix**: `http://your-host:9012/mcp`
 3. Under **Authentication**, select **No sign-in**
 4. Under **Request headers**, add:
    - `X-Api-Key`: `your-api-key`

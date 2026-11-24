@@ -90,7 +90,7 @@ public sealed class ApcoaFlowTools(
     public async Task<string> StartSessionAsync(
         [Description("Parking id (from find_parking)")] int parkingId,
         [Description("Registered license plate, e.g. \"ABC 123DE\" (see get_registered_cars)")] string licensePlate,
-        [Description("Desired duration in minutes. Omit for a default of 60.")] int? durationMinutes = null,
+        [Description("Desired duration in minutes. Omit for a default of 60. If a free-time promotion applies and this is shorter than the free window, it is rounded up to the full free window so none of the free time is wasted.")] int? durationMinutes = null,
         [Description("For a PAID session: the exact cost in PLN you are confirming (from a prior call's quote). Must match the live cost exactly. Omit on the first call.")] decimal? confirmedCostPln = null,
         CancellationToken ct = default)
     {
@@ -129,7 +129,7 @@ public sealed class ApcoaFlowTools(
         [Description("Your current latitude (decimal degrees)")] double latitude,
         [Description("Your current longitude (decimal degrees)")] double longitude,
         [Description("Registered license plate, e.g. \"ABC 123DE\" (see get_registered_cars)")] string licensePlate,
-        [Description("Desired duration in minutes. Omit for a default of 60.")] int? durationMinutes = null,
+        [Description("Desired duration in minutes. Omit for a default of 60. If a free-time promotion applies and this is shorter than the free window, it is rounded up to the full free window so none of the free time is wasted.")] int? durationMinutes = null,
         [Description("Search radius in metres for the closest parking. Omit to use the configured default (300 m).")] double? radiusMeters = null,
         [Description("For a PAID session: the exact cost in PLN you are confirming (from a prior call's quote). Omit on the first call.")] decimal? confirmedCostPln = null,
         CancellationToken ct = default)
@@ -167,7 +167,7 @@ public sealed class ApcoaFlowTools(
     public async Task<string> StartExpensiveSessionAsync(
         [Description("Parking id (from find_parking)")] int parkingId,
         [Description("Registered license plate, e.g. \"ABC 123DE\"")] string licensePlate,
-        [Description("Desired duration in minutes. Omit for a default of 60.")] int? durationMinutes = null,
+        [Description("Desired duration in minutes. Omit for a default of 60. If a free-time promotion applies and this is shorter than the free window, it is rounded up to the full free window so none of the free time is wasted.")] int? durationMinutes = null,
         [Description("The exact cost in PLN you are confirming (from a prior call's quote). Must match the live cost exactly. Omit on the first call.")] decimal? confirmedCostPln = null,
         CancellationToken ct = default)
     {

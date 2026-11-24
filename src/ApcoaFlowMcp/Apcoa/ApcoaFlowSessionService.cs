@@ -119,7 +119,10 @@ public sealed class ApcoaFlowSessionService(IApcoaFlowApi api, IApcoaParkingData
         var promo = offers.Entities.FirstOrDefault(o => o.IsActiveFreeTime);
 
         // 4. Decide the duration.
-        //    Free path: default to the promo's free window; validate a requested duration ≤ it.
+        //    When a free-time promo applies, always fill the whole free window (a free coupon is
+        //    one-use, so never waste part of it): a request shorter than the free window is rounded
+        //    UP to it, and OnlyFree rejects a request longer than it. Everything stays capped by the
+        //    lot's max duration.
         var requested = durationMinutes is { } dm ? TimeSpan.FromMinutes(dm) : (TimeSpan?)null;
         TimeSpan window;
         if (mode == StartMode.OnlyFree)
@@ -127,14 +130,22 @@ public sealed class ApcoaFlowSessionService(IApcoaFlowApi api, IApcoaParkingData
             if (promo?.FreeWindow is not { } freeWindow)
                 return Tag(Refused($"No active free-parking promotion is available for parking {parkingId}."));
 
-            window = requested ?? freeWindow;
-            if (window > freeWindow)
-                return Tag(Refused($"Requested {window.TotalMinutes:0} min exceeds the free window of {freeWindow.TotalMinutes:0} min for this parking."));
+            if (requested is { } r && r > freeWindow)
+                return Tag(Refused($"Requested {r.TotalMinutes:0} min exceeds the free window of {freeWindow.TotalMinutes:0} min for this parking."));
+
+            // Fill the whole free window (round a shorter request up to it).
+            window = requested is { } rq && rq > freeWindow ? rq : freeWindow;
             window = window <= maxLot ? window : maxLot;
         }
         else
         {
             window = requested ?? TimeSpan.FromHours(1);
+
+            // If a free promo applies, never park for less than the full free window — fill the slot,
+            // then any paid overage runs after it.
+            if (promo?.FreeWindow is { } freeWindow && window < freeWindow)
+                window = freeWindow;
+
             window = window <= maxLot ? window : maxLot;
         }
 
@@ -161,6 +172,12 @@ public sealed class ApcoaFlowSessionService(IApcoaFlowApi api, IApcoaParkingData
         var costPln = quote.TotalPayablePln;
         var minutes = (int)window.TotalMinutes;
 
+        // A note describing the free window applied by a promo, so the paid confirmation makes clear
+        // how much of the time is free vs charged (empty when no free-time promo applies).
+        var freeNote = promo?.FreeMinutes is { } fm
+            ? $" A {fm}-min free promotion ('{promo.Name}') is applied, so you are only charged for the time beyond it."
+            : string.Empty;
+
         // OnlyFree must actually be free.
         if (mode == StartMode.OnlyFree && !quote.IsFree)
             return Tag(Refused($"This parking is not free for {minutes} min (cost {costPln:0.00} PLN) even with promotions."));
@@ -170,19 +187,19 @@ public sealed class ApcoaFlowSessionService(IApcoaFlowApi api, IApcoaParkingData
         {
             if (!bypassCap && costPln > maxCostPln)
                 return Tag(new StartResult(false, costPln, minutes, promo?.Name, promo?.FreeMinutes,
-                    $"Cost {costPln:0.00} PLN exceeds the limit of {maxCostPln:0.00} PLN. Use start_expensive_session to override.",
+                    $"Cost {costPln:0.00} PLN exceeds the limit of {maxCostPln:0.00} PLN. Use start_expensive_session to override.{freeNote}",
                     null));
 
             if (confirmedCostPln is null)
                 return Tag(new StartResult(false, costPln, minutes, promo?.Name, promo?.FreeMinutes,
-                    $"This is a PAID session: {costPln:0.00} PLN for {minutes} min. Re-invoke with confirmedCostPln={costPln:0.00} to start.",
+                    $"This is a PAID session: {costPln:0.00} PLN for {minutes} min. Re-invoke with confirmedCostPln={costPln:0.00} to start.{freeNote}",
                     null));
 
             // The confirmed cost must match the live cost exactly — refuse if it differs either way
             // (price changed, promo expired, or a stale/guessed confirmation).
             if (costPln != confirmedCostPln.Value)
                 return Tag(new StartResult(false, costPln, minutes, promo?.Name, promo?.FreeMinutes,
-                    $"Live cost {costPln:0.00} PLN does not match the confirmed {confirmedCostPln.Value:0.00} PLN; not starting. Re-confirm with the exact current cost.",
+                    $"Live cost {costPln:0.00} PLN does not match the confirmed {confirmedCostPln.Value:0.00} PLN; not starting. Re-confirm with the exact current cost.{freeNote}",
                     null));
         }
 
