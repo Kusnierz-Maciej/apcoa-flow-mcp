@@ -52,10 +52,14 @@ services:
       - ParkingData__BackgroundRefreshInterval=24:00:00
       - ParkingData__StorePath=/data/parking
     volumes:
-      # Bind mount to a host directory. It must be writable by the container user (UID 1654):
-      # `mkdir -p ./data/parking && chown -R 1654:1654 ./data/parking`, or run the container as
-      # your own user with `user: "1000:1000"`.
+      # Bind mount to a host directory the container can write to (warm-starts the parking cache).
+      # It must be writable by the user the container runs as. On a Synology NAS, run as an
+      # ACL-trusted host user (see the `user:` line) rather than chowning — Synology ACLs override
+      # chmod/chown, so `chown -R 1654` does not grant write.
       - ./data/parking:/data/parking
+    # Run as a host user the share's ACL allows to write. On Synology use ContainerManager —
+    # find its id with `id ContainerManager` (e.g. 106808:106808). `user: "0:0"` (root) also works.
+    user: "106808:106808"
     restart: unless-stopped
 ```
 
@@ -171,7 +175,9 @@ Example client configuration:
 
 `find_parking` searches an offline dataset, because APCOA has no live search API — the app downloads static, encrypted parking tiles from a public S3 bucket and searches them on-device. This server does the same: on first use it downloads and decrypts every country tile, builds an in-memory spatial index (~1 MB), and persists a compact snapshot to disk.
 
-The snapshot lives at `ParkingData:StorePath` (default `/data/parking`). Bind-mount a host directory there (writable by the container user — see the compose example above) so the index warm-starts after a restart instead of re-downloading from S3. If the path isn't writable the server falls back to serving from memory and rebuilding on each start.
+The snapshot lives at `ParkingData:StorePath` (default `/data/parking`). Bind-mount a host directory there (writable by the user the container runs as — see the compose example above) so the index warm-starts after a restart instead of re-downloading from S3. If the path isn't writable the server falls back to serving from memory and rebuilding on each start.
+
+> **Synology NAS:** shares enforce POSIX ACLs that override `chmod`/`chown`, so a `chown -R 1654` on the bind-mount directory does **not** make it writable (the `everyone` ACL entry caps non-listed users at read-only). Instead, run the container as a host user the share's ACL already trusts — on Synology that's the built-in `ContainerManager` account. Get its id with `id ContainerManager` and set it in compose, e.g. `user: "106808:106808"`. `user: "0:0"` (root) also works.
 
 Freshness is tunable via the `ParkingData` configuration section (defaults shown):
 
