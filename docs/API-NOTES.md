@@ -130,7 +130,7 @@ Before starting a session the app always:
 | Consumer Profile ID | `6340557` |
 | Payment Method ID (BLIK) | `5876545` |
 | Vehicle ID | `7417618` |
-| Vehicle plate | `STA 0521` |
+| Vehicle plate | `ABC 123DE` |
 | Parking IDs observed | `9882`, `8331`, `10395`, `616319` |
 | Parking Lot IDs observed | `9085`, `10584`, `11089`, `41905` |
 | Country code | `PL` |
