@@ -1,3 +1,6 @@
+using System.Text.Json.Serialization;
+using ApcoaFlowApiClient.Converters;
+
 namespace ApcoaFlowApiClient.Models.Session;
 
 public class StartParkingSessionRequest
@@ -12,9 +15,14 @@ public class StartParkingSessionRequest
     public string PaymentMethod { get; set; } = string.Empty;
     public int ConsumerUserPaymentId { get; set; }
     public int ConsumerProfileId { get; set; }
-    public string SessionCheckInTime { get; set; } = string.Empty;
-    public string? ScheduledSessionCheckInTime { get; set; }
-    public string? ScheduledSessionCheckOutTime { get; set; }
+
+    [JsonConverter(typeof(IsoDateTimeOffsetConverter))]
+    public DateTimeOffset? SessionCheckInTime { get; set; }
+    [JsonConverter(typeof(IsoDateTimeOffsetConverter))]
+    public DateTimeOffset? ScheduledSessionCheckInTime { get; set; }
+    [JsonConverter(typeof(IsoDateTimeOffsetConverter))]
+    public DateTimeOffset? ScheduledSessionCheckOutTime { get; set; }
+
     public string? PromotionName { get; set; }
     public int? PromotionId { get; set; }
     public string? OfferDiscountType { get; set; }

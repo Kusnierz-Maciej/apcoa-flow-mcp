@@ -66,22 +66,23 @@ public interface IApcoaFlowApi
     Task<List<ParkingSessionV2>> GetParkingSessionsAsync([Query] ParkingSessionV2Query query, CancellationToken ct = default);
 
     /// <summary>
-    /// Starts a new parking session. Called after the full pre-flight sequence:
-    /// validate operational hours → get tariff breakdown → apply promotions → get UTC time.
+    /// Starts a new parking session. Called after the pre-flight sequence (validate hours → tariff
+    /// breakdown → apply promotion). Returns a payment envelope with the session nested under
+    /// <see cref="StartSessionResponse.ParkingSession"/>.
     /// </summary>
     [Post("/authentication/v1/consumer/parkingSession")]
-    Task<ParkingSessionV2> StartParkingSessionAsync([Body] StartParkingSessionRequest request, CancellationToken ct = default);
+    Task<StartSessionResponse> StartParkingSessionAsync([Body] StartParkingSessionRequest request, CancellationToken ct = default);
 
     /// <summary>
     /// Extends an active parking session. Body shape TBD — not yet captured.
-    /// See API-NOTES.md for details.
+    /// See docs/API-NOTES.md for details.
     /// </summary>
     [Post("/authentication/v1/consumer/parkingSession/extendParkingSession")]
     Task<ParkingSessionV2> ExtendParkingSessionAsync([Body] ExtendParkingSessionRequest request, CancellationToken ct = default);
 
     /// <summary>
     /// Stops (ends) the active parking session. Body shape TBD — not yet captured.
-    /// See API-NOTES.md for details.
+    /// See docs/API-NOTES.md for details.
     /// </summary>
     [Put("/authentication/v1/consumer/parkingSession")]
     Task<ParkingSessionV2> StopParkingSessionAsync([Body] StopParkingSessionRequest request, CancellationToken ct = default);
@@ -183,13 +184,26 @@ public interface IApcoaFlowApi
     // Promotions
     // -------------------------------------------------------------------------
 
-    /// <summary>Returns applicable promotions/offers for the given parking lot and vehicle. Body shape TBD.</summary>
+    /// <summary>
+    /// Returns applicable promotions/offers for a parking lot (v1 variant). Response shape varies; kept
+    /// for completeness. Prefer <see cref="GetApplicableOffersV2Async"/> which returns a typed offer list.
+    /// </summary>
     [Post("/authentication/v2/promotion/applicableOffersWithPromotion")]
     Task<List<Offer>> GetApplicableOffersAsync([Body] ApplicableOffersRequest request, CancellationToken ct = default);
 
-    /// <summary>Validates a chosen promotion before applying it to a session. Body shape TBD.</summary>
+    /// <summary>
+    /// Returns active promotions/coupons for a parking lot and user. Free-parking coupons have
+    /// <c>concessionType=="free_time"</c>; their free window is in <c>concessionValue</c> (minutes).
+    /// </summary>
+    [Post("/authentication/v1/promotion/applicableOffersWithPromotionV2")]
+    Task<OffersResponse> GetApplicableOffersV2Async([Body] ApplicableOffersV2Request request, CancellationToken ct = default);
+
+    /// <summary>
+    /// Validates a chosen promotion before applying it to a session. The 200 response body is opaque
+    /// (merged/consumer blob); only success matters, so the result is read as a raw JSON element.
+    /// </summary>
     [Post("/authentication/v1/promotion/validate")]
-    Task ValidatePromotionAsync([Body] ValidatePromotionRequest request, CancellationToken ct = default);
+    Task<System.Text.Json.JsonElement> ValidatePromotionAsync([Body] ValidatePromotionRequest request, CancellationToken ct = default);
 
     // -------------------------------------------------------------------------
     // Permits

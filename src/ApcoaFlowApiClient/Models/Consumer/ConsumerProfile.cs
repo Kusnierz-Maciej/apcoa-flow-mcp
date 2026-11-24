@@ -1,5 +1,8 @@
 namespace ApcoaFlowApiClient.Models.Consumer;
 
+using System.Text.Json.Serialization;
+using ApcoaFlowApiClient.Converters;
+
 public class ConsumerProfile
 {
     public int Id { get; set; }
@@ -10,8 +13,10 @@ public class ConsumerProfile
     public string? PhoneNumber { get; set; }
     public string? ImageUrl { get; set; }
     public int IsPhoneVerified { get; set; }
-    public string? CreatedAt { get; set; }
-    public string? UpdatedAt { get; set; }
+    [JsonConverter(typeof(IsoDateTimeOffsetConverter))]
+    public DateTimeOffset? CreatedAt { get; set; }
+    [JsonConverter(typeof(IsoDateTimeOffsetConverter))]
+    public DateTimeOffset? UpdatedAt { get; set; }
     public int IsEmailAddressVerified { get; set; }
     public int PromotionsEnabled { get; set; }
     public string? SignupMethod { get; set; }
@@ -22,6 +27,27 @@ public class ConsumerProfile
     public List<object> RfidOrders { get; set; } = [];
     public List<PaymentMethod> ConsumerUserPaymentMethods { get; set; } = [];
     public List<ConsumerIdentification> ConsumerUserIdentifications { get; set; } = [];
+
+    /// <summary>
+    /// Consumer profiles (e.g. PERSONAL/BUSINESS). The default profile's <see cref="ConsumerUserProfile.Id"/>
+    /// is the <c>consumerProfileId</c> required when starting a session — it is NOT the top-level <see cref="Id"/>.
+    /// </summary>
+    public List<ConsumerUserProfile> ConsumerUserProfileList { get; set; } = [];
+
+    /// <summary>The default profile id to send as <c>consumerProfileId</c> when starting a session.</summary>
+    [JsonIgnore]
+    public int? DefaultProfileId =>
+        (ConsumerUserProfileList.FirstOrDefault(p => p.IsDefault == 1)
+         ?? ConsumerUserProfileList.FirstOrDefault())?.Id;
+}
+
+public class ConsumerUserProfile
+{
+    public int Id { get; set; }
+    public string? Name { get; set; }
+    public int IsDefault { get; set; }
+    public string? ProfileType { get; set; }
+    public string? Status { get; set; }
 }
 
 public class Vehicle
@@ -40,7 +66,8 @@ public class Vehicle
     public string? State { get; set; }
     public string? Model { get; set; }
     public string? FuelType { get; set; }
-    public string? RentalExpiryTime { get; set; }
+    [JsonConverter(typeof(IsoDateTimeOffsetConverter))]
+    public DateTimeOffset? RentalExpiryTime { get; set; }
 }
 
 public class PaymentMethod
@@ -55,7 +82,8 @@ public class PaymentMethod
     public string? DisplayItemOne { get; set; }
     public string? DisplayItemTwo { get; set; }
     public int PaymentGatewayId { get; set; }
-    public string? UpdatedAt { get; set; }
+    [JsonConverter(typeof(IsoDateTimeOffsetConverter))]
+    public DateTimeOffset? UpdatedAt { get; set; }
 }
 
 public class ConsumerIdentification
