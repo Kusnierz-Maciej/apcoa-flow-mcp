@@ -1,5 +1,6 @@
 namespace ApcoaFlowApiClient.Tests;
 
+[Category("LiveApi")]
 public class ApcoaFlowApiTests
 {
     private readonly IApcoaFlowApi _api = ApiClientFactory.Api;

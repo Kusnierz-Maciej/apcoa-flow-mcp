@@ -1,5 +1,6 @@
 using ApcoaFlowApiClient;
 using ApcoaFlowMcp.Apcoa;
+using ApcoaFlowMcp.Tools;
 
 namespace ApcoaFlowMcp;
 
@@ -22,7 +23,7 @@ public static class StdioHost
         builder.Services
             .AddMcpServer(options => options.ServerInstructions = McpInstructions.Text)
             .WithStdioServerTransport()
-            .WithToolsFromAssembly();
+            .WithTools<ApcoaFlowTools>();
 
         await builder.Build().RunAsync();
     }

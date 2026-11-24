@@ -2,6 +2,7 @@ using ApcoaFlowApiClient;
 using ApcoaFlowMcp;
 using ApcoaFlowMcp.Apcoa;
 using ApcoaFlowMcp.Security;
+using ApcoaFlowMcp.Tools;
 
 if (args.Contains("--stdio"))
 {
@@ -19,7 +20,7 @@ builder.Services.AddScoped<ApcoaFlowApiAccessor>();
 builder.Services
     .AddMcpServer(options => options.ServerInstructions = McpInstructions.Text)
     .WithHttpTransport()
-    .WithToolsFromAssembly();
+    .WithTools<ApcoaFlowTools>();
 
 var app = builder.Build();
 
