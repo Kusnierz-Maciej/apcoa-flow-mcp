@@ -1,28 +1,33 @@
 using System.ComponentModel;
 using System.Text;
-using ApcoaFlowApiClient.Models.Parking;
-using ApcoaFlowApiClient.ParkingData;
+using ApcoaFlowApiClient.Models.Session;
 using ApcoaFlowMcp.Apcoa;
+using Microsoft.Extensions.Options;
 using ModelContextProtocol.Server;
 
 namespace ApcoaFlowMcp.Tools;
 
-// 'accessor' is injected for the API-backed session tools below, which are still stubbed
-// (NotImplementedException). Suppress the "unread parameter" warning until they are implemented.
-#pragma warning disable CS9113
+// NOTE: docs/MCP-TOOLS.md is the human-facing reference for these tools (names, inputs, example
+// outputs). When you add/rename a tool or change its parameters, behaviour, or output format,
+// update docs/MCP-TOOLS.md in the same change to keep it accurate.
 [McpServerToolType]
-public sealed class ApcoaFlowTools(ApcoaFlowApiAccessor accessor, IApcoaParkingDataSource parkingData)
+public sealed class ApcoaFlowTools(
+    ApcoaFlowSessionService sessions,
+    ApcoaFlowApiClient.ParkingData.IApcoaParkingDataSource parkingData,
+    IOptions<ApcoaFlowToolsOptions> options)
 {
+    private readonly ApcoaFlowToolsOptions _options = options.Value;
+
     [McpServerTool(Name = "find_parking")]
-    [Description("Find APCOA parkings near a location, optionally filtered by name (e.g. \"Carrefour\", \"Lidl\"). Returns one line per parking as \"[id] name - address (distance km)\", nearest first. Use the id with other parking tools.")]
+    [Description("Find APCOA parkings near a location, optionally filtered by name (e.g. \"Carrefour\", \"Lidl\"). Returns one line per parking as \"[id] name - address (distance m)\", nearest first. Use the id with start_session.")]
     public async Task<string> FindParkingAsync(
         [Description("Latitude of the search center (decimal degrees)")] double latitude,
         [Description("Longitude of the search center (decimal degrees)")] double longitude,
-        [Description("Search radius in kilometers. Keep small (e.g. 1-2) for 'near me' queries.")] double radiusKm = 2.0,
+        [Description("Search radius in metres. Keep small (e.g. 1000-2000) for 'near me' queries.")] double radiusMeters = 2000,
         [Description("Optional name filter, e.g. a retail brand like \"Carrefour\" or \"Biedronka\". Case- and accent-insensitive.")] string? nameContains = null,
         CancellationToken ct = default)
     {
-        var results = await parkingData.FindNearbyAsync(latitude, longitude, radiusKm, nameContains, ct);
+        var results = await parkingData.FindNearbyAsync(latitude, longitude, radiusMeters / 1000.0, nameContains, ct);
         if (results.Count == 0)
             return "No parkings found for the given location/filter.";
 
@@ -30,65 +35,193 @@ public sealed class ApcoaFlowTools(ApcoaFlowApiAccessor accessor, IApcoaParkingD
         foreach (var (p, distanceKm) in results)
         {
             var addr = string.IsNullOrWhiteSpace(p.Address) ? "" : $" - {p.Address}";
-            var city = string.IsNullOrWhiteSpace(p.City) ? "" : $", {p.City}";
-            sb.AppendLine($"[{p.Id}] {p.DisplayName}{addr}{city} ({distanceKm:F1} km)");
+            var meters = (int)Math.Round(distanceKm * 1000);
+            sb.AppendLine($"[{p.Id}] {p.DisplayName}{addr} ({meters} m)");
         }
         return sb.ToString().TrimEnd();
     }
 
-    [McpServerTool(Name = "get_parking_zones")]
-    [Description("List all available parking zones. Returns one line per zone as \"[zoneId] name - address\". Call this first to get a zoneId before starting a session.")]
-    public async Task<string> GetParkingZonesAsync(CancellationToken ct = default)
+    [McpServerTool(Name = "get_registered_cars")]
+    [Description("List the license plates registered on the account. Returns one line per car as \"plate [default] - status\".")]
+    public async Task<string> GetRegisteredCarsAsync(CancellationToken ct = default)
     {
-        // TODO: implement once API is known
-        throw new NotImplementedException("get_parking_zones is not yet implemented.");
+        var cars = await sessions.GetVehiclesAsync(ct);
+        if (cars.Count == 0)
+            return "No registered cars on the account.";
+
+        var sb = new StringBuilder();
+        foreach (var c in cars)
+        {
+            var def = c.IsDefault == 1 ? " [default]" : "";
+            var status = string.IsNullOrWhiteSpace(c.IdentificationStatus) ? "" : $" - {c.IdentificationStatus}";
+            sb.AppendLine($"{c.VehicleNumber}{def}{status}");
+        }
+        return sb.ToString().TrimEnd();
     }
 
-    [McpServerTool(Name = "get_active_session")]
-    [Description("Returns the currently active parking session, or a message if no session is running. Always call this before start_session to avoid duplicate sessions.")]
-    public async Task<string> GetActiveSessionAsync(CancellationToken ct = default)
+    [McpServerTool(Name = "get_active_sessions")]
+    [Description("Returns the currently active parking session(s), or a message if none is running. Always call this before starting a session to avoid duplicates.")]
+    public async Task<string> GetActiveSessionsAsync(CancellationToken ct = default)
     {
-        // TODO: implement once API is known
-        throw new NotImplementedException("get_active_session is not yet implemented.");
-    }
-
-    [McpServerTool(Name = "start_session")]
-    [Description("Start a parking session at the given zone for the given license plate. Always confirm zone name and license plate with the user before calling. Returns the new session details.")]
-    public async Task<string> StartSessionAsync(
-        [Description("The zone ID (from get_parking_zones)")] string zoneId,
-        [Description("The zone name exactly as get_parking_zones shows it. Shown in the permission prompt; not sent to the API.")] string zoneName,
-        [Description("License plate number, e.g. \"WA12345\"")] string licensePlate,
-        CancellationToken ct = default)
-    {
-        // TODO: implement once API is known
-        throw new NotImplementedException("start_session is not yet implemented.");
-    }
-
-    [McpServerTool(Name = "end_session")]
-    [Description("End the active parking session. Always confirm with the user before calling. Returns the ended session details including duration.")]
-    public async Task<string> EndSessionAsync(
-        [Description("The session ID (from get_active_session)")] string sessionId,
-        CancellationToken ct = default)
-    {
-        // TODO: implement once API is known
-        throw new NotImplementedException("end_session is not yet implemented.");
+        var active = await sessions.GetActiveAsync(ct);
+        if (active.Count == 0)
+            return "No active parking session.";
+        return string.Join("\n", active.Select(FormatSession));
     }
 
     [McpServerTool(Name = "get_session_history")]
-    [Description("Returns the user's past parking sessions in reverse chronological order.")]
+    [Description("Returns the user's recent completed parking sessions, most recent first, with cost and duration.")]
     public async Task<string> GetSessionHistoryAsync(CancellationToken ct = default)
     {
-        // TODO: implement once API is known
-        throw new NotImplementedException("get_session_history is not yet implemented.");
+        var history = await sessions.GetHistoryAsync(ct);
+        if (history.Count == 0)
+            return "No past parking sessions.";
+        return string.Join("\n", history.Select(FormatSession));
     }
 
-    private static string FormatSession(ParkingSession s)
+    [McpServerTool(Name = "start_session")]
+    [Description(
+        "Start a parking session at a parking (by id, from find_parking) for a registered license plate. " +
+        "May cost money. FREE sessions start immediately. PAID sessions do NOT start on the first call: the " +
+        "tool returns the cost, and you must confirm by calling again with confirmedCostPln set to EXACTLY " +
+        "that cost (it must match the live cost precisely, or the start is refused). Enforces a maximum cost " +
+        "limit. Always confirm parking, plate, and cost with the user before confirming a paid session. " +
+        "(To guarantee a free-only start, use start_free_session instead.)")]
+    public async Task<string> StartSessionAsync(
+        [Description("Parking id (from find_parking)")] int parkingId,
+        [Description("Registered license plate, e.g. \"ABC 123DE\" (see get_registered_cars)")] string licensePlate,
+        [Description("Desired duration in minutes. Omit for a default of 60.")] int? durationMinutes = null,
+        [Description("For a PAID session: the exact cost in PLN you are confirming (from a prior call's quote). Must match the live cost exactly. Omit on the first call.")] decimal? confirmedCostPln = null,
+        CancellationToken ct = default)
     {
-        var status = s.IsActive ? "[active]" : "[ended]";
-        var duration = s.EndedAt.HasValue
-            ? $" ({(s.EndedAt.Value - s.StartedAt).TotalMinutes:F0} min)"
-            : "";
-        return $"{status} [{s.Id}] zone:{s.ZoneId} plate:{s.LicensePlate} started:{s.StartedAt:g}{duration}";
+        var result = await sessions.StartAsync(
+            parkingId, licensePlate, durationMinutes, ApcoaFlowSessionService.StartMode.Normal,
+            confirmedCostPln, _options.MaxSessionCostPln, bypassCap: false, ct);
+        return FormatStart(result);
+    }
+
+    [McpServerTool(Name = "start_free_session")]
+    [Description(
+        "Start a FREE parking session at a parking (by id, from find_parking) for a registered license plate. " +
+        "Auto-applies an active free-time promotion and starts only if the session is actually free (cost 0); " +
+        "if it would cost anything, it is refused and nothing is started. Safe: this tool never incurs a charge. " +
+        "Use start_session for anything that may be paid.")]
+    public async Task<string> StartFreeSessionAsync(
+        [Description("Parking id (from find_parking)")] int parkingId,
+        [Description("Registered license plate, e.g. \"ABC 123DE\" (see get_registered_cars)")] string licensePlate,
+        [Description("Desired duration in minutes. Omit to use the full free window.")] int? durationMinutes = null,
+        CancellationToken ct = default)
+    {
+        var result = await sessions.StartAsync(
+            parkingId, licensePlate, durationMinutes, ApcoaFlowSessionService.StartMode.OnlyFree,
+            confirmedCostPln: null, _options.MaxSessionCostPln, bypassCap: false, ct);
+        return FormatStart(result);
+    }
+
+    [McpServerTool(Name = "start_session_current_location")]
+    [Description(
+        "Start a parking session at the closest parking to the user's current GPS location (within a " +
+        "radius, default 300 m), for a registered license plate. May cost money. Same FREE/PAID behaviour as " +
+        "start_session: free starts immediately; paid returns the cost and needs a second call with " +
+        "confirmedCostPln set to EXACTLY that cost. Use this when the user wants to park 'here'/'where I am'. " +
+        "(To guarantee a free-only start here, use start_free_session_current_location.)")]
+    public async Task<string> StartSessionCurrentLocationAsync(
+        [Description("Your current latitude (decimal degrees)")] double latitude,
+        [Description("Your current longitude (decimal degrees)")] double longitude,
+        [Description("Registered license plate, e.g. \"ABC 123DE\" (see get_registered_cars)")] string licensePlate,
+        [Description("Desired duration in minutes. Omit for a default of 60.")] int? durationMinutes = null,
+        [Description("Search radius in metres for the closest parking. Omit to use the configured default (300 m).")] double? radiusMeters = null,
+        [Description("For a PAID session: the exact cost in PLN you are confirming (from a prior call's quote). Omit on the first call.")] decimal? confirmedCostPln = null,
+        CancellationToken ct = default)
+    {
+        var result = await sessions.StartAtLocationAsync(
+            latitude, longitude, licensePlate, durationMinutes, ApcoaFlowSessionService.StartMode.Normal,
+            confirmedCostPln, _options.MaxSessionCostPln, bypassCap: false,
+            radiusMeters ?? _options.CurrentLocationRadiusMeters, ct);
+        return FormatStart(result);
+    }
+
+    [McpServerTool(Name = "start_free_session_current_location")]
+    [Description(
+        "Start a FREE parking session at the closest parking to the user's current GPS location (within a " +
+        "radius, default 300 m), for a registered license plate. Auto-applies an active free-time promotion and " +
+        "starts only if the session is actually free; refused (nothing started) if it would cost anything. Safe: " +
+        "never incurs a charge. Use this for 'park free here/where I am'.")]
+    public async Task<string> StartFreeSessionCurrentLocationAsync(
+        [Description("Your current latitude (decimal degrees)")] double latitude,
+        [Description("Your current longitude (decimal degrees)")] double longitude,
+        [Description("Registered license plate, e.g. \"ABC 123DE\" (see get_registered_cars)")] string licensePlate,
+        [Description("Desired duration in minutes. Omit to use the full free window.")] int? durationMinutes = null,
+        [Description("Search radius in metres for the closest parking. Omit to use the configured default (300 m).")] double? radiusMeters = null,
+        CancellationToken ct = default)
+    {
+        var result = await sessions.StartAtLocationAsync(
+            latitude, longitude, licensePlate, durationMinutes, ApcoaFlowSessionService.StartMode.OnlyFree,
+            confirmedCostPln: null, _options.MaxSessionCostPln, bypassCap: false,
+            radiusMeters ?? _options.CurrentLocationRadiusMeters, ct);
+        return FormatStart(result);
+    }
+
+    [McpServerTool(Name = "start_expensive_session")]
+    [Description("Does the same as start_session but bypasses the maximum-cost limit.")]
+    public async Task<string> StartExpensiveSessionAsync(
+        [Description("Parking id (from find_parking)")] int parkingId,
+        [Description("Registered license plate, e.g. \"ABC 123DE\"")] string licensePlate,
+        [Description("Desired duration in minutes. Omit for a default of 60.")] int? durationMinutes = null,
+        [Description("The exact cost in PLN you are confirming (from a prior call's quote). Must match the live cost exactly. Omit on the first call.")] decimal? confirmedCostPln = null,
+        CancellationToken ct = default)
+    {
+        var result = await sessions.StartAsync(
+            parkingId, licensePlate, durationMinutes,
+            ApcoaFlowSessionService.StartMode.Normal,
+            confirmedCostPln, _options.MaxSessionCostPln, bypassCap: true, ct);
+        return FormatStart(result);
+    }
+
+    [McpServerTool(Name = "end_session")]
+    [Description("End an active parking session by its id (from get_active_sessions). Returns the final cost. Always confirm with the user before calling.")]
+    public async Task<string> EndSessionAsync(
+        [Description("The session id (from get_active_sessions)")] long sessionId,
+        CancellationToken ct = default)
+    {
+        var ended = await sessions.StopAsync(sessionId, ct);
+        if (ended is null)
+            return $"Session {sessionId} was ended (no completed record returned to confirm cost).";
+        return $"Ended session {sessionId}: {ended.Amount:0.00} {ended.CurrencyCode} at {ended.ParkingName}.";
+    }
+
+    // -------------------------------------------------------------------------
+
+    private static string FormatStart(ApcoaFlowSessionService.StartResult r)
+    {
+        var sb = new StringBuilder();
+
+        // Always surface which parking (name + id) and, when started via location, how far away it is.
+        if (r.ParkingName is not null || r.ParkingId != 0)
+        {
+            sb.Append($"Parking: {r.ParkingName ?? "?"} [{r.ParkingId}]");
+            if (r.DistanceMeters is int d)
+                sb.Append($", {d} m away");
+            sb.Append(". ");
+        }
+
+        sb.Append(r.Message);
+
+        if (!r.Started)
+            return sb.ToString();
+
+        if (r.Session is { } s)
+            sb.Append($" Session id: {s.SessionId}, status: {s.ParkingSessionStatus}.");
+        if (r.PromotionName is not null)
+            sb.Append($" Promotion applied: {r.PromotionName}" + (r.FreeMinutes is int m ? $" ({m} free min)." : "."));
+        return sb.ToString();
+    }
+
+    private static string FormatSession(ParkingSessionV2 s)
+    {
+        var status = $"[{s.ParkingSessionStatus.ToLowerInvariant()}]";
+        var when = (s.CheckinTime ?? s.ScheduledCheckinTime)?.ToString("u") ?? "";
+        var cost = $"{s.Amount:0.00} {s.CurrencyCode}";
+        return $"{status} [{s.Id}] {s.ParkingName} plate:{s.LicensePlate} {cost} since:{when}";
     }
 }
-#pragma warning restore CS9113

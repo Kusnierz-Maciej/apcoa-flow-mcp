@@ -5,9 +5,20 @@ services:
     ports:
       - "9012:8080"
     env_file:
+      # Secrets live here (credentials + API key). See .env.example.
       - .env
     environment:
       - ASPNETCORE_ENVIRONMENT=Production
+      # Non-secret settings — all overridable via env (Section__Key convention).
+      # Defaults shown; uncomment to change. StorePath is fixed to the mounted volume below.
+      - ApcoaFlow__MaxSessionCostPln=100
+      - ApcoaFlow__CurrentLocationRadiusMeters=300
+      - ParkingData__CompanyId=9
+      - ParkingData__GeohashPrecision=6
+      - ParkingData__SoftRefreshAge=12:00:00
+      - ParkingData__HardRefreshAge=72:00:00
+      - ParkingData__BackgroundRefreshInterval=48:00:00
+      - ParkingData__StorePath=/data/parking
     volumes:
       - apcoa-parking-data:/data/parking
     restart: unless-stopped

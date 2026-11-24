@@ -17,7 +17,8 @@ builder.Services.AddTransient<IApcoaFlowCredentialProvider, HttpContextCredentia
 builder.Services.AddApcoaFlowApiClient();
 builder.Services.AddApcoaParkingDataSource(builder.Configuration.GetSection("ParkingData"));
 builder.Services.AddApcoaParkingRefreshService();
-builder.Services.AddScoped<ApcoaFlowApiAccessor>();
+builder.Services.Configure<ApcoaFlowToolsOptions>(builder.Configuration.GetSection("ApcoaFlow"));
+builder.Services.AddScoped<ApcoaFlowSessionService>();
 
 builder.Services
     .AddMcpServer(options => options.ServerInstructions = McpInstructions.Text)
