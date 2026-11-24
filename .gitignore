@@ -1,0 +1,23 @@
+# Build outputs
+bin/
+obj/
+
+# Test results
+TestResults/
+
+# macOS
+.DS_Store
+
+# IDE
+.idea/
+*.user
+
+# MCP config (may contain secrets)
+.mcp.json
+
+# Docker env files
+**/.env
+
+# Claude Code local state
+.claude/settings.local.json
+.claude/worktrees/

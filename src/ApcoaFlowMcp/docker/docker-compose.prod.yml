@@ -1,0 +1,11 @@
+services:
+  apcoa-flow-mcp:
+    container_name: apcoa-flow-mcp
+    image: ghcr.io/kusnierz-maciej/apcoa-flow-mcp:latest
+    ports:
+      - "9012:8080"
+    env_file:
+      - .env
+    environment:
+      - ASPNETCORE_ENVIRONMENT=Production
+    restart: unless-stopped

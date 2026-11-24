@@ -1,0 +1,5 @@
+<Solution>
+  <Project Path="ApcoaFlowApiClient/ApcoaFlowApiClient.csproj" />
+  <Project Path="ApcoaFlowApiClient.Tests/ApcoaFlowApiClient.Tests.csproj" />
+  <Project Path="ApcoaFlowMcp/ApcoaFlowMcp.csproj" />
+</Solution>
