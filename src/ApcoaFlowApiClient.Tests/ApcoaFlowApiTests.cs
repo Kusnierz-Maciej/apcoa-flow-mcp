@@ -1,5 +1,8 @@
 namespace ApcoaFlowApiClient.Tests;
 
+// Placeholder live-API tests (still stubbed). The constant-assertion analyzer warning is
+// expected until these are implemented; suppress it narrowly for this file.
+#pragma warning disable TUnitAssertions0005
 [Category("LiveApi")]
 public class ApcoaFlowApiTests
 {
@@ -40,3 +43,4 @@ public class ApcoaFlowApiTests
         await Assert.That(true).IsTrue();
     }
 }
+#pragma warning restore TUnitAssertions0005
