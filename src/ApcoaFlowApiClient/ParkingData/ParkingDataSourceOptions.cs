@@ -10,15 +10,15 @@ public class ParkingDataSourceOptions
 
     /// <summary>
     /// Past this age, the index is too old to serve: the next search blocks on an in-place rebuild
-    /// before returning. Safety floor. Default 72 h.
+    /// before returning. Safety floor. Default 48 h.
     /// </summary>
-    public TimeSpan HardRefreshAge { get; set; } = TimeSpan.FromHours(72);
+    public TimeSpan HardRefreshAge { get; set; } = TimeSpan.FromHours(48);
 
     /// <summary>
     /// Cadence of the proactive background refresh performed by the hosted service (web host only).
-    /// Keeps the index fresh so the soft/hard paths rarely fire. Default 48 h.
+    /// Keeps the index fresh so the soft/hard paths rarely fire. Default 24 h.
     /// </summary>
-    public TimeSpan BackgroundRefreshInterval { get; set; } = TimeSpan.FromHours(48);
+    public TimeSpan BackgroundRefreshInterval { get; set; } = TimeSpan.FromHours(24);
 
     /// <summary>Directory where the parking snapshot is persisted (mapped Docker volume). Default /data/parking.</summary>
     public string StorePath { get; set; } = "/data/parking";

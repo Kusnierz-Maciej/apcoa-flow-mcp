@@ -16,8 +16,8 @@ services:
       - ParkingData__CompanyId=9
       - ParkingData__GeohashPrecision=6
       - ParkingData__SoftRefreshAge=12:00:00
-      - ParkingData__HardRefreshAge=72:00:00
-      - ParkingData__BackgroundRefreshInterval=48:00:00
+      - ParkingData__HardRefreshAge=48:00:00
+      - ParkingData__BackgroundRefreshInterval=24:00:00
       - ParkingData__StorePath=/data/parking
     volumes:
       - apcoa-parking-data:/data/parking

@@ -48,8 +48,8 @@ services:
       - ParkingData__CompanyId=9
       - ParkingData__GeohashPrecision=6
       - ParkingData__SoftRefreshAge=12:00:00
-      - ParkingData__HardRefreshAge=72:00:00
-      - ParkingData__BackgroundRefreshInterval=48:00:00
+      - ParkingData__HardRefreshAge=48:00:00
+      - ParkingData__BackgroundRefreshInterval=24:00:00
       - ParkingData__StorePath=/data/parking
     volumes:
       - apcoa-parking-data:/data/parking
@@ -180,8 +180,8 @@ Freshness is tunable via the `ParkingData` configuration section (defaults shown
   "ParkingData": {
     "StorePath": "/data/parking",
     "SoftRefreshAge": "12:00:00",
-    "HardRefreshAge": "72:00:00",
-    "BackgroundRefreshInterval": "48:00:00",
+    "HardRefreshAge": "48:00:00",
+    "BackgroundRefreshInterval": "24:00:00",
     "GeohashPrecision": 6,
     "CompanyId": 9
   }
