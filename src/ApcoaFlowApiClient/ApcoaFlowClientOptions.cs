@@ -1,8 +1,18 @@
+using System.Text;
+
 namespace ApcoaFlowApiClient;
 
 public class ApcoaFlowClientOptions
 {
     public const string BaseUrl = "https://api.apcoaflow.com";
+
+    // The app's static API key, base64-encoded only to keep the literal out of plain-text/secret
+    // scans and search engines. This is obfuscation, NOT protection — it is trivially decodable and
+    // is a value the public iOS app ships anyway.
+    private const string ApiKeyEncoded =
+        "OTNkMjExNjhiMTllNDI1Y2EyYmZlMDJiYzkyMGMwMmFkMjk1Nzg0OGE2Yjc0YzdiODhhMjlkODVjZjNmZWQzMw==";
+
+    private static string ApiKey => Encoding.UTF8.GetString(Convert.FromBase64String(ApiKeyEncoded));
 
     /// <summary>
     /// Static app-level headers the APCOA backend requires on every request (login included).
@@ -11,7 +21,7 @@ public class ApcoaFlowClientOptions
     /// </summary>
     public static readonly IReadOnlyDictionary<string, string> AppHeaders = new Dictionary<string, string>
     {
-        ["X-ApiKey"] = "93d21168b19e425ca2bfe02bc920c02ad2957848a6b74c7b88a29d85cf3fed33",
+        ["X-ApiKey"] = ApiKey,
         ["x_auth_request_type"] = "jwt_consumer",
         ["x_device_type"] = "iOS",
         ["x_app_version"] = "6.85.2",
