@@ -222,22 +222,32 @@ Override via environment variables, e.g. `ApcoaFlow__MaxSessionCostPln=50`. Cred
 
 ## Running tests
 
-There are two kinds of tests (TUnit, run via Microsoft.Testing.Platform):
+Tests use TUnit (run via Microsoft.Testing.Platform) and come in three kinds:
 
-- **Offline** (no credentials, no network) — the spatial index, the on-disk snapshot store, and the tariff/promotion/cost logic.
-- **Live** (`[Category("LiveApi")]`) — exercise the real APCOA Flow API to catch upstream changes. These need credentials and are opt-in; they never run unless you filter them in.
+- **Unit** (`ApcoaFlowMcp.Tests`) — the MCP session orchestration (`start_session` free/paid logic,
+  promo validation, already-active handling) against a fully mocked API. No credentials, no network.
+- **Offline** (`ApcoaFlowApiClient.Tests`, no `LiveApi` category) — the spatial index, the on-disk
+  snapshot store, and the tariff/promotion/cost logic. No credentials, no network.
+- **Live** (`[Category("LiveApi")]`) — exercise the real APCOA Flow API to catch upstream changes.
+  These need credentials and are opt-in; they never run unless you filter them in.
+
+Run every non-live test (unit + offline — fast, no account needed):
+
+```bash
+dotnet test --solution src/ApcoaFlowMcp.slnx --treenode-filter '/**[Category!=LiveApi]'
+```
+
+Run just the MCP unit tests:
+
+```bash
+dotnet test --project src/ApcoaFlowMcp.Tests
+```
 
 Credentials for the live tests (never stored in the repo):
 
 ```bash
 dotnet user-secrets --project src/ApcoaFlowApiClient.Tests set "ApcoaFlow:Email" "your@email.com"
 dotnet user-secrets --project src/ApcoaFlowApiClient.Tests set "ApcoaFlow:Password" "yourpassword"
-```
-
-Run the offline tests only (default — fast, no account needed):
-
-```bash
-dotnet test --solution src/ApcoaFlowMcp.slnx --treenode-filter '/**[Category!=LiveApi]'
 ```
 
 Run the live tests (needs credentials):

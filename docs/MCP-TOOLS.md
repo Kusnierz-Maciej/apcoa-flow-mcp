@@ -56,7 +56,9 @@ No registered cars on the account.
 
 ## `get_active_sessions`
 
-Return the currently running session(s). Call before starting to avoid duplicates.
+Return the currently running session(s). You do **not** need to call this before starting — the start
+tools detect an already-active session themselves and report it (see `start_session`) — but it is handy
+to inspect or get a session id to end.
 
 **Inputs** — none.
 
@@ -98,11 +100,18 @@ Resolves the lot, tariff, vehicle, payment method and profile automatically.
   second call with `confirmedCostPln` set to **exactly** that cost (any mismatch is refused).
 - A paid cost above `MaxSessionCostPln` (default 100 zł) is refused — use `start_expensive_session`.
 - To guarantee a free-only start, use `start_free_session` instead.
-- **Free-time promotions are auto-applied.** If the parking has an active free-time promotion, it is
-  applied to the quote (so you are only charged for time beyond the free window), and the
-  confirmation message says how many minutes are free. A one-use free promo is never partly wasted:
-  if `durationMinutes` is shorter than the free window, it is rounded **up** to the full free window
-  (capped by the lot's max duration).
+- **Free-time promotions are auto-applied — but only when actually usable.** If the parking has an
+  active free-time promotion, it is validated before being trusted and then applied to the quote (so
+  you are only charged for time beyond the free window), and the confirmation message says how many
+  minutes are free. A one-use free promo is never partly wasted: if `durationMinutes` is shorter than
+  the free window, it is rounded **up** to the full free window (capped by the lot's max duration). If
+  the promotion fails validation (expired, used-up, not valid for this account) it is dropped and the
+  session is quoted at the normal paid price — the price simulator alone would otherwise report such a
+  promo as free even though the real start charges full price.
+- **One session at a time.** If a session is already active (the backend allows only one per account),
+  the start is refused and the tool reports the existing session — whether it is at **this** parking
+  (you can keep using it, or end it and start fresh) or **elsewhere** — including how long it has left
+  and the `end_session(<id>)` call to end it. You do not need to call `get_active_sessions` first.
 
 **Inputs**
 
@@ -134,6 +143,14 @@ Parking: Carrefour Tarnowskie Góry ul. Kościuszki 5 [9882]. Started a 6.00 PLN
 Over the cost cap:
 ```
 Parking: … [10584]. Cost 150.00 PLN exceeds the limit of 100.00 PLN. Use start_expensive_session to override.
+```
+A session is already active at this parking (keep it or end it):
+```
+Parking: Tarnowskie Góry ul. Oświęcimska [616319]. You already have an active session at THIS parking (session 84214483 at 'Tarnowskie Góry ul. Oświęcimska' [616319], plate ABC 123DE, 25 min left). It is already running here — you can keep using it, or end it with end_session(84214483) and start a fresh one.
+```
+A session is already active somewhere else (end it, then retry):
+```
+Parking: Carrefour Tarnowskie Góry ul. Kościuszki 5 [9882]. Can't start here — a session is already active ELSEWHERE: session 84214483 at 'Tarnowskie Góry ul. Oświęcimska' [616319], plate ABC 123DE, 25 min left. Only one session can run at a time. End it with end_session(84214483) and then retry, or keep the current one.
 ```
 
 ---

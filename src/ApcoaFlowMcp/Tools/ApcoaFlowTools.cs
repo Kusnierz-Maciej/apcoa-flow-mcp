@@ -60,7 +60,7 @@ public sealed class ApcoaFlowTools(
     }
 
     [McpServerTool(Name = "get_active_sessions")]
-    [Description("Returns the currently active parking session(s), or a message if none is running. Always call this before starting a session to avoid duplicates.")]
+    [Description("Returns the currently active parking session(s), or a message if none is running. You don't need to call this before starting — start_session detects an already-active session itself — but it's useful to inspect running sessions or get an id to end.")]
     public async Task<string> GetActiveSessionsAsync(CancellationToken ct = default)
     {
         var active = await sessions.GetActiveAsync(ct);

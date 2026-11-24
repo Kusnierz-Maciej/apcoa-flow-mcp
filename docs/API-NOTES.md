@@ -37,6 +37,21 @@ When starting fresh it is absent. Both cases observed in dumps.
 `GET /authentication/v1/consumers/favourite/parking` returns **204 No Content** when the user has
 no favourites. The client should treat 204 as an empty list rather than an error.
 
+### One active session per account → HTTP 424 `LIMIT_EXCEEDED`
+Starting a session (`POST /consumer/parkingSession`) while one is already active is rejected with
+**HTTP 424 Failed Dependency** and body `{"message":"LIMIT_EXCEEDED","statusCode":5012,...}`. The
+backend allows only one active session per account. Handle this by listing active sessions and
+surfacing the existing one rather than retrying.
+
+### Tariff breakdown applies promos it cannot honour (free quote, paid start)
+`GET /tariff/tariffBreakDownV2` with a promotion applies the discount **optimistically** — it returns
+`totalPayableAmountInCents=0` / `discountApplicable=1` even for a promo that is actually unusable
+(expired, used up, or not valid for the account). The real start then **charges full price**. The
+authoritative check is `POST /promotion/validate`: a usable coupon returns 2xx; an unusable one returns
+**HTTP 422** with `{"message":"INVALID_PROMOTION_CODE","statusCode":5007,...}`. Always validate before
+trusting a promo-applied quote. (The `free_duration*` fields on the breakdown are always 0/empty in PL
+and are not a reliable signal either — use the base-tariff `totalPayableAmountInCents` to judge "free".)
+
 ---
 
 ## Parking Search — S3 Offline Data
