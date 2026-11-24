@@ -20,18 +20,20 @@ public class ApcoaFlowAuthHandler : DelegatingHandler
     {
         var credentials = _credentials.GetCredentials();
 
+        ApplyAppHeaders(request);
         var token = await _tokens.GetOrLoginAsync(credentials, ct => LoginAsync(credentials, ct), cancellationToken);
         request.Headers.Authorization = new AuthenticationHeaderValue("Bearer", token);
 
         var response = await base.SendAsync(request, cancellationToken);
 
-        if (response.StatusCode == HttpStatusCode.Unauthorized)
+        if (IsAuthFailure(response.StatusCode))
         {
             _tokens.Invalidate(credentials, token);
 
             token = await _tokens.GetOrLoginAsync(credentials, ct => LoginAsync(credentials, ct), cancellationToken);
 
             var retryRequest = await CloneRequestAsync(request);
+            ApplyAppHeaders(retryRequest);
             retryRequest.Headers.Authorization = new AuthenticationHeaderValue("Bearer", token);
             response = await base.SendAsync(retryRequest, cancellationToken);
         }
@@ -39,10 +41,27 @@ public class ApcoaFlowAuthHandler : DelegatingHandler
         return response;
     }
 
+    // HTTP 419 is APCOA's "Invalid or Expired Token"; 401 is standard unauthorized.
+    private static bool IsAuthFailure(HttpStatusCode status) =>
+        status == HttpStatusCode.Unauthorized || (int)status == 419;
+
+    /// <summary>Stamps the static app headers the backend requires, without overwriting any already set.</summary>
+    private static void ApplyAppHeaders(HttpRequestMessage request)
+    {
+        foreach (var (name, value) in ApcoaFlowClientOptions.AppHeaders)
+        {
+            if (!request.Headers.Contains(name))
+                request.Headers.TryAddWithoutValidation(name, value);
+        }
+    }
+
     private static async Task<string> LoginAsync(ApcoaFlowClientOptions credentials, CancellationToken cancellationToken)
     {
-        var loginApi = RestService.For<IApcoaFlowApi>(
-            new HttpClient { BaseAddress = new Uri(ApcoaFlowClientOptions.BaseUrl) });
+        var http = new HttpClient { BaseAddress = new Uri(ApcoaFlowClientOptions.BaseUrl) };
+        foreach (var (name, value) in ApcoaFlowClientOptions.AppHeaders)
+            http.DefaultRequestHeaders.TryAddWithoutValidation(name, value);
+
+        var loginApi = RestService.For<IApcoaFlowApi>(http);
 
         var response = await loginApi.LoginAsync(new LoginRequest
         {
