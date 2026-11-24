@@ -15,6 +15,8 @@ var builder = WebApplication.CreateBuilder(args);
 builder.Services.AddHttpContextAccessor();
 builder.Services.AddTransient<IApcoaFlowCredentialProvider, HttpContextCredentialProvider>();
 builder.Services.AddApcoaFlowApiClient();
+builder.Services.AddApcoaParkingDataSource(builder.Configuration.GetSection("ParkingData"));
+builder.Services.AddApcoaParkingRefreshService();
 builder.Services.AddScoped<ApcoaFlowApiAccessor>();
 
 builder.Services

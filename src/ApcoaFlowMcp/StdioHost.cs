@@ -18,6 +18,7 @@ public static class StdioHost
 
         builder.Services.AddTransient<IApcoaFlowCredentialProvider, ConfigurationCredentialProvider>();
         builder.Services.AddApcoaFlowApiClient();
+        builder.Services.AddApcoaParkingDataSource(builder.Configuration.GetSection("ParkingData"));
         builder.Services.AddScoped<ApcoaFlowApiAccessor>();
 
         builder.Services

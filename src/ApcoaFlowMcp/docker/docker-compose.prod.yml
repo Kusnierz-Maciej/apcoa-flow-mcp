@@ -8,4 +8,9 @@ services:
       - .env
     environment:
       - ASPNETCORE_ENVIRONMENT=Production
+    volumes:
+      - apcoa-parking-data:/data/parking
     restart: unless-stopped
+
+volumes:
+  apcoa-parking-data:
