@@ -1,6 +1,6 @@
 # apcoa-flow-mcp
 
-Unofficial MCP server for [APCOA Flow](https://flow.apcoa.com) parking sessions, built on .NET 10 and ASP.NET Core.
+Unofficial MCP server for [APCOA Flow](https://www.apcoa.pl/krotkotrwale-parkowanie/opcje-rezerwacji-i-platnosci/apcoa-flow) parking sessions, built on .NET 10 and ASP.NET Core.
 
 ## MCP tools
 
