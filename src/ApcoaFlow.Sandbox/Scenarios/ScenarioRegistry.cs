@@ -6,6 +6,9 @@ public static class ScenarioRegistry
     public static readonly IReadOnlyList<IScenario> All =
     [
         new DumpSessionsScenario(),
+        new InvestigateCarrefourScenario(),
+        new CaptureCarrefourPaidStartScenario(),
+        new DumpTariffScenario(),
     ];
 
     public static IScenario? Find(string name) =>

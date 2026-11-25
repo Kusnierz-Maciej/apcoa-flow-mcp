@@ -6,9 +6,14 @@ using Microsoft.Extensions.DependencyInjection;
 namespace ApcoaFlow.Sandbox.Scenarios;
 
 /// <summary>
-/// READ-ONLY. Fetches the consumer profile and lists ACTIVE / COMPLETED / IN_REVIEW sessions.
-/// Starts / extends / stops NOTHING, so it is always safe to run. Doubles as the reference
-/// scenario proving the dump pipeline works end-to-end.
+/// WHAT: READ-ONLY. Fetches the consumer profile and lists ACTIVE / COMPLETED / IN_REVIEW sessions,
+/// dumping every request/response in full. Starts / extends / stops NOTHING.
+///
+/// WHY: the first, always-safe scenario — it proves the dump pipeline end-to-end and gives a quick
+/// snapshot of the account (plates, payment methods, recent session history and their charges).
+///
+/// FOUND / USE IT FOR: confirming whether a recent start actually charged (COMPLETED amount), whether
+/// anything is stuck ACTIVE, and as the template to copy when writing a new read-only probe.
 /// </summary>
 public sealed class DumpSessionsScenario : IScenario
 {
