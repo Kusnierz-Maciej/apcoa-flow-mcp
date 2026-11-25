@@ -4,9 +4,12 @@ using ApcoaFlowApiClient.Converters;
 namespace ApcoaFlowApiClient.Models.Promotion;
 
 /// <summary>
-/// A promotion/coupon from <c>POST /promotion/applicableOffersWithPromotionV2</c>. Free-parking offers
-/// have <see cref="ConcessionType"/> == "free_time" and carry the free window in <see cref="ConcessionValue"/>
-/// (minutes, serialized as a string). The free window comes from this metadata, never from <see cref="Name"/>.
+/// A promotion/coupon returned by the offers endpoints (<c>applicableOffersWithPromotion</c> /
+/// <c>…V2</c>). Free-parking offers have <see cref="ConcessionType"/> == "free_time" and carry the free
+/// window in <see cref="ConcessionValue"/> (minutes, serialized as a string). The free window comes from
+/// this metadata, never from <see cref="Name"/>. The offer's own <see cref="Id"/>/<see cref="Name"/> are
+/// a DISPLAY code; the promotion the API actually accepts is in <see cref="PromotionResponseList"/> —
+/// use <see cref="PromotionId"/>/<see cref="PromotionName"/> for validate / breakdown / start.
 /// </summary>
 public class Offer
 {
@@ -37,6 +40,28 @@ public class Offer
     public string? Company { get; set; }
     public string? Tenant { get; set; }
 
+    /// <summary>
+    /// The promotions nested under this offer. The offer's top-level <see cref="Id"/>/<see cref="Name"/>
+    /// are the OFFER code/display name (e.g. 4107 / "Darmowe60minutparkowania."); the promotion the API
+    /// actually accepts for validate / tariff breakdown / start lives here (e.g. 104539 / "FRE60MIN07").
+    /// Sending the offer name instead of the promotion name makes promotion/validate return 422
+    /// INVALID_PROMOTION_CODE. Use <see cref="PromotionId"/>/<see cref="PromotionName"/>.
+    /// </summary>
+    public List<PromotionResponse> PromotionResponseList { get; set; } = [];
+
+    /// <summary>The primary nested promotion (isPrimary==1), else the first, else null.</summary>
+    [JsonIgnore]
+    public PromotionResponse? PrimaryPromotion =>
+        PromotionResponseList.FirstOrDefault(p => p.IsPrimary == 1) ?? PromotionResponseList.FirstOrDefault();
+
+    /// <summary>The id the API expects for this promotion: the nested promotion's id, else the offer id.</summary>
+    [JsonIgnore]
+    public int PromotionId => PrimaryPromotion?.Id ?? Id;
+
+    /// <summary>The name the API expects for this promotion: the nested promotion's name, else the offer name.</summary>
+    [JsonIgnore]
+    public string? PromotionName => PrimaryPromotion?.Name ?? Name;
+
     /// <summary>True when this is an active free-time coupon.</summary>
     [JsonIgnore]
     public bool IsActiveFreeTime =>
@@ -49,4 +74,24 @@ public class Offer
     /// <summary>Convenience: the free window in whole minutes, or null.</summary>
     [JsonIgnore]
     public int? FreeMinutes => FreeWindow is { } w ? (int)w.TotalMinutes : null;
+}
+
+/// <summary>
+/// A promotion nested in an <see cref="Offer"/>'s <c>promotionResponseList</c>. This carries the id/name
+/// that <c>promotion/validate</c>, <c>tariffBreakDownV2</c> and the start request actually accept —
+/// distinct from the parent offer's code/display name.
+/// </summary>
+public class PromotionResponse
+{
+    public int Id { get; set; }
+    public string? Name { get; set; }
+    public int OfferCode { get; set; }
+    public string? OfferName { get; set; }
+
+    /// <summary>1 for the primary promotion of its offer.</summary>
+    public int IsPrimary { get; set; }
+    public int IsActive { get; set; }
+
+    public string? UsageType { get; set; }
+    public int? UsageLimit { get; set; }
 }

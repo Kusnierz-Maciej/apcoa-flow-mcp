@@ -102,12 +102,22 @@ internal static class Fake
         ],
     };
 
-    /// <summary>An offers response, optionally carrying one active free-time promo.</summary>
-    public static OffersResponse Offers(Offer? promo = null) =>
-        new() { Entities = promo is null ? [] : [promo] };
+    /// <summary>An offers list, optionally carrying one active free-time promo.</summary>
+    public static List<Offer> Offers(Offer? promo = null) =>
+        promo is null ? [] : [promo];
 
-    /// <summary>An active free-time promo with the given free window (minutes).</summary>
-    public static Offer FreeTimePromo(int freeMinutes = 90, string name = "PROMO1", int id = 1) => new()
+    /// <summary>
+    /// An active free-time promo with the given free window (minutes). By default it carries a nested
+    /// primary promotion (as the real API does) whose name/id differ from the offer's display name/id —
+    /// so tests assert we send the NESTED code, not the offer code. Pass promotionName/promotionId=null
+    /// to omit the nested promotion and exercise the fallback to the offer's own fields.
+    /// </summary>
+    public static Offer FreeTimePromo(
+        int freeMinutes = 90,
+        string name = "PROMO1",
+        int id = 1,
+        string? promotionName = "PROMO1_CODE",
+        int? promotionId = 1001) => new()
     {
         Id = id,
         Name = name,
@@ -116,6 +126,9 @@ internal static class Fake
         ConcessionType = "free_time",
         ConcessionValue = TimeSpan.FromMinutes(freeMinutes),
         OfferDiscountType = "PROMOTION",
+        PromotionResponseList = promotionName is null || promotionId is null
+            ? []
+            : [new PromotionResponse { Id = promotionId.Value, Name = promotionName, OfferCode = id, OfferName = name, IsPrimary = 1, IsActive = 1 }],
     };
 
     /// <summary>A tariff breakdown quoting the given PLN total (0 = free).</summary>
@@ -160,9 +173,9 @@ internal static class Fake
         return new ApiResponse<ValidatePromotionResponse>(http, body, new RefitSettings(), error);
     }
 
-    /// <summary>A validate-promotion response that says the promo is usable (200, no error body).</summary>
+    /// <summary>A validate-promotion response that says the promo is usable (200, message "valid").</summary>
     public static IApiResponse<ValidatePromotionResponse> ValidOk() =>
-        ValidateResponse(HttpStatusCode.OK, new ValidatePromotionResponse());
+        ValidateResponse(HttpStatusCode.OK, new ValidatePromotionResponse { Message = "valid" });
 
     /// <summary>A validate-promotion response that rejects the promo (422 INVALID_PROMOTION_CODE).</summary>
     public static IApiResponse<ValidatePromotionResponse> ValidRejected() =>
@@ -175,7 +188,7 @@ internal static class Fake
     public static IApcoaFlowApi Api(
         ConsumerProfile? consumer = null,
         List<ParkingLot>? lots = null,
-        OffersResponse? offers = null,
+        List<Offer>? offers = null,
         TariffBreakdown? quote = null,
         StartSessionResponse? started = null)
     {
@@ -184,7 +197,7 @@ internal static class Fake
             .Returns(lots ?? Lots());
         api.GetConsumerAsync(Arg.Any<bool>(), Arg.Any<CancellationToken>())
             .Returns(consumer ?? Consumer());
-        api.GetApplicableOffersV2Async(Arg.Any<ApplicableOffersV2Request>(), Arg.Any<CancellationToken>())
+        api.GetApplicableOffersAsync(Arg.Any<ApplicableOffersRequest>(), Arg.Any<CancellationToken>())
             .Returns(offers ?? Offers());
         api.GetTariffBreakdownAsync(Arg.Any<TariffBreakdownQuery>(), Arg.Any<CancellationToken>())
             .Returns(quote ?? Quote(0m));

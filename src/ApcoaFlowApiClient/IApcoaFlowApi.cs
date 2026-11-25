@@ -189,15 +189,21 @@ public interface IApcoaFlowApi
     // -------------------------------------------------------------------------
 
     /// <summary>
-    /// Returns applicable promotions/offers for a parking lot (v1 variant). Response shape varies; kept
-    /// for completeness. Prefer <see cref="GetApplicableOffersV2Async"/> which returns a typed offer list.
+    /// Returns applicable promotions/offers for a parking lot, keyed by license plate (the
+    /// <c>identifier</c>) exactly as the official app does. The response is a bare array of offers, each
+    /// carrying its nested <c>promotionResponseList</c> — so <see cref="Offer.PromotionId"/>/
+    /// <see cref="Offer.PromotionName"/> expose the real promotion code the API accepts. This is the
+    /// PREFERRED offers call; <see cref="GetApplicableOffersV2Async"/> (user-id keyed, envelope shape) is
+    /// retained for the live tests and sandbox probes only.
     /// </summary>
     [Post("/authentication/v2/promotion/applicableOffersWithPromotion")]
     Task<List<Offer>> GetApplicableOffersAsync([Body] ApplicableOffersRequest request, CancellationToken ct = default);
 
     /// <summary>
-    /// Returns active promotions/coupons for a parking lot and user. Free-parking coupons have
-    /// <c>concessionType=="free_time"</c>; their free window is in <c>concessionValue</c> (minutes).
+    /// Returns active promotions/coupons for a parking lot and user (envelope shape, user-id keyed).
+    /// Free-parking coupons have <c>concessionType=="free_time"</c>; their free window is in
+    /// <c>concessionValue</c> (minutes). Production uses <see cref="GetApplicableOffersAsync"/> instead,
+    /// which matches the app; this remains for live tests / sandbox scenarios.
     /// </summary>
     [Post("/authentication/v1/promotion/applicableOffersWithPromotionV2")]
     Task<OffersResponse> GetApplicableOffersV2Async([Body] ApplicableOffersV2Request request, CancellationToken ct = default);

@@ -7,6 +7,8 @@ public static class ScenarioRegistry
     [
         new DumpSessionsScenario(),
         new InvestigateCarrefourScenario(),
+        new InvestigateAldiScenario(),
+        new StartFreeAldiScenario(),
         new CaptureCarrefourPaidStartScenario(),
         new DumpTariffScenario(),
     ];

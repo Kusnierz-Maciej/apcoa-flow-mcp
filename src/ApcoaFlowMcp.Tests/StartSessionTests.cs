@@ -140,6 +140,54 @@ public class StartSessionTests
         await Assert.That(result.Started).IsTrue();
     }
 
+    [Test]
+    public async Task ValidateMessageValid_IsAccepted_PromoApplied_AndFree()
+    {
+        // The real promotion/validate success body is message:"valid" (NOT "SUCCESS"/"OK"). That must be
+        // accepted — otherwise a usable promo is dropped and a free parking is wrongly reported paid.
+        var api = Fake.Api(quote: Fake.Quote(0m), offers: Fake.Offers(Fake.FreeTimePromo(freeMinutes: 60)));
+        api.ValidatePromotionAsync(Arg.Any<ValidatePromotionRequest>(), Arg.Any<CancellationToken>())
+            .Returns(Fake.ValidateResponse(System.Net.HttpStatusCode.OK,
+                new ValidatePromotionResponse { Message = "valid", Error = null }));
+
+        var result = await StartOnlyFree(api);
+
+        await Assert.That(result.Started).IsTrue()
+            .Because("a 200 'valid' validation must keep the promo and start the free session");
+        await api.Received(1).StartParkingSessionAsync(Arg.Any<StartParkingSessionRequest>(), Arg.Any<CancellationToken>());
+    }
+
+    [Test]
+    public async Task FreePromo_SendsNestedPromotionCode_NotOfferDisplayName()
+    {        // Regression for the Aldi 8331 bug: the offer's display name/id (e.g. 4107 /
+        // "Darmowe60minutparkowania.") must NOT be sent to validate / breakdown / start — the API 422s
+        // on it. We must send the nested promotionResponseList code/id (e.g. 104539 / "FRE60MIN07").
+        var promo = Fake.FreeTimePromo(
+            freeMinutes: 60, name: "Darmowe60minutparkowania.", id: 4107,
+            promotionName: "FRE60MIN07", promotionId: 104539);
+        var api = Fake.Api(quote: Fake.Quote(0m), offers: Fake.Offers(promo));
+
+        var result = await StartOnlyFree(api);
+
+        await Assert.That(result.Started).IsTrue();
+
+        // validate was fed the nested name, never the offer display name.
+        await api.Received().ValidatePromotionAsync(
+            Arg.Is<ValidatePromotionRequest>(r => r != null && r.PromotionName == "FRE60MIN07"), Arg.Any<CancellationToken>());
+        await api.DidNotReceive().ValidatePromotionAsync(
+            Arg.Is<ValidatePromotionRequest>(r => r != null && r.PromotionName == "Darmowe60minutparkowania."), Arg.Any<CancellationToken>());
+
+        // the start carried the nested id/name too.
+        await api.Received().StartParkingSessionAsync(
+            Arg.Is<StartParkingSessionRequest>(r => r != null && r.PromotionId == 104539 && r.PromotionName == "FRE60MIN07"),
+            Arg.Any<CancellationToken>());
+
+        // the breakdown quotes used the nested id/name.
+        await api.Received().GetTariffBreakdownAsync(
+            Arg.Is<TariffBreakdownQuery>(q => q != null && q.PromotionId == 104539 && q.DiscountName == "FRE60MIN07"),
+            Arg.Any<CancellationToken>());
+    }
+
     // ─── Account/resolution refusals ───────────────────────────────────────────────────────────────
 
     [Test]

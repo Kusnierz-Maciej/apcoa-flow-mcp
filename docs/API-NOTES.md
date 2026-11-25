@@ -47,15 +47,37 @@ surfacing the existing one rather than retrying.
 `GET /tariff/tariffBreakDownV2` with a promotion applies the discount **optimistically** — it returns
 `totalPayableAmountInCents=0` / `discountApplicable=1` even for a promo that is actually unusable
 (expired, used up, or not valid for the account). The real start then **charges full price**. The
-authoritative check is `POST /promotion/validate`: a usable coupon returns 2xx; an unusable one returns
-**HTTP 422** with `{"message":"INVALID_PROMOTION_CODE","statusCode":5007,...}`. Always validate before
-trusting a promo-applied quote. (The `free_duration*` fields on the breakdown are always 0/empty in PL
-and are not a reliable signal either — use the base-tariff `totalPayableAmountInCents` to judge "free".)
+authoritative check is `POST /promotion/validate`: a usable coupon returns 2xx with
+`{"message":"valid","error":null,...}`; an unusable one returns **HTTP 422** with
+`{"message":"INVALID_PROMOTION_CODE","statusCode":5007,...}`. Always validate before trusting a
+promo-applied quote. (The `free_duration*` fields on the breakdown are always 0/empty in PL and are not
+a reliable signal either — use the base-tariff `totalPayableAmountInCents` to judge "free".)
 
-Concrete example (Carrefour Tarnowskie Góry, lot `10584`, coupon `FREE120PL2_4H` = 2 h free every 4 h):
-the breakdown "with promo" returns `discountType=percent, discountValue=10` (a trivial 10 % discount,
-NOT the free window; `freeTimeSlot:[]`, `freeDurationApplied:false`), while `promotion/validate`
-returns 422 `INVALID_PROMOTION_CODE`/5007 because the per-person 4 h usage window is still consumed.
+> Note: the official app does **not** call `promotion/validate` at all — it goes offers →
+> `tariffBreakDownV2` (with the promo) and trusts the 0-cost result. We keep validate as an extra safety
+> gate. The success body says `message:"valid"` (NOT "SUCCESS"/"OK"), so a success check must accept
+> "valid" and reject only explicit error markers, or a usable promo gets wrongly dropped.
+
+### The promotion code lives in the offer's nested `promotionResponseList`, not the offer id/name
+An offer object's top-level `id`/`name` are a **display code** (e.g. `4107` /
+`"Darmowe60minutparkowania."`). The promotion the API actually accepts for `promotion/validate`,
+`tariffBreakDownV2` (`discountName`/`promotionId`) and session start is nested under
+`promotionResponseList` — e.g. `{ "id": 104539, "name": "FRE60MIN07", "isPrimary": 1 }`. Sending the
+offer display name instead returns 422 `INVALID_PROMOTION_CODE`. Read the primary nested promotion
+(`isPrimary==1`, else the first) and fall back to the offer's own id/name only when the list is empty.
+
+The app's offers call is `POST /authentication/v2/promotion/applicableOffersWithPromotion` with body
+`{company, checkDurationBasedPromotion:true, parkingLot, isAutoApply:true, tenant:"apcoa", identifier:"<PLATE>"}`
+— identifier is the **plate**, and the response is a **bare array** of offers (not the `{entities:[…]}`
+envelope of the `…V2` user-id-keyed variant).
+
+Concrete example (Aldi Tarnowskie Góry, parking `8331`, lot `9085`, tariff `7562`, coupon offer
+`4107` / nested promotion `FRE60MIN07`/`104539` = 60 min free): with the nested code, `promotion/validate`
+returns `200 "valid"` and the 60-min breakdown returns `totalPayableAmountInCents=0` (genuinely free) —
+a live free start+stop confirmed `amount=0.0`. With the offer display name it 422s and the breakdown
+only applies a 10 % discount (3.60 PLN). Earlier notes blaming the Carrefour `FREE120PL2_4H` 422 on a 4 h
+cooldown may be the same wrong-code bug — re-verify with the nested promotion name before assuming a
+cooldown.
 
 ### `GET /tariff?parkingLotId=...` returns the full pricing grid (unit = 1/100 cent!)
 Confirmed live (2026-11-25). The response is **not** flat name/description — it is the whole rate grid:

@@ -138,13 +138,18 @@ public sealed class ApcoaFlowSessionService(IApcoaFlowApi api, IApcoaParkingData
         //    the free window). Validating first means an UNUSABLE promo never inflates the requested
         //    duration to its free window, so a 60-min request stays 60 min at the real price instead
         //    of being quoted the (unavailable) 120-min free-window tier.
-        var offers = await api.GetApplicableOffersV2Async(new ApplicableOffersV2Request
+        //
+        //    Endpoint + identity match the official app exactly: v2/applicableOffersWithPromotion keyed
+        //    by the PLATE (not the consumer id). Each returned offer carries the real promotion in its
+        //    nested promotionResponseList — Offer.PromotionId/PromotionName surface that (the offer's own
+        //    id/name are just the display code and must NOT be sent to validate/breakdown/start).
+        var offers = await api.GetApplicableOffersAsync(new ApplicableOffersRequest
         {
             ParkingLot = lotId,
-            UserId = consumer.Id,
+            Identifier = vehicle.VehicleNumber,
             Company = Company,
         }, ct);
-        var promo = offers.Entities.FirstOrDefault(o => o.IsActiveFreeTime);
+        var promo = offers.FirstOrDefault(o => o.IsActiveFreeTime);
 
         var checkIn = DateTimeOffset.UtcNow;
         var requested = durationMinutes is { } dm ? TimeSpan.FromMinutes(dm) : (TimeSpan?)null;
@@ -257,8 +262,8 @@ public sealed class ApcoaFlowSessionService(IApcoaFlowApi api, IApcoaParkingData
                 SessionCheckInTime = checkIn,
                 ScheduledSessionCheckInTime = checkIn,
                 ScheduledSessionCheckOutTime = checkOut,
-                PromotionName = promo?.Name,
-                PromotionId = promo?.Id,
+                PromotionName = promo?.PromotionName,
+                PromotionId = promo?.PromotionId,
                 OfferDiscountType = promo is null ? null : "PROMOTION",
                 IsAutoApplyPromotion = promo is not null,
             }, ct);
@@ -474,8 +479,8 @@ public sealed class ApcoaFlowSessionService(IApcoaFlowApi api, IApcoaParkingData
         api.GetTariffBreakdownAsync(TariffBreakdownQuery.For(
             lotId, tariffId, checkIn, window, plate,
             company: Company,
-            promotionId: promo?.Id,
-            discountName: promo?.Name,
+            promotionId: promo?.PromotionId,
+            discountName: promo?.PromotionName,
             offerDiscountType: promo is null ? null : "PROMOTION",
             consumerUserId: consumerId), ct);
 
@@ -485,6 +490,12 @@ public sealed class ApcoaFlowSessionService(IApcoaFlowApi api, IApcoaParkingData
     /// free quote but a charged start). Returns true only when the promotion/validate endpoint returns
     /// a success status AND its typed body carries no error marker. Any non-success status, any body
     /// with an error code/message, or any transport error is treated as "not usable" (returns false).
+    ///
+    /// NOTE: the official APCOA app does NOT call promotion/validate — it trusts the tariff breakdown's
+    /// 0-cost result directly. We keep this as an extra safety gate, but it MUST be fed the nested
+    /// promotion name (<see cref="Offer.PromotionName"/>, e.g. "FRE60MIN07"), not the offer display name
+    /// ("Darmowe60minutparkowania."); the latter makes validate return 422 INVALID_PROMOTION_CODE and the
+    /// usable promo gets wrongly discarded.
     /// </summary>
     private async Task<bool> PromotionValidatesAsync(
         Offer promo, int lotId, string plate, int consumerId, DateTimeOffset startTime, TimeSpan window, CancellationToken ct)
@@ -495,7 +506,7 @@ public sealed class ApcoaFlowSessionService(IApcoaFlowApi api, IApcoaParkingData
             {
                 ConsumerID = consumerId,
                 VehicleNumber = plate,
-                PromotionName = promo.Name ?? string.Empty,
+                PromotionName = promo.PromotionName ?? string.Empty,
                 Company = Company,
                 ParkingLot = lotId,
                 StartTime = startTime,
@@ -511,12 +522,22 @@ public sealed class ApcoaFlowSessionService(IApcoaFlowApi api, IApcoaParkingData
             if (body is null)
                 return true; // success status, no body — nothing says the promo failed
 
+            // Treat as usable on a 2xx UNLESS the body carries an explicit failure marker. The success
+            // body says message:"valid", error:null (NOT "SUCCESS"/"OK"); a failure says
+            // message:"INVALID_PROMOTION_CODE", statusCode:5007 (and usually arrives as a non-2xx caught
+            // above). So reject only on a populated error, an out-of-2xx statusCode, or a message that
+            // reads like an error — never on an unrecognised-but-neutral message.
+            if (!string.IsNullOrWhiteSpace(body.Error))
+                return false;
+
             if (body.StatusCode is { } code && (code < 200 || code > 299))
                 return false;
 
             if (!string.IsNullOrWhiteSpace(body.Message) &&
-                !body.Message.Equals("SUCCESS", StringComparison.OrdinalIgnoreCase) &&
-                !body.Message.Equals("OK", StringComparison.OrdinalIgnoreCase))
+                (body.Message.Contains("INVALID", StringComparison.OrdinalIgnoreCase) ||
+                 body.Message.Contains("ERROR", StringComparison.OrdinalIgnoreCase) ||
+                 body.Message.Contains("EXPIRED", StringComparison.OrdinalIgnoreCase) ||
+                 body.Message.Contains("FAIL", StringComparison.OrdinalIgnoreCase)))
                 return false;
 
             return true;
