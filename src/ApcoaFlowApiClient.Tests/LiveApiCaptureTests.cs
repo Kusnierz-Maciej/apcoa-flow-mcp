@@ -20,6 +20,7 @@ namespace ApcoaFlowApiClient.Tests;
 /// category; it is not part of the normal test run.
 /// </summary>
 [Category("LiveApi")]
+[NotInParallel("LiveApi")]
 public class LiveApiCaptureTests
 {
     // Free test parking — unlimited free sessions, safe to query. See docs/API-NOTES.md.

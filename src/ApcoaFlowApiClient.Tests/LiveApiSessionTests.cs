@@ -19,6 +19,7 @@ namespace ApcoaFlowApiClient.Tests;
 /// the normal suite — invoke explicitly.
 /// </summary>
 [Category("LiveApi")]
+[NotInParallel("LiveApi")]
 public class LiveApiSessionTests
 {
     // Search origin — Tarnowskie Góry; parking 616319 is a base-tariff, genuinely-free (0.00 PLN),
@@ -64,12 +65,27 @@ public class LiveApiSessionTests
     }
 
     /// <summary>
+    /// Before EVERY test in this class, end any session left ACTIVE by a previous run (or a crashed
+    /// test). The account allows only one active session at a time, so a leftover session would make a
+    /// fresh start fail with 424 LIMIT_EXCEEDED. Best-effort — failures here are logged, not thrown.
+    /// </summary>
+    [Before(Test)]
+    public Task EndAnyActiveSessionBefore() => SweepActiveSessionsAsync("pre-test");
+
+    /// <summary>
     /// Safety net: after EVERY test in this class, end any session left ACTIVE. This runs even if a
     /// test throws before its own cleanup, so a session-creating test can never leave a billable
     /// session running. Best-effort — failures here are logged, not thrown.
     /// </summary>
     [After(Test)]
-    public async Task EndAnyActiveSession()
+    public Task EndAnyActiveSession() => SweepActiveSessionsAsync("cleanup");
+
+    /// <summary>
+    /// Lists ACTIVE sessions and stops each one. Shared by the before/after hooks. A 422 on stop means
+    /// the session is already completing/finalized server-side (not actually stoppable) — that is a
+    /// success for our purposes (nothing is left active), so it is not treated as a failure.
+    /// </summary>
+    private static async Task SweepActiveSessionsAsync(string phase)
     {
         try
         {
@@ -85,17 +101,22 @@ public class LiveApiSessionTests
                         ParkingSessionId = s.Id,
                         SessionCheckOutTime = DateTimeOffset.UtcNow,
                     });
-                    Console.Error.WriteLine($"[session-test] cleanup: ended lingering ACTIVE session {s.Id} at {s.ParkingName}");
+                    Console.Error.WriteLine($"[session-test] {phase}: ended lingering ACTIVE session {s.Id} at {s.ParkingName}");
+                }
+                catch (ApiException ex) when ((int)ex.StatusCode == 422)
+                {
+                    // Already completing/finalized server-side — effectively stopped, so tolerate it.
+                    Console.Error.WriteLine($"[session-test] {phase}: session {s.Id} already finalizing (HTTP 422), treated as ended.");
                 }
                 catch (Exception ex)
                 {
-                    Console.Error.WriteLine($"[session-test] cleanup: FAILED to end session {s.Id}: {ex.Message}");
+                    Console.Error.WriteLine($"[session-test] {phase}: FAILED to end session {s.Id}: {ex.Message}");
                 }
             }
         }
         catch (Exception ex)
         {
-            Console.Error.WriteLine($"[session-test] cleanup: could not sweep active sessions: {ex.Message}");
+            Console.Error.WriteLine($"[session-test] {phase}: could not sweep active sessions: {ex.Message}");
         }
     }
 
