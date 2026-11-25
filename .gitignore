@@ -21,3 +21,6 @@ TestResults/
 # Claude Code local state
 .claude/settings.local.json
 .claude/worktrees/
+
+# ApcoaFlow.Sandbox dump output (contains live tokens — never commit)
+src/ApcoaFlow.Sandbox/out/

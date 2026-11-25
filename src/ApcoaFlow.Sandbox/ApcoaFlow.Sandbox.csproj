@@ -1,0 +1,28 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+    <PropertyGroup>
+        <TargetFramework>net10.0</TargetFramework>
+        <Nullable>enable</Nullable>
+        <ImplicitUsings>enable</ImplicitUsings>
+        <OutputType>Exe</OutputType>
+        <IsPackable>false</IsPackable>
+        <RootNamespace>ApcoaFlow.Sandbox</RootNamespace>
+        <AssemblyName>ApcoaFlow.Sandbox</AssemblyName>
+        <!-- Reuse the shared user-secrets store so ApcoaFlow:Email / ApcoaFlow:Password
+             are the same creds the test projects already use. -->
+        <UserSecretsId>545bc20f-94d7-4765-b2bc-396b3a2ecfc2</UserSecretsId>
+    </PropertyGroup>
+
+    <ItemGroup>
+        <PackageReference Include="Microsoft.Extensions.Configuration" />
+        <PackageReference Include="Microsoft.Extensions.Configuration.UserSecrets" />
+        <PackageReference Include="Microsoft.Extensions.Configuration.EnvironmentVariables" />
+        <PackageReference Include="Microsoft.Extensions.DependencyInjection" />
+    </ItemGroup>
+
+    <ItemGroup>
+        <ProjectReference Include="..\ApcoaFlowApiClient\ApcoaFlowApiClient.csproj" />
+        <ProjectReference Include="..\ApcoaFlowMcp\ApcoaFlowMcp.csproj" />
+    </ItemGroup>
+
+</Project>

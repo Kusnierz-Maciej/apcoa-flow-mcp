@@ -3,4 +3,5 @@
   <Project Path="ApcoaFlowApiClient.Tests/ApcoaFlowApiClient.Tests.csproj" />
   <Project Path="ApcoaFlowMcp/ApcoaFlowMcp.csproj" />
   <Project Path="ApcoaFlowMcp.Tests/ApcoaFlowMcp.Tests.csproj" />
+  <Project Path="ApcoaFlow.Sandbox/ApcoaFlow.Sandbox.csproj" />
 </Solution>

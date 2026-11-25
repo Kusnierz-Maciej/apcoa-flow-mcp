@@ -10,29 +10,38 @@ namespace ApcoaFlowApiClient;
 
 public static class ServiceCollectionExtensions
 {
-    public static IServiceCollection AddApcoaFlowApiClient(this IServiceCollection services)
+    public static IServiceCollection AddApcoaFlowApiClient(
+        this IServiceCollection services,
+        Action<IHttpClientBuilder>? configureClient = null)
     {
         services.AddSingleton<ApcoaFlowTokenStore>();
         services.AddTransient<ApcoaFlowAuthHandler>();
 
-        services
+        var builder = services
             .AddRefitClient<IApcoaFlowApi>()
             .ConfigureHttpClient(c => c.BaseAddress = new Uri(ApcoaFlowClientOptions.BaseUrl))
-            .AddHttpMessageHandler<ApcoaFlowAuthHandler>()
-            // Client-side rate limit (outermost handler) so we never hammer the backend and trip its
-            // 403 lockout. Token bucket: a short burst of up to 10 requests is allowed, then it settles
-            // to a long-run average of 1 request/second as tokens refill one per second. Requests over
-            // the limit queue (FIFO) rather than fail, so callers just slow down.
-            .AddResilienceHandler("apcoa-rate-limit", builder =>
-                builder.AddRateLimiter(new TokenBucketRateLimiter(new TokenBucketRateLimiterOptions
-                {
-                    TokenLimit = 10,
-                    TokensPerPeriod = 1,
-                    ReplenishmentPeriod = TimeSpan.FromSeconds(1),
-                    QueueProcessingOrder = QueueProcessingOrder.OldestFirst,
-                    QueueLimit = int.MaxValue,
-                    AutoReplenishment = true,
-                })));
+            .AddHttpMessageHandler<ApcoaFlowAuthHandler>();
+
+        // Client-side rate limit (outermost handler) so we never hammer the backend and trip its
+        // 403 lockout. Token bucket: a short burst of up to 10 requests is allowed, then it settles
+        // to a long-run average of 1 request/second as tokens refill one per second. Requests over
+        // the limit queue (FIFO) rather than fail, so callers just slow down.
+        builder.AddResilienceHandler("apcoa-rate-limit", rl =>
+            rl.AddRateLimiter(new TokenBucketRateLimiter(new TokenBucketRateLimiterOptions
+            {
+                TokenLimit = 10,
+                TokensPerPeriod = 1,
+                ReplenishmentPeriod = TimeSpan.FromSeconds(1),
+                QueueProcessingOrder = QueueProcessingOrder.OldestFirst,
+                QueueLimit = int.MaxValue,
+                AutoReplenishment = true,
+            })));
+
+        // Optional extension point: lets a caller (e.g. the diagnostic sandbox) append extra
+        // handlers to the client pipeline. Handlers added here land AFTER the built-in ones —
+        // i.e. innermost, closest to the socket — so a dump handler sees the fully-decorated
+        // request and fires once per physical send, including the auth handler's retry re-send.
+        configureClient?.Invoke(builder);
 
         return services;
     }
