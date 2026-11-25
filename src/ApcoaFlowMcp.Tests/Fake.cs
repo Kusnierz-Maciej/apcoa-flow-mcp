@@ -36,8 +36,9 @@ internal static class Fake
         ConsumerUserProfileList = [new ConsumerUserProfile { Id = ProfileId, IsDefault = 1 }],
     };
 
-    /// <summary>A single bookable lot with the given optional max duration (minutes).</summary>
-    public static List<ParkingLot> Lots(int? maxMinutes = null) =>
+    /// <summary>A single bookable lot with the given optional max duration (minutes). Includes
+    /// enableStopButton/allowRefund so the cancel/refund note is deterministic (default: can stop, no refund).</summary>
+    public static List<ParkingLot> Lots(int? maxMinutes = null, int enableStopButton = 1, int allowRefund = 0) =>
     [
         new ParkingLot
         {
@@ -47,15 +48,59 @@ internal static class Fake
                 Name = ParkingName,
                 TariffBasicInfoSet = [new TariffBasicInfo { TariffId = TariffId }],
             },
-            ParkingLotConfigurationResponse = maxMinutes is { } max
-                ? new ParkingLotConfiguration
-                {
-                    ParkingLotConfigurationList =
-                        [new ParkingLotConfigItem { MaxDuration = TimeSpan.FromMinutes(max) }],
-                }
-                : null,
+            ParkingLotConfigurationResponse = new ParkingLotConfiguration
+            {
+                ParkingLotConfigurationList =
+                [
+                    new ParkingLotConfigItem
+                    {
+                        MaxDuration = maxMinutes is { } max ? TimeSpan.FromMinutes(max) : TimeSpan.Zero,
+                        EnableStopButton = enableStopButton,
+                        AllowRefund = allowRefund,
+                    },
+                ],
+            },
         },
     ];
+
+    /// <summary>
+    /// A tariff grid like Carrefour TG lot 10584: FLAT 2 PLN for the first 60 min, +4 PLN per further
+    /// 60-min block, 50 PLN/day cap, no proration. amountInCents here is in 1/100-cent (÷10000 for PLN).
+    /// </summary>
+    public static TariffTemplatesResponse Tariff(int isProrationAllowed = 0) => new()
+    {
+        TariffTemplates =
+        [
+            new TariffTemplate
+            {
+                TariffId = TariffId,
+                ParkingLotId = LotId,
+                Name = "Taryfa podstawowa",
+                IsDefault = 1,
+                IsActive = 1,
+                IsProrationAllowed = isProrationAllowed,
+                Stacks =
+                [
+                    new TariffStack
+                    {
+                        Slots =
+                        [
+                            new TariffSlot
+                            {
+                                MaxMinutes = 1440,
+                                Grids =
+                                [
+                                    new TariffGrid { Type = "FLAT", AmountInCents = 20000, Duration = 60, Sequence = 1 },
+                                    new TariffGrid { Type = "INCREMENTAL", AmountInCents = 40000, Duration = 60, Sequence = 2 },
+                                ],
+                            },
+                        ],
+                        Maxima = [new TariffMaxima { Type = "DAY", AmountInCents = 500000, IsDurationBoss = 1 }],
+                    },
+                ],
+            },
+        ],
+    };
 
     /// <summary>An offers response, optionally carrying one active free-time promo.</summary>
     public static OffersResponse Offers(Offer? promo = null) =>
@@ -143,6 +188,8 @@ internal static class Fake
             .Returns(offers ?? Offers());
         api.GetTariffBreakdownAsync(Arg.Any<TariffBreakdownQuery>(), Arg.Any<CancellationToken>())
             .Returns(quote ?? Quote(0m));
+        api.GetTariffAsync(Arg.Any<int>(), Arg.Any<CancellationToken>())
+            .Returns(Tariff());
         api.StartParkingSessionAsync(Arg.Any<StartParkingSessionRequest>(), Arg.Any<CancellationToken>())
             .Returns(started ?? Started());
         api.ValidatePromotionAsync(Arg.Any<ValidatePromotionRequest>(), Arg.Any<CancellationToken>())
