@@ -52,6 +52,44 @@ authoritative check is `POST /promotion/validate`: a usable coupon returns 2xx; 
 trusting a promo-applied quote. (The `free_duration*` fields on the breakdown are always 0/empty in PL
 and are not a reliable signal either — use the base-tariff `totalPayableAmountInCents` to judge "free".)
 
+Concrete example (Carrefour Tarnowskie Góry, lot `10584`, coupon `FREE120PL2_4H` = 2 h free every 4 h):
+the breakdown "with promo" returns `discountType=percent, discountValue=10` (a trivial 10 % discount,
+NOT the free window; `freeTimeSlot:[]`, `freeDurationApplied:false`), while `promotion/validate`
+returns 422 `INVALID_PROMOTION_CODE`/5007 because the per-person 4 h usage window is still consumed.
+
+### `GET /tariff?parkingLotId=...` returns the full pricing grid (unit = 1/100 cent!)
+Confirmed live (2026-11-25). The response is **not** flat name/description — it is the whole rate grid:
+```
+{ "tariffTemplates": [ {
+    "tariffId", "parkingLotId", "name", "isDefault", "isActive",
+    "isProrationAllowed",            // 0 = early stop is NOT prorated/refunded
+    "freeDurationInMinutes",
+    "stacks": [ {
+      "slots": [ {
+        "startDay","startTime","endDay","endTime","maxMinutes","freeSlot",
+        "grids": [ { "type": "FLAT"|"INCREMENTAL", "amountInCents", "duration", "sequence" } ]
+      } ],
+      "maxima": [ { "type": "DAY", "amountInCents", "isDurationBoss" } ]
+    } ]
+} ] }
+```
+**UNIT GOTCHA:** `amountInCents` here is in **1/100 of a cent** — divide by **10000** (not 100) for the
+currency amount. Carrefour lot `10584`: FLAT `20000`/60 min = **2.00 PLN** first hour; INCREMENTAL
+`40000`/60 min = **+4.00 PLN** per further hour (so 90–120 min = 6.00 PLN); DAY maxima `500000` =
+**50.00 PLN/day**. Price tiers are derived from this grid (FLAT block + cumulative INCREMENTAL blocks,
+capped by the daily maximum). The iOS app does **not** call `/tariff`; it derives prices by probing
+`tariffBreakDownV2` at discrete durations — but the grid is the authoritative source.
+
+### Start charges immediately; early stop does not refund
+`POST /consumer/parkingSession` (start) **captures money immediately** — the response carries
+`transactionStatus:SUCCESSFUL` and `transactionAmount` (⚠ in **cents**, e.g. `200.0` = 2.00 PLN) and
+`sessionPaymentType:CAPTURE`. `PUT /consumer/parkingSession` (stop) returns the final amount nested at
+`parkingSession.amount` (PLN) — the **top-level `transactionAmount` is null** on stop. Ending a paid
+session early does **not** refund when the lot's `parkingLotConfiguration.allowRefund=0` (and tariff
+`isProrationAllowed=0`) — the remaining paid time is forfeited. `enableStopButton` says whether a
+session can be stopped at all. (Carrefour `10584`: `allowRefund:0`, `isProrationAllowed:0`,
+`enableStopButton:1`.)
+
 ---
 
 ## Parking Search — S3 Offline Data
@@ -100,7 +138,8 @@ externalId: string (the old external ID)
 ```
 
 **No pricing/tariff data in S3 files** — only location, metadata, and operational hours.
-Tariff info requires a separate API call: `GET /authentication/v1/tariff?parkingLotId=...`
+Tariff info requires a separate API call: `GET /authentication/v1/tariff?parkingLotId=...` — which
+returns the full pricing grid (see "`GET /tariff` returns the full pricing grid" above).
 
 ### Credentials in App Config
 The app config (`GET /authentication/v1/dashboard/tenant/appConfigByCompanyId/9?version=v3`) returns:
@@ -167,12 +206,14 @@ The following response shapes were NOT cleanly isolated from the WebProxyTool HA
 | Endpoint | Unknown fields |
 |---|---|
 | `GET /authentication/v1/consumer/parkingSessionV2` | Full `ParkingSessionV2` shape — `parkingName`? `tariffId`? `promotionId`? exact field names |
-| `PUT /authentication/v1/consumer/parkingSession` (stop) | Response body shape (assumed same as V2 session) |
 | `GET /authentication/v1/parking/{id}` | Full `ParkingDetail` — does it include `operationalHours`? `parkingLots`? `tariffId`? |
-| `GET /authentication/v1/parking/{id}/parkingLots` | Full `ParkingLot` shape — `tariffId`? `capacity`? `sessionType`? |
-| `GET /authentication/v1/tariff?parkingLotId=...` | Full `TariffInfo` shape — price ranges? max duration? currency? |
 | `POST /authentication/v2/promotion/applicableOffersWithPromotion` | Full `Offer` shape |
 | `GET /authentication/v1/consumers/favourite/parking` | Full `FavouriteParking` shape (may have more than 3 fields) |
+
+Resolved (confirmed live 2026-11-25):
+- `PUT /consumer/parkingSession` (stop) — final amount nested at `parkingSession.amount`; top-level `transactionAmount` null. See "Start charges immediately; early stop does not refund" above.
+- `GET /parking/{id}/parkingLots` — `parkingLotConfiguration` carries `enableStopButton`, `allowRefund`, `allowExtension`, `minDuration`/`maxDuration`, `durationPerRotationInMins`, `paygTariffRows`, `sessionIntervalInMins`.
+- `GET /tariff?parkingLotId=...` — full pricing grid; see "`GET /tariff` returns the full pricing grid" above (amountInCents is 1/100-cent, ÷10000 for PLN).
 
 ### Other TBD
 

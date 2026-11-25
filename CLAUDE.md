@@ -22,7 +22,10 @@ Each run writes `src/ApcoaFlow.Sandbox/out/<UTC-timestamp>/` containing one
 files there to analyse the issue.
 
 - Add a new probe by implementing `IScenario` (in `Scenarios/`) and registering it
-  in `ScenarioRegistry`.
+  in `ScenarioRegistry`. Existing scenarios each carry a WHAT/WHY/FOUND doc header:
+  `dump-sessions` (read-only account snapshot), `investigate-carrefour` (read-only:
+  lots, coupon, tariff breakdowns), `dump-tariff` (read-only: raw `/tariff` grid),
+  `capture-carrefour-paid-start` (**BILLABLE** — real paid start+stop).
 - The dump handler is attached as the innermost pipeline handler via the optional
   `configureClient` hook on `AddApcoaFlowApiClient`, so it captures each physical
   send — including the auth handler's 419/401 retry re-send.

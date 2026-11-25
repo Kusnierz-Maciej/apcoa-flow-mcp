@@ -10,8 +10,8 @@ Unofficial MCP server for [APCOA Flow](https://www.apcoa.pl/krotkotrwale-parkowa
 | `get_registered_cars` | License plates registered on the account, with the default flagged. |
 | `get_active_sessions` | Currently running session(s), or a message if none. |
 | `get_session_history` | Recent completed sessions, most recent first, with cost. |
-| `start_session` | Start a session at a parking (by id) for a plate. **May cost money.** Free starts immediately; paid returns the cost and requires a second call with the exact `confirmedCostPln`. Resolves lot/tariff automatically, auto-applies free-time promotions (filling the whole free window), and enforces a max-cost cap. |
-| `start_free_session` | Start a session at a parking only if it is actually **free** (auto-applies a free-time promotion); refused if it would cost anything. Never charges — the safe default. |
+| `start_session` | Start a session at a parking (by id) for a plate. **May cost money.** Free starts immediately. If paid, it does **not** start on the first call: it returns the **shortest available duration and its price**, the other price options, and a note on whether stopping early refunds — then you confirm by calling again with both `durationMinutes` (the option you chose) and the exact `confirmedCostPln`. Resolves lot/tariff automatically, auto-applies a free-time promotion **only when it validates as usable** (filling the free window), and enforces a max-cost cap. |
+| `start_free_session` | Start a session at a parking only if it is actually **free** (auto-applies a validated free-time promotion). Never charges. If no free tier is available it starts nothing and instead reports the price options and suggests `start_session`. |
 | `start_session_current_location` | Like `start_session` (may cost money), but at the closest parking to a given GPS location within a radius (metres, default 300). |
 | `start_free_session_current_location` | Free-only variant of the above — closest parking by location, started only if free. |
 | `start_expensive_session` | Same as `start_session` but bypasses the max-cost cap (separate tool so it can be permissioned independently). |
