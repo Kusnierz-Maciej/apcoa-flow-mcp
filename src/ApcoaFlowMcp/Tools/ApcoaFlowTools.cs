@@ -83,15 +83,16 @@ public sealed class ApcoaFlowTools(
     [Description(
         "Start a parking session at a parking (by id, from find_parking) for a registered license plate. " +
         "May cost money. FREE sessions start immediately. PAID sessions do NOT start on the first call: the " +
-        "tool returns the cost, and you must confirm by calling again with confirmedCostPln set to EXACTLY " +
-        "that cost (it must match the live cost precisely, or the start is refused). Enforces a maximum cost " +
-        "limit. Always confirm parking, plate, and cost with the user before confirming a paid session. " +
-        "(To guarantee a free-only start, use start_free_session instead.)")]
+        "tool returns the SHORTEST available duration and its price, plus the other price options, and a note " +
+        "on whether stopping early refunds. To start, call again with BOTH durationMinutes (the option you " +
+        "chose) and confirmedCostPln set to EXACTLY that option's price (it must match the live cost, or the " +
+        "start is refused). Enforces a maximum cost limit. Always confirm parking, plate, duration, and cost " +
+        "with the user before confirming a paid session. (To guarantee a free-only start, use start_free_session.)")]
     public async Task<string> StartSessionAsync(
         [Description("Parking id (from find_parking)")] int parkingId,
         [Description("Registered license plate, e.g. \"ABC 123DE\" (see get_registered_cars)")] string licensePlate,
-        [Description("Desired duration in minutes. Omit to use the server's default duration. If a free-time promotion applies and this is shorter than the free window, it is rounded up to the full free window so none of the free time is wasted.")] int? durationMinutes = null,
-        [Description("For a PAID session: the exact cost in PLN you are confirming (from a prior call's quote). Must match the live cost exactly. Omit on the first call.")] decimal? confirmedCostPln = null,
+        [Description("Desired duration in minutes. Omit to use the server's default. Only rounded up to a free-time promotion's window when that promotion actually validates as usable; otherwise your exact requested duration is quoted.")] int? durationMinutes = null,
+        [Description("For a PAID session: the exact cost in PLN you are confirming (the chosen option's price from a prior call's quote). Must match the live cost exactly. Omit on the first call.")] decimal? confirmedCostPln = null,
         CancellationToken ct = default)
     {
         var result = await sessions.StartAsync(
@@ -104,8 +105,8 @@ public sealed class ApcoaFlowTools(
     [Description(
         "Start a FREE parking session at a parking (by id, from find_parking) for a registered license plate. " +
         "Auto-applies an active free-time promotion and starts only if the session is actually free (cost 0); " +
-        "if it would cost anything, it is refused and nothing is started. Safe: this tool never incurs a charge. " +
-        "Use start_session for anything that may be paid.")]
+        "if it would cost anything, nothing is started and the response instead reports the price options and " +
+        "suggests using start_session for a paid session. Safe: this tool never incurs a charge.")]
     public async Task<string> StartFreeSessionAsync(
         [Description("Parking id (from find_parking)")] int parkingId,
         [Description("Registered license plate, e.g. \"ABC 123DE\" (see get_registered_cars)")] string licensePlate,
@@ -122,9 +123,10 @@ public sealed class ApcoaFlowTools(
     [Description(
         "Start a parking session at the closest parking to the user's current GPS location (within a " +
         "search radius), for a registered license plate. May cost money. Same FREE/PAID behaviour as " +
-        "start_session: free starts immediately; paid returns the cost and needs a second call with " +
-        "confirmedCostPln set to EXACTLY that cost. Use this when the user wants to park 'here'/'where I am'. " +
-        "(To guarantee a free-only start here, use start_free_session_current_location.)")]
+        "start_session: free starts immediately; paid returns the shortest option + the other price " +
+        "options + a cancel/refund note, and needs a second call with the chosen durationMinutes and " +
+        "confirmedCostPln set to EXACTLY that option's cost. Use this when the user wants to park " +
+        "'here'/'where I am'. (To guarantee a free-only start here, use start_free_session_current_location.)")]
     public async Task<string> StartSessionCurrentLocationAsync(
         [Description("Your current latitude (decimal degrees)")] double latitude,
         [Description("Your current longitude (decimal degrees)")] double longitude,
@@ -145,8 +147,9 @@ public sealed class ApcoaFlowTools(
     [Description(
         "Start a FREE parking session at the closest parking to the user's current GPS location (within a " +
         "search radius), for a registered license plate. Auto-applies an active free-time promotion and " +
-        "starts only if the session is actually free; refused (nothing started) if it would cost anything. Safe: " +
-        "never incurs a charge. Use this for 'park free here/where I am'.")]
+        "starts only if the session is actually free; if it would cost anything nothing is started and the " +
+        "response reports the price options and suggests start_session_current_location for a paid session. " +
+        "Safe: never incurs a charge. Use this for 'park free here/where I am'.")]
     public async Task<string> StartFreeSessionCurrentLocationAsync(
         [Description("Your current latitude (decimal degrees)")] double latitude,
         [Description("Your current longitude (decimal degrees)")] double longitude,
@@ -206,6 +209,11 @@ public sealed class ApcoaFlowTools(
         }
 
         sb.Append(r.Message);
+
+        // Cancel/refund note — useful before confirming a paid start, and after starting (so the user
+        // knows whether finishing early would refund). Appended to both quote and started results.
+        if (!string.IsNullOrEmpty(r.CancelRefundNote))
+            sb.Append(' ').Append(r.CancelRefundNote);
 
         if (!r.Started)
             return sb.ToString();

@@ -159,9 +159,13 @@ public interface IApcoaFlowApi
     // Tariff & pricing
     // -------------------------------------------------------------------------
 
-    /// <summary>Returns tariff info for a parking lot.</summary>
+    /// <summary>
+    /// Returns the full tariff pricing grid for a parking lot (templates → stacks → slots → grids),
+    /// from which exact price tiers can be derived. See <see cref="TariffTemplatesResponse"/> for the
+    /// 1/100-cent unit gotcha.
+    /// </summary>
     [Get("/authentication/v1/tariff")]
-    Task<TariffInfo> GetTariffAsync([Query] int parkingLotId, CancellationToken ct = default);
+    Task<TariffTemplatesResponse> GetTariffAsync([Query] int parkingLotId, CancellationToken ct = default);
 
     /// <summary>
     /// Returns an itemised cost breakdown for the given duration/window.

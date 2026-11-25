@@ -79,4 +79,10 @@ public class ParkingLotConfigItem
     public TimeSpan ExtensionInterval { get; set; }
 
     public string? BookingButtonText { get; set; }
+
+    /// <summary>1 when an active session can be stopped early at all.</summary>
+    public int EnableStopButton { get; set; }
+
+    /// <summary>1 when stopping early refunds (fully or prorated); 0 = no refund (remaining time forfeited).</summary>
+    public int AllowRefund { get; set; }
 }

@@ -1,5 +1,6 @@
 using ApcoaFlowApiClient;
 using ApcoaFlowApiClient.Models.Consumer;
+using ApcoaFlowApiClient.Models.Parking;
 using ApcoaFlowApiClient.Models.Promotion;
 using ApcoaFlowApiClient.Models.Session;
 using ApcoaFlowApiClient.Models.Tariff;
@@ -41,7 +42,19 @@ public sealed class ApcoaFlowSessionService(IApcoaFlowApi api, IApcoaParkingData
 
         /// <summary>When non-null, there is already an active session at this parking.</summary>
         public ParkingSessionV2? ExistingSession { get; init; }
+
+        /// <summary>
+        /// Price tiers for this lot (shortest first), populated when a start is NOT free so the caller
+        /// can pick a duration. Empty when the session is free or no ladder was computed.
+        /// </summary>
+        public IReadOnlyList<PriceTier> PriceLadder { get; init; } = [];
+
+        /// <summary>Short note on whether the session can be stopped early and whether that refunds.</summary>
+        public string? CancelRefundNote { get; init; }
     }
+
+    /// <summary>One price option: a duration and the total cost to park for it.</summary>
+    public sealed record PriceTier(int Minutes, decimal Pln);
 
     public enum StartMode { Normal, OnlyFree }
 
@@ -118,7 +131,13 @@ public sealed class ApcoaFlowSessionService(IApcoaFlowApi api, IApcoaParkingData
         if (consumer.DefaultProfileId is not { } profileId)
             return Refused("No consumer profile is available on the account.");
 
-        // 3. Find an active free-time promotion for this lot (needed for OnlyFree; opportunistic otherwise).
+        // 3. Find an active free-time promotion for this lot, then VALIDATE it BEFORE using it to
+        //    decide the duration. The tariff breakdown applies a promo optimistically even when it is
+        //    actually unusable (expired/used-up/on cooldown — e.g. the "every 4h" coupon returns 422
+        //    INVALID_PROMOTION_CODE / 5007 and the breakdown then only gives a small % discount, not
+        //    the free window). Validating first means an UNUSABLE promo never inflates the requested
+        //    duration to its free window, so a 60-min request stays 60 min at the real price instead
+        //    of being quoted the (unavailable) 120-min free-window tier.
         var offers = await api.GetApplicableOffersV2Async(new ApplicableOffersV2Request
         {
             ParkingLot = lotId,
@@ -127,22 +146,38 @@ public sealed class ApcoaFlowSessionService(IApcoaFlowApi api, IApcoaParkingData
         }, ct);
         var promo = offers.Entities.FirstOrDefault(o => o.IsActiveFreeTime);
 
-        // 4. Decide the duration.
-        //    When a free-time promo applies, always fill the whole free window (a free coupon is
-        //    one-use, so never waste part of it): a request shorter than the free window is rounded
-        //    UP to it, and OnlyFree rejects a request longer than it. Everything stays capped by the
-        //    lot's max duration.
+        var checkIn = DateTimeOffset.UtcNow;
         var requested = durationMinutes is { } dm ? TimeSpan.FromMinutes(dm) : (TimeSpan?)null;
+
+        // Validate against the duration we would actually use with the promo (its free window, capped),
+        // which is what the real start would request.
+        if (promo?.FreeWindow is { } fw)
+        {
+            var validateWindow = fw <= maxLot ? fw : maxLot;
+            if (!await PromotionValidatesAsync(promo, lotId, vehicle.VehicleNumber, consumer.Id, checkIn, validateWindow, ct))
+                promo = null;
+        }
+
+        // Cancel / refund note for this lot+tariff (so the user knows if stopping early refunds).
+        var cancelNote = await BuildCancelRefundNoteAsync(lotId, lot, ct);
+
+        // 4. Decide the duration — only a VALIDATED free-time promo expands the window.
+        //    With a usable promo, fill the whole free window (a one-use coupon should not be wasted):
+        //    a shorter request rounds UP to it; OnlyFree rejects a longer request. Capped by lot max.
         TimeSpan window;
         if (mode == StartMode.OnlyFree)
         {
             if (promo?.FreeWindow is not { } freeWindow)
-                return Tag(Refused($"No active free-parking promotion is available for parking {parkingId}."));
+            {
+                // No usable free tier: refuse, but INCLUDE pricing + point to the paid tool.
+                var ladder = await BuildPriceLadderAsync(tariffId, lotId, checkIn, vehicle.VehicleNumber, consumer.Id, maxLot, ct);
+                var msg = FormatNoFreeMessage(parkingId, ladder);
+                return Tag(Refused(msg)) with { PriceLadder = ladder, CancelRefundNote = cancelNote };
+            }
 
             if (requested is { } r && r > freeWindow)
-                return Tag(Refused($"Requested {r.TotalMinutes:0} min exceeds the free window of {freeWindow.TotalMinutes:0} min for this parking."));
+                return Tag(Refused($"Requested {r.TotalMinutes:0} min exceeds the free window of {freeWindow.TotalMinutes:0} min for this parking.")) with { CancelRefundNote = cancelNote };
 
-            // Fill the whole free window (round a shorter request up to it).
             window = requested is { } rq && rq > freeWindow ? rq : freeWindow;
             window = window <= maxLot ? window : maxLot;
         }
@@ -150,27 +185,13 @@ public sealed class ApcoaFlowSessionService(IApcoaFlowApi api, IApcoaParkingData
         {
             window = requested ?? TimeSpan.FromMinutes(DefaultDurationMinutes);
 
-            // If a free promo applies, never park for less than the full free window — fill the slot,
-            // then any paid overage runs after it.
             if (promo?.FreeWindow is { } freeWindow && window < freeWindow)
                 window = freeWindow;
 
             window = window <= maxLot ? window : maxLot;
         }
 
-        var checkIn = DateTimeOffset.UtcNow;
         var checkOut = checkIn.Add(window);
-
-        // 5. If a promo applies, VALIDATE it before trusting it. The tariff breakdown (step 6) will
-        //    optimistically zero out the price for a promo even when that promo is actually unusable
-        //    (expired/used-up/not-valid-for-this-account), and the real start then charges full price.
-        //    The promotion/validate endpoint is the authoritative check: a usable coupon returns a 2xx
-        //    whose body carries no error signal; an unusable one returns a non-2xx (e.g. 422
-        //    INVALID_PROMOTION_CODE / 5007) OR a 2xx body that still carries an error code/message.
-        //    If validation does not clearly succeed, DROP the promo and fall back to the base price so
-        //    the quote reflects what will really be charged.
-        if (promo is not null && !await PromotionValidatesAsync(promo, lotId, vehicle.VehicleNumber, consumer.Id, checkIn, window, ct))
-            promo = null;
 
         // 6. Quote the final (promo-applied) price.
         var quote = await QuoteAsync(tariffId, lotId, window, checkIn, vehicle.VehicleNumber, promo, consumer.Id, ct);
@@ -183,29 +204,41 @@ public sealed class ApcoaFlowSessionService(IApcoaFlowApi api, IApcoaParkingData
             ? $" A {fm}-min free promotion ('{promo.Name}') is applied, so you are only charged for the time beyond it."
             : string.Empty;
 
-        // OnlyFree must actually be free.
+        // OnlyFree must actually be free (a validated promo can still leave paid overage if the
+        // request exceeds the free window).
         if (mode == StartMode.OnlyFree && !quote.IsFree)
-            return Tag(Refused($"This parking is not free for {minutes} min (cost {costPln:0.00} PLN) even with promotions."));
+        {
+            var ladder = await BuildPriceLadderAsync(tariffId, lotId, checkIn, vehicle.VehicleNumber, consumer.Id, maxLot, ct);
+            return Tag(Refused(FormatNoFreeMessage(parkingId, ladder))) with { PriceLadder = ladder, CancelRefundNote = cancelNote };
+        }
 
         // 7. Free → start now. Paid → require confirmation and the cap.
         if (!quote.IsFree)
         {
+            // Build the price ladder once, so every paid branch can show the options.
+            var ladder = await BuildPriceLadderAsync(tariffId, lotId, checkIn, vehicle.VehicleNumber, consumer.Id, maxLot, ct);
+
+            StartResult PaidQuote(string message) =>
+                Tag(new StartResult(false, costPln, minutes, promo?.Name, promo?.FreeMinutes, message, null))
+                    with { PriceLadder = ladder, CancelRefundNote = cancelNote };
+
             if (!bypassCap && costPln > maxCostPln)
-                return Tag(new StartResult(false, costPln, minutes, promo?.Name, promo?.FreeMinutes,
-                    $"Cost {costPln:0.00} PLN exceeds the limit of {maxCostPln:0.00} PLN. Use start_expensive_session to override.{freeNote}",
-                    null));
+                return PaidQuote($"Cost {costPln:0.00} PLN for {minutes} min exceeds the limit of {maxCostPln:0.00} PLN. Use start_expensive_session to override.{freeNote}{FormatLadderSuffix(ladder)}");
 
             if (confirmedCostPln is null)
-                return Tag(new StartResult(false, costPln, minutes, promo?.Name, promo?.FreeMinutes,
-                    $"This is a PAID session: {costPln:0.00} PLN for {minutes} min. Re-invoke with confirmedCostPln={costPln:0.00} to start.{freeNote}",
-                    null));
+            {
+                // Lead with the SHORTEST startable option, then list the rest, and tell the caller to
+                // re-invoke with the chosen durationMinutes + confirmedCostPln.
+                var shortest = ladder.Count > 0 ? ladder[0] : new PriceTier(minutes, costPln);
+                return PaidQuote(
+                    $"This is a PAID session. Shortest option: {shortest.Minutes} min = {shortest.Pln:0.00} PLN. " +
+                    $"Re-invoke with durationMinutes={shortest.Minutes} and confirmedCostPln={shortest.Pln:0.00} to start.{freeNote}{FormatLadderSuffix(ladder)}");
+            }
 
             // The confirmed cost must match the live cost exactly — refuse if it differs either way
             // (price changed, promo expired, or a stale/guessed confirmation).
             if (costPln != confirmedCostPln.Value)
-                return Tag(new StartResult(false, costPln, minutes, promo?.Name, promo?.FreeMinutes,
-                    $"Live cost {costPln:0.00} PLN does not match the confirmed {confirmedCostPln.Value:0.00} PLN; not starting. Re-confirm with the exact current cost.{freeNote}",
-                    null));
+                return PaidQuote($"Live cost {costPln:0.00} PLN for {minutes} min does not match the confirmed {confirmedCostPln.Value:0.00} PLN; not starting. Re-confirm with the exact current cost.{freeNote}{FormatLadderSuffix(ladder)}");
         }
 
         // 8. Start the session.
@@ -271,7 +304,8 @@ public sealed class ApcoaFlowSessionService(IApcoaFlowApi api, IApcoaParkingData
 
         var kind = quote.IsFree ? "free" : $"{costPln:0.00} PLN";
         return Tag(new StartResult(true, costPln, minutes, promo?.Name, promo?.FreeMinutes,
-            $"Started a {kind} session for {minutes} min on parking {parkingId}.", response));
+            $"Started a {kind} session for {minutes} min on parking {parkingId}.", response))
+            with { CancelRefundNote = cancelNote };
     }
 
     /// <summary>Stops a session and returns the final (completed) session with its cost.</summary>
@@ -297,6 +331,142 @@ public sealed class ApcoaFlowSessionService(IApcoaFlowApi api, IApcoaParkingData
         (await api.GetConsumerAsync(ct: ct)).VehicleInformationResponses;
 
     // -------------------------------------------------------------------------
+
+    /// <summary>
+    /// Builds the price ladder (shortest first) for a lot by quoting a set of candidate durations with
+    /// NO promotion and collapsing consecutive equal prices to the shortest duration at that price. The
+    /// candidate durations come from the lot's own tariff grid when available (block boundaries), else a
+    /// default ladder. Everything is capped at <paramref name="maxLot"/>. A duration that quotes to 0 is
+    /// kept (it signals a free tier). Any quote that throws is skipped.
+    /// </summary>
+    private async Task<IReadOnlyList<PriceTier>> BuildPriceLadderAsync(
+        int tariffId, int lotId, DateTimeOffset checkIn, string plate, int consumerId, TimeSpan maxLot, CancellationToken ct)
+    {
+        var candidates = await CandidateDurationsAsync(lotId, maxLot, ct);
+
+        var tiers = new List<PriceTier>();
+        decimal? lastPln = null;
+        foreach (var minutes in candidates)
+        {
+            TariffBreakdown quote;
+            try
+            {
+                quote = await QuoteAsync(tariffId, lotId, TimeSpan.FromMinutes(minutes), checkIn, plate, promo: null, consumerId, ct);
+            }
+            catch (Refit.ApiException)
+            {
+                continue; // this duration isn't quotable — skip it rather than fail the whole ladder
+            }
+
+            var pln = quote.TotalPayablePln;
+            // Collapse: only record a tier when the price changes (so 30&60→60=2 PLN boundary).
+            if (lastPln is { } lp && lp == pln)
+                continue;
+            tiers.Add(new PriceTier(minutes, pln));
+            lastPln = pln;
+        }
+
+        return tiers;
+    }
+
+    /// <summary>
+    /// Candidate ladder durations (minutes) to quote. Prefers the lot's tariff grid block boundaries
+    /// (FLAT duration, then cumulative INCREMENTAL blocks up to the day) so boundaries are exact; falls
+    /// back to a fixed ladder if the tariff can't be read. All capped at <paramref name="maxLot"/>.
+    /// </summary>
+    private async Task<IReadOnlyList<int>> CandidateDurationsAsync(int lotId, TimeSpan maxLot, CancellationToken ct)
+    {
+        var fallback = new[] { 15, 30, 60, 90, 120, 180, 240 };
+        var cap = maxLot == TimeSpan.MaxValue ? int.MaxValue : (int)maxLot.TotalMinutes;
+
+        try
+        {
+            var tariff = await api.GetTariffAsync(lotId, ct);
+            var template = tariff?.TariffTemplates.FirstOrDefault(t => t.IsActive == 1 && t.IsDefault == 1)
+                           ?? tariff?.TariffTemplates.FirstOrDefault(t => t.IsActive == 1)
+                           ?? tariff?.TariffTemplates.FirstOrDefault();
+            var slot = template?.Stacks.FirstOrDefault()?.Slots.FirstOrDefault();
+            if (slot is not null && slot.Grids.Count > 0)
+            {
+                // Derive block boundaries: the cumulative end minute of the FLAT block and of each
+                // following INCREMENTAL block, capped at the slot/lot max. Quoting at each boundary
+                // captures the price step at that tier.
+                var ordered = slot.Grids.OrderBy(g => g.Sequence).ToList();
+                var bounds = new SortedSet<int>();
+                var cursor = 0;
+                foreach (var g in ordered)
+                {
+                    if (g.Duration <= 0) continue;
+                    cursor += g.Duration;
+                    bounds.Add(cursor);
+                }
+                var slotMax = slot.MaxMinutes is { } mm && mm > 0 ? mm : cap;
+                var result = bounds.Where(m => m <= Math.Min(cap, slotMax)).OrderBy(m => m).ToList();
+                if (result.Count > 0)
+                    return result;
+            }
+        }
+        catch (Refit.ApiException)
+        {
+            // fall through to the fixed ladder
+        }
+
+        return fallback.Where(m => m <= cap).ToArray();
+    }
+
+    /// <summary>Renders the non-shortest tiers as a trailing " Other options: …" clause (empty if ≤1 tier).</summary>
+    private static string FormatLadderSuffix(IReadOnlyList<PriceTier> ladder)
+    {
+        if (ladder.Count <= 1) return string.Empty;
+        var rest = ladder.Skip(1).Select(t => $"{t.Minutes} min = {t.Pln:0.00} PLN");
+        return " Other options: " + string.Join("; ", rest) + ".";
+    }
+
+    /// <summary>Message for a free-only request at a parking that has no usable free tier: states it is
+    /// not free, shows pricing, and points at the paid tool.</summary>
+    private static string FormatNoFreeMessage(int parkingId, IReadOnlyList<PriceTier> ladder)
+    {
+        if (ladder.Count == 0)
+            return $"No free parking is available at parking {parkingId}, and no price could be quoted. Use start_session to start a paid session.";
+        var shortest = ladder[0];
+        return $"No free parking is available at parking {parkingId}. Shortest paid option: {shortest.Minutes} min = {shortest.Pln:0.00} PLN." +
+               FormatLadderSuffix(ladder) + " Use start_session to start a paid session.";
+    }
+
+    /// <summary>
+    /// Builds a short note on whether an early stop is possible and whether it refunds, from the lot's
+    /// config (allowRefund / enableStopButton) and the tariff's proration flag. Best-effort: returns
+    /// null if nothing can be determined.
+    /// </summary>
+    private async Task<string?> BuildCancelRefundNoteAsync(int lotId, ParkingLot lot, CancellationToken ct)
+    {
+        var cfg = lot.PrimaryConfig;
+        var refunds = cfg?.AllowRefund == 1;
+
+        bool? prorated = null;
+        try
+        {
+            var tariff = await api.GetTariffAsync(lotId, ct);
+            var template = tariff?.TariffTemplates.FirstOrDefault(t => t.IsActive == 1) ?? tariff?.TariffTemplates.FirstOrDefault();
+            if (template is not null) prorated = template.IsProrationAllowed == 1;
+        }
+        catch (Refit.ApiException)
+        {
+            // leave proration unknown
+        }
+
+        // Only assert "cannot stop" when the config explicitly says so (0). If config is missing, don't
+        // over-claim; fall through to the refund wording.
+        if (cfg is not null && cfg.EnableStopButton == 0 && cfg.AllowRefund == 0)
+            return "Early stop: this parking may not allow stopping early; no refund of remaining time.";
+
+        if (refunds)
+            return prorated == true
+                ? "Early stop: allowed, with a prorated (partial) refund for unused time."
+                : "Early stop: allowed, with a refund.";
+
+        return "Early stop: allowed, but NO refund — the remaining paid time is forfeited.";
+    }
 
     private Task<TariffBreakdown> QuoteAsync(
         int tariffId, int lotId, TimeSpan window, DateTimeOffset checkIn,
