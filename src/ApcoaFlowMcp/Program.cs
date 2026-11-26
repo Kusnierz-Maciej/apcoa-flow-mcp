@@ -4,7 +4,7 @@ using ApcoaFlowMcp.Apcoa;
 using ApcoaFlowMcp.Security;
 using ApcoaFlowMcp.Security.OAuth;
 using ApcoaFlowMcp.Tools;
-using Microsoft.AspNetCore.DataProtection;
+using Microsoft.AspNetCore.HttpOverrides;
 using OpenTelemetry.Logs;
 using OpenTelemetry.Resources;
 using OpenTelemetry.Trace;
@@ -58,27 +58,28 @@ builder.Services.AddScoped<ApcoaFlowSessionService>();
 // OAuth authorization: API-key allowlist + encrypted stateless tokens carrying the APCOA credentials.
 builder.Services.Configure<SecurityOptions>(builder.Configuration.GetSection("Security"));
 builder.Services.AddSingleton<ApiKeyAllowlist>();
-builder.Services.AddSingleton<CredentialTokenService>();
 
-// Data Protection seeds token encryption. Persist keys to a stable directory and derive from the
-// configured TokenSecret so tokens survive restarts and are stable across replicas.
-var dpBuilder = builder.Services.AddDataProtection().SetApplicationName("ApcoaFlowMcp");
+// Token encryption derives its key deterministically from Security:TokenSecret — nothing is
+// persisted to disk, so tokens survive restarts/replicas and the secret alone controls validity.
 var tokenSecret = builder.Configuration["Security:TokenSecret"];
 
-// HTTP mode fails fast if the OAuth token secret is missing or left at the .env.example placeholder —
-// a known secret would let anyone forge session tokens carrying arbitrary APCOA credentials.
+// HTTP mode fails fast if the OAuth token secret is missing, the .env.example placeholder, or too
+// short — a known or weak secret would let anyone forge session tokens carrying arbitrary APCOA
+// credentials, and it is the sole key source for token encryption.
 const string PlaceholderTokenSecret = "change-me-to-a-long-random-secret";
-if (string.IsNullOrWhiteSpace(tokenSecret) || tokenSecret == PlaceholderTokenSecret)
+const int MinTokenSecretLength = 32;
+if (string.IsNullOrWhiteSpace(tokenSecret) || tokenSecret == PlaceholderTokenSecret
+    || tokenSecret.Length < MinTokenSecretLength)
 {
     Console.Error.WriteLine(
-        "FATAL: Security__TokenSecret is not set (or still the placeholder). Set it to a long, " +
-        "random, stable secret before starting the HTTP server. See docker/.env.example.");
+        $"FATAL: Security__TokenSecret must be set to a long (>= {MinTokenSecretLength} chars), random, " +
+        "stable secret before starting the HTTP server. It is the sole key for OAuth token encryption. " +
+        "See docker/.env.example.");
     Environment.ExitCode = 1;
     return;
 }
 
-if (!string.IsNullOrWhiteSpace(tokenSecret))
-    dpBuilder.PersistKeysToFileSystem(new DirectoryInfo(DataProtectionKeyDir(tokenSecret)));
+builder.Services.AddSingleton(new CredentialTokenService(tokenSecret));
 
 builder.Services
     .AddMcpServer(options => options.ServerInstructions = McpInstructions.Text)
@@ -86,6 +87,17 @@ builder.Services
     .WithTools<ApcoaFlowTools>();
 
 var app = builder.Build();
+
+// Honor X-Forwarded-Proto/Host from the reverse proxy that terminates TLS, so Request.Scheme is
+// "https" and the OAuth discovery metadata advertises https:// endpoints. The container is only
+// reachable via the proxy, so the single forwarding hop is trusted (no known-proxy restriction).
+var forwardedHeaders = new ForwardedHeadersOptions
+{
+    ForwardedHeaders = ForwardedHeaders.XForwardedProto | ForwardedHeaders.XForwardedHost,
+};
+forwardedHeaders.KnownIPNetworks.Clear();
+forwardedHeaders.KnownProxies.Clear();
+app.UseForwardedHeaders(forwardedHeaders);
 
 app.UseMiddleware<RequestLoggingMiddleware>();
 
@@ -107,11 +119,3 @@ app.Logger.LogInformation("ApcoaFlowMcp v{Version} starting",
     typeof(Program).Assembly.GetName().Version?.ToString(3) ?? "unknown");
 
 app.Run();
-
-// Derives a per-secret key directory so changing TokenSecret rotates (invalidates) all tokens.
-static string DataProtectionKeyDir(string secret)
-{
-    var hash = Convert.ToHexString(
-        System.Security.Cryptography.SHA256.HashData(System.Text.Encoding.UTF8.GetBytes(secret)))[..16];
-    return Path.Combine(Path.GetTempPath(), "apcoaflow-mcp-dpkeys", hash);
-}

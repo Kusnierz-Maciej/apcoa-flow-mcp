@@ -1,6 +1,5 @@
 using ApcoaFlowMcp.Security;
 using ApcoaFlowMcp.Security.OAuth;
-using Microsoft.AspNetCore.DataProtection;
 using Microsoft.Extensions.Options;
 
 namespace ApcoaFlowMcp.Tests;
@@ -11,8 +10,10 @@ namespace ApcoaFlowMcp.Tests;
 /// </summary>
 public class OAuthTests
 {
-    private static CredentialTokenService NewTokenService() =>
-        new(new EphemeralDataProtectionProvider());
+    private const string Secret = "test-token-secret-at-least-32-chars-long";
+
+    private static CredentialTokenService NewTokenService(string secret = Secret) =>
+        new(secret);
 
     private static TokenPayload Access(string apiKey = "key-1") =>
         new(TokenKind.Access, "user@example.com", "pw", CredentialTokenService.HashApiKey(apiKey), null, null);
@@ -65,6 +66,30 @@ public class OAuthTests
         await Assert.That(svc.TryUnprotect("not-a-token", TokenKind.Access)).IsNull();
         await Assert.That(svc.TryUnprotect("", TokenKind.Access)).IsNull();
         await Assert.That(svc.TryUnprotect(null, TokenKind.Access)).IsNull();
+    }
+
+    [Test]
+    public async Task Token_SameSecret_DecryptsAcrossInstances()
+    {
+        // Restart / replica simulation: a fresh service built from the same secret (no shared state,
+        // nothing on disk) must decrypt a token the first one issued.
+        var issuer = NewTokenService();
+        var token = issuer.Protect(Access(), TimeSpan.FromHours(1));
+
+        var other = NewTokenService();
+        var back = other.TryUnprotect(token, TokenKind.Access);
+
+        await Assert.That(back).IsNotNull();
+        await Assert.That(back!.Email).IsEqualTo("user@example.com");
+    }
+
+    [Test]
+    public async Task Token_DifferentSecret_IsRejected()
+    {
+        // Changing the secret must invalidate every issued token (the only validity knob).
+        var token = NewTokenService("secret-A-at-least-32-chars-long-padding").Protect(Access(), TimeSpan.FromHours(1));
+        var other = NewTokenService("secret-B-at-least-32-chars-long-padding");
+        await Assert.That(other.TryUnprotect(token, TokenKind.Access)).IsNull();
     }
 
     // ─── ApiKeyAllowlist ───────────────────────────────────────────────────────────────────────────

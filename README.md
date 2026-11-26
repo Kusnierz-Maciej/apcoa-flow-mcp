@@ -44,8 +44,9 @@ The three auth methods:
    endpoints and opens a login screen where the user enters an **API key** (from
    `Security__AllowedApiKeys`) plus their **own APCOA email + password**. Credentials are validated
    against APCOA at login and then stored only inside an encrypted, client-held session token — never on
-   the server. Requires `Security__TokenSecret`. Removing a key from `Security__AllowedApiKeys` and
-   restarting ends every session created with it.
+   the server. Requires `Security__TokenSecret` (min 32 chars) — the key that secures those tokens;
+   keep it stable, and note that **changing it invalidates every issued token**. Removing a key from
+   `Security__AllowedApiKeys` and restarting likewise ends every session created with it.
 2. **`X-Api-Key` + `Authorization: Basic`** *(HTTP)* — for clients that support custom headers. The
    `X-Api-Key` must match a configured key; the `Basic` header carries `base64(email:password)`.
 3. **stdio config account** *(stdio only)* — no network, no gate; the single APCOA account is read from
@@ -87,8 +88,9 @@ Each compose file lists the non-secret keys commented out, so you can see every 
 # Add more keys for more users; removing one and restarting ends every session created with it.
 Security__AllowedApiKeys__0=00000000-0000-0000-0000-000000000000
 
-# Required for OAuth: a long, STABLE random secret that encrypts session tokens.
-# Changing it invalidates all issued tokens (everyone must re-authorize).
+# Required for OAuth: a long (min 32 chars), STABLE random secret — the key that secures session
+# tokens. Changing it invalidates all issued tokens (everyone must re-authorize). The server
+# refuses to start if it is unset, too short, or left at this placeholder.
 Security__TokenSecret=change-me-to-a-long-random-secret
 ```
 
@@ -155,6 +157,13 @@ Multiple users can share one server instance, each passing their own credentials
 The server must be publicly reachable from the internet and served over **HTTPS** (the session tokens
 carry encrypted credentials). If it's on a local NAS, expose it via a tunnel such as
 [Cloudflare Tunnel](https://developers.cloudflare.com/cloudflare-one/connections/connect-networks/) or ngrok — both terminate TLS for you.
+
+> **Behind a reverse proxy / tunnel:** the server honors `X-Forwarded-Proto` and `X-Forwarded-Host`,
+> so the OAuth discovery metadata it publishes (issuer, authorize/token/register endpoints) uses the
+> public `https://` scheme and host rather than the container's internal `http://…:8080`. Your proxy
+> must forward those headers (Cloudflare Tunnel, ngrok, nginx/Traefik/Caddy all do by default). If the
+> metadata comes back with `http://` URLs, OAuth client registration from claude.ai will fail — check
+> that the proxy forwards `X-Forwarded-Proto`.
 
 ### Local development
 
