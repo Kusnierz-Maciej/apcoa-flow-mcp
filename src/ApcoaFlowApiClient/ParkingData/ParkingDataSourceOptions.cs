@@ -1,3 +1,5 @@
+using System.ComponentModel.DataAnnotations;
+
 namespace ApcoaFlowApiClient.ParkingData;
 
 public class ParkingDataSourceOptions
@@ -21,14 +23,17 @@ public class ParkingDataSourceOptions
     public TimeSpan BackgroundRefreshInterval { get; set; } = TimeSpan.FromHours(24);
 
     /// <summary>Directory where the parking snapshot is persisted (mapped Docker volume). Default /data/parking.</summary>
+    [Required(AllowEmptyStrings = false)]
     public string StorePath { get; set; } = "/data/parking";
 
     /// <summary>
     /// Geohash precision used for spatial bucketing. 6 ≈ 1.2 × 0.6 km cells, tuned for the typical
     /// 500 m–2 km search. Correctness holds for any radius regardless of this value.
     /// </summary>
+    [Range(1, 12)]
     public int GeohashPrecision { get; set; } = 6;
 
     /// <summary>Company ID used to fetch the app config (and therefore the decryption key). Defaults to 9 (Poland).</summary>
+    [Range(1, int.MaxValue)]
     public int CompanyId { get; set; } = 9;
 }

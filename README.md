@@ -58,7 +58,10 @@ The three auth methods:
 > **Disabling the API-key gate:** set `Security__RequireMcpApiKey=false` for a trusted/private
 > deployment. The `X-Api-Key` check is dropped and the OAuth login screen no longer asks for an API
 > key — APCOA email + password are still required. Default is `true`; while it is on, at least one
-> `Security__AllowedApiKeys__N` must be configured or every request is rejected.
+> `Security__AllowedApiKeys__N` must be configured or the HTTP server refuses to start.
+>
+> **Startup validation:** every setting is checked when the server starts. On invalid configuration
+> it exits with code 1 and lists every problem on stderr.
 
 ### Docker (production / NAS)
 
@@ -174,16 +177,17 @@ dotnet run --project src/ApcoaFlowMcp
 # Server starts at http://localhost:5200 (loopback only)
 ```
 
-For local work the simplest path is the **header** style — pass an
-`Authorization: Basic base64(email:password)` header (and, if you set `Security__AllowedApiKeys`, a
-matching `X-Api-Key`). To exercise the **OAuth** flow locally, set an API key and a token secret first:
+The HTTP host needs a token secret (min 32 chars) and, unless `Security:RequireMcpApiKey` is `false`,
+at least one API key — set them once via user-secrets:
 
 ```bash
 dotnet user-secrets --project src/ApcoaFlowMcp set "Security:AllowedApiKeys:0" "dev-key"
-dotnet user-secrets --project src/ApcoaFlowMcp set "Security:TokenSecret" "dev-token-secret"
+dotnet user-secrets --project src/ApcoaFlowMcp set "Security:TokenSecret" "dev-token-secret-at-least-32-chars-long"
 ```
 
-then point the [MCP Inspector](https://github.com/modelcontextprotocol/inspector) (or Claude Code) at
+For local work the simplest path is the **header** style — pass an
+`Authorization: Basic base64(email:password)` header plus `X-Api-Key: dev-key`. To exercise the
+**OAuth** flow, point the [MCP Inspector](https://github.com/modelcontextprotocol/inspector) (or Claude Code) at
 `http://localhost:5200/mcp` and complete the login screen with `dev-key` + your APCOA email/password.
 
 Claude Code config (`.mcp.json` in the project root or `~/.claude/mcp.json`):
@@ -234,9 +238,9 @@ The snapshot lives at `ParkingData__StorePath`. Bind-mount a host directory ther
 Freshness and indexing are tunable via `ParkingData__*` environment variables:
 
 - **ParkingData__SoftRefreshAge** — past this, a search returns current data immediately and refreshes in the background.
-- **ParkingData__HardRefreshAge** — past this, the next search blocks on a rebuild before answering.
+- **ParkingData__HardRefreshAge** — past this, the next search blocks on a rebuild before answering. Must be ≥ `SoftRefreshAge`; all three ages must be positive.
 - **ParkingData__BackgroundRefreshInterval** — how often the web host proactively rebuilds (not used in stdio mode).
-- **ParkingData__GeohashPrecision** — spatial bucket size; 6 ≈ 1.2 × 0.6 km cells.
+- **ParkingData__GeohashPrecision** — spatial bucket size (1–12); 6 ≈ 1.2 × 0.6 km cells.
 - **ParkingData__CompanyId** — APCOA tenant used to fetch the dataset decryption key.
 
 ## Session settings

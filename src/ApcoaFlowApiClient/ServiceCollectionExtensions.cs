@@ -3,6 +3,8 @@ using ApcoaFlowApiClient.ParkingData;
 using ApcoaFlowApiClient.ParkingData.Store;
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
+using Microsoft.Extensions.DependencyInjection.Extensions;
+using Microsoft.Extensions.Options;
 using Polly;
 using Refit;
 
@@ -57,12 +59,16 @@ public static class ServiceCollectionExtensions
         IConfiguration? configuration = null,
         Action<ParkingDataSourceOptions>? configure = null)
     {
+        // Fail fast at host start on bad config: DataAnnotations cover single-field bounds, the
+        // validator covers cross-field rules (positive ages, soft <= hard).
+        var options = services.AddOptions<ParkingDataSourceOptions>();
         if (configuration is not null)
-            services.Configure<ParkingDataSourceOptions>(configuration);
+            options.Bind(configuration);
         if (configure is not null)
-            services.Configure(configure);
-        if (configuration is null && configure is null)
-            services.Configure<ParkingDataSourceOptions>(_ => { });
+            options.Configure(configure);
+        options.ValidateDataAnnotations().ValidateOnStart();
+        services.TryAddEnumerable(
+            ServiceDescriptor.Singleton<IValidateOptions<ParkingDataSourceOptions>, ParkingDataSourceOptionsValidator>());
 
         services.AddHttpClient(nameof(ApcoaS3ParkingDataSource));
         services.AddSingleton<IParkingDataStore, FileParkingDataStore>();

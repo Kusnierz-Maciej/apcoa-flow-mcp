@@ -19,7 +19,10 @@ public static class StdioHost
         builder.Services.AddTransient<IApcoaFlowCredentialProvider, ConfigurationCredentialProvider>();
         builder.Services.AddApcoaFlowApiClient();
         builder.Services.AddApcoaParkingDataSource(builder.Configuration.GetSection("ParkingData"));
-        builder.Services.Configure<ApcoaFlowToolsOptions>(builder.Configuration.GetSection("ApcoaFlow"));
+        builder.Services.AddOptions<ApcoaFlowToolsOptions>()
+            .Bind(builder.Configuration.GetSection("ApcoaFlow"))
+            .ValidateDataAnnotations()
+            .ValidateOnStart();
         builder.Services.AddScoped<ApcoaFlowSessionService>();
 
         builder.Services
@@ -27,6 +30,10 @@ public static class StdioHost
             .WithStdioServerTransport()
             .WithTools<ApcoaFlowTools>();
 
-        await builder.Build().RunAsync();
+        var host = builder.Build();
+        if (!StartupValidation.TryValidate(host.Services))
+            return;
+
+        await host.RunAsync();
     }
 }

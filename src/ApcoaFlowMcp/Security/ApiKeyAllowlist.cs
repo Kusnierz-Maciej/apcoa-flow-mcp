@@ -26,6 +26,36 @@ public sealed class SecurityOptions
 }
 
 /// <summary>
+/// Startup rules for <see cref="SecurityOptions"/> (web host only — stdio has no OAuth). The token
+/// secret is the sole key for OAuth token encryption: a missing, placeholder or short secret would let
+/// anyone forge session tokens carrying arbitrary APCOA credentials.
+/// </summary>
+public sealed class SecurityOptionsValidator : IValidateOptions<SecurityOptions>
+{
+    public const string PlaceholderTokenSecret = "change-me-to-a-long-random-secret";
+    public const int MinTokenSecretLength = 32;
+
+    public ValidateOptionsResult Validate(string? name, SecurityOptions options)
+    {
+        var failures = new List<string>();
+
+        if (string.IsNullOrWhiteSpace(options.TokenSecret))
+            failures.Add("Security:TokenSecret is required. Set it to a long, random, stable secret (see docker/.env.example).");
+        else if (options.TokenSecret == PlaceholderTokenSecret)
+            failures.Add("Security:TokenSecret is still the .env.example placeholder. Replace it with a long, random, stable secret.");
+        else if (options.TokenSecret.Length < MinTokenSecretLength)
+            failures.Add($"Security:TokenSecret must be at least {MinTokenSecretLength} characters (got {options.TokenSecret.Length}).");
+
+        if (options.RequireMcpApiKey && !options.AllKeys.Any())
+            failures.Add(
+                "Security:AllowedApiKeys must contain at least one key when Security:RequireMcpApiKey is true. " +
+                "Set Security__AllowedApiKeys__0, or Security__RequireMcpApiKey=false for a trusted private deployment.");
+
+        return failures.Count == 0 ? ValidateOptionsResult.Success : ValidateOptionsResult.Fail(failures);
+    }
+}
+
+/// <summary>
 /// Validates API keys against the configured allowlist and resolves whether a token's embedded
 /// <c>apiKeyHash</c> is still allowlisted (the admin kill-switch: remove a key + restart → its tokens die).
 /// All comparisons are constant-time. When <see cref="SecurityOptions.RequireMcpApiKey"/> is <c>false</c>,
