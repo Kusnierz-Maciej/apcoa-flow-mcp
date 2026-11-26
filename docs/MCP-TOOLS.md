@@ -112,6 +112,10 @@ Resolves the lot, tariff, vehicle, payment method and profile automatically.
   simulator alone reports such a promo as free even though the real start would charge — e.g. the
   Carrefour "every 4 h, 2 h free" coupon quotes free but `promotion/validate` returns 422 and the
   start charges — so validation, not the simulator, decides.)
+- **When a coupon is consumed, the start reports its reuse cooldown.** Free-time coupons are
+  one-use-per-period (e.g. once every 4 hours). On a started session that actually applied one, the
+  output ends with `This coupon is now used up and can be used again in <period>.` (derived from the
+  promotion's own reuse period — no clock time is computed).
 - The **price tiers come from the lot's tariff grid** (`GET /tariff`): a FLAT first block plus
   INCREMENTAL per-block charges, capped by any daily maximum. This is why a short request is not
   quoted at a longer tier's price.
@@ -182,6 +186,10 @@ rounded up to it (capped by the lot's max duration), and a longer one is refused
 **Output**
 ```
 Parking: Tarnowskie Góry ul. Oświęcimska [616319]. Started a free session for 120 min on parking 616319. Early stop: allowed, but NO refund — the remaining paid time is forfeited. Session id: 84214483, status: ACTIVE.
+```
+Started with a free-time coupon — the coupon's reuse cooldown is reported:
+```
+Parking: Aldi Tarnowskie Góry ul. Sobieskiego 3 [8331]. Started a free session for 60 min on parking 8331. Early stop: allowed, but NO refund — the remaining paid time is forfeited. Session id: 84300617, status: ACTIVE. Promotion applied: FRE60MIN07 (60 free min). This coupon is now used up and can be used again in 4 hours.
 ```
 Not free (nothing started — reports pricing and points to the paid tool):
 ```

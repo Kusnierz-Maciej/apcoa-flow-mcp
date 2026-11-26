@@ -13,7 +13,10 @@ namespace ApcoaFlowMcp.Apcoa;
 /// (optionally with a free-time promotion), enforce the two-step paid confirmation, and start/stop.
 /// Pure of MCP concerns so all start/stop tools reuse it.
 /// </summary>
-public sealed class ApcoaFlowSessionService(IApcoaFlowApi api, IApcoaParkingDataSource parkingData)
+public sealed class ApcoaFlowSessionService(
+    IApcoaFlowApi api,
+    IApcoaParkingDataSource parkingData,
+    ILogger<ApcoaFlowSessionService> logger)
 {
     private const string Company = "PL";
 
@@ -51,6 +54,12 @@ public sealed class ApcoaFlowSessionService(IApcoaFlowApi api, IApcoaParkingData
 
         /// <summary>Short note on whether the session can be stopped early and whether that refunds.</summary>
         public string? CancelRefundNote { get; init; }
+
+        /// <summary>
+        /// When a free-time coupon was consumed by a started session, how long until it can be used
+        /// again (its reuse cooldown). Null when no coupon was applied or the coupon has no cooldown.
+        /// </summary>
+        public TimeSpan? PromotionReuseCooldown { get; init; }
     }
 
     /// <summary>One price option: a duration and the total cost to park for it.</summary>
@@ -308,9 +317,19 @@ public sealed class ApcoaFlowSessionService(IApcoaFlowApi api, IApcoaParkingData
         }
 
         var kind = quote.IsFree ? "free" : $"{costPln:0.00} PLN";
+
+        // A consumed coupon normally carries a recognised reuse cooldown (e.g. PROMO_MINUTE=240 → 4h). If
+        // the API ever sends a cooldown in a unit we don't map, ReuseCooldown is null and we show nothing —
+        // log the raw unit as a warning so the new unit can be added to Offer.ReuseCooldown.
+        if (promo?.HasUnrecognisedCooldownUnit == true)
+            logger.LogWarning(
+                "Promotion '{Promotion}' (lot {Lot}) has an unrecognised reuse-cooldown unit '{Unit}' (value {Value}); " +
+                "no reuse-cooldown message will be shown. Add this unit to Offer.ReuseCooldown.",
+                promo.PromotionName, lotId, promo.ReuseCooldownUnit, promo.PrimaryPromotion?.PromotionDurationUsageTime);
+
         return Tag(new StartResult(true, costPln, minutes, promo?.Name, promo?.FreeMinutes,
             $"Started a {kind} session for {minutes} min on parking {parkingId}.", response))
-            with { CancelRefundNote = cancelNote };
+            with { CancelRefundNote = cancelNote, PromotionReuseCooldown = promo?.ReuseCooldown };
     }
 
     /// <summary>Stops a session and returns the final (completed) session with its cost.</summary>

@@ -117,7 +117,9 @@ internal static class Fake
         string name = "PROMO1",
         int id = 1,
         string? promotionName = "PROMO1_CODE",
-        int? promotionId = 1001) => new()
+        int? promotionId = 1001,
+        int? cooldownUsageTime = null,
+        string? cooldownUsageType = null) => new()
     {
         Id = id,
         Name = name,
@@ -128,7 +130,13 @@ internal static class Fake
         OfferDiscountType = "PROMOTION",
         PromotionResponseList = promotionName is null || promotionId is null
             ? []
-            : [new PromotionResponse { Id = promotionId.Value, Name = promotionName, OfferCode = id, OfferName = name, IsPrimary = 1, IsActive = 1 }],
+            : [new PromotionResponse
+            {
+                Id = promotionId.Value, Name = promotionName, OfferCode = id, OfferName = name,
+                IsPrimary = 1, IsActive = 1,
+                PromotionDurationUsageTime = cooldownUsageTime,
+                PromotionDurationUsageType = cooldownUsageType,
+            }],
     };
 
     /// <summary>A tariff breakdown quoting the given PLN total (0 = free).</summary>

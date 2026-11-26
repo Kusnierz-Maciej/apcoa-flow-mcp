@@ -19,7 +19,8 @@ public class StartSessionTests
     private const decimal MaxCost = 20m;
 
     private static ApcoaFlowSessionService Service(IApcoaFlowApi api) =>
-        new(api, Substitute.For<IApcoaParkingDataSource>());
+        new(api, Substitute.For<IApcoaParkingDataSource>(),
+            Microsoft.Extensions.Logging.Abstractions.NullLogger<ApcoaFlowSessionService>.Instance);
 
     private static Task<ApcoaFlowSessionService.StartResult> StartNormal(
         IApcoaFlowApi api, int? duration = null, decimal? confirmed = null, bool bypassCap = false) =>
@@ -385,5 +386,93 @@ public class StartSessionTests
 
         await Assert.That(result.Started).IsTrue();
         await Assert.That(result.CancelRefundNote!).Contains("prorated");
+    }
+
+    // ─── Coupon reuse cooldown (surfaced after a coupon is consumed) ────────────────────────────────
+
+    [Test]
+    public async Task StartedWithFreeCoupon_CarriesReuseCooldown()
+    {
+        // The Aldi/Carrefour coupon: once every 240 min (PROMO_MINUTE) = 4 hours. A started free session
+        // that consumed it must carry the cooldown so the tool can tell the user when it's usable again.
+        var promo = Fake.FreeTimePromo(freeMinutes: 60, cooldownUsageTime: 240, cooldownUsageType: "PROMO_MINUTE");
+        var api = Fake.Api(quote: Fake.Quote(0m), offers: Fake.Offers(promo));
+
+        var result = await StartOnlyFree(api);
+
+        await Assert.That(result.Started).IsTrue();
+        await Assert.That(result.PromotionReuseCooldown).IsEqualTo(TimeSpan.FromHours(4));
+    }
+
+    [Test]
+    public async Task StartedWithoutCoupon_HasNoReuseCooldown()
+    {
+        var api = Fake.Api(quote: Fake.Quote(0m)); // no offers → no promo consumed
+        var result = await StartNormal(api);
+
+        await Assert.That(result.Started).IsTrue();
+        await Assert.That(result.PromotionReuseCooldown).IsNull();
+    }
+
+    [Test]
+    public async Task UnconfirmedPaidQuote_HasNoReuseCooldown()
+    {
+        // A quote (not a start) must not report a cooldown even if a free coupon exists but didn't apply.
+        var api = Fake.Api(quote: Fake.Quote(5m));
+        var result = await StartNormal(api);
+
+        await Assert.That(result.Started).IsFalse();
+        await Assert.That(result.PromotionReuseCooldown).IsNull();
+    }
+
+    [Test]
+    [Arguments("PROMO_MINUTE", 240, 4 * 60)]
+    [Arguments("PROMO_HOUR", 4, 4 * 60)]
+    [Arguments("PROMO_DAY", 1, 24 * 60)]
+    [Arguments("PROMO_SECOND", 120, 2)]
+    public async Task ReuseCooldown_ParsesKnownUnits(string unit, int amount, int expectedMinutes)
+    {
+        var promo = Fake.FreeTimePromo(cooldownUsageTime: amount, cooldownUsageType: unit);
+        await Assert.That(promo.ReuseCooldown).IsEqualTo(TimeSpan.FromMinutes(expectedMinutes));
+    }
+
+    [Test]
+    [Arguments("PROMO_WEEK", 2)]   // unrecognised unit → don't guess
+    [Arguments("WHATEVER", 5)]
+    [Arguments(null, 240)]         // missing unit
+    public async Task ReuseCooldown_UnknownOrMissingUnit_IsNull(string? unit, int amount)
+    {
+        var promo = Fake.FreeTimePromo(cooldownUsageTime: amount, cooldownUsageType: unit);
+        await Assert.That(promo.ReuseCooldown).IsNull();
+    }
+
+    [Test]
+    public async Task ReuseCooldown_NonPositiveAmount_IsNull()
+    {
+        var promo = Fake.FreeTimePromo(cooldownUsageTime: 0, cooldownUsageType: "PROMO_MINUTE");
+        await Assert.That(promo.ReuseCooldown).IsNull();
+    }
+
+    // ─── Cooldown humanising (the string the user sees) ─────────────────────────────────────────────
+
+    [Test]
+    [Arguments(240, "4 hours")]
+    [Arguments(60, "1 hour")]
+    [Arguments(90, "1 hour 30 minutes")]
+    [Arguments(45, "45 minutes")]
+    [Arguments(1, "1 minute")]
+    [Arguments(1440, "1 day")]
+    [Arguments(1500, "1 day 1 hour")]
+    public async Task FormatDuration_RendersNaturalUnits(int minutes, string expected)
+    {
+        var text = ApcoaFlowMcp.Tools.ApcoaFlowTools.FormatDuration(TimeSpan.FromMinutes(minutes));
+        await Assert.That(text).IsEqualTo(expected);
+    }
+
+    [Test]
+    public async Task FormatDuration_SubMinute_FallsBackToSeconds()
+    {
+        var text = ApcoaFlowMcp.Tools.ApcoaFlowTools.FormatDuration(TimeSpan.FromSeconds(30));
+        await Assert.That(text).IsEqualTo("30 seconds");
     }
 }

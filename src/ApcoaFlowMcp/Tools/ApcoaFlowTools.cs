@@ -222,7 +222,28 @@ public sealed class ApcoaFlowTools(
             sb.Append($" Session id: {s.SessionId}, status: {s.ParkingSessionStatus}.");
         if (r.PromotionName is not null)
             sb.Append($" Promotion applied: {r.PromotionName}" + (r.FreeMinutes is int m ? $" ({m} free min)." : "."));
+        if (r.PromotionReuseCooldown is { } cooldown && cooldown > TimeSpan.Zero)
+            sb.Append($" This coupon is now used up and can be used again in {FormatDuration(cooldown)}.");
         return sb.ToString();
+    }
+
+    /// <summary>
+    /// Formats a reuse cooldown in the largest natural units: "4 hours", "90 minutes" → "1 hour 30 minutes",
+    /// "2 days". Days and hours combine with a trailing remainder; sub-minute amounts fall back to seconds.
+    /// </summary>
+    internal static string FormatDuration(TimeSpan d)
+    {
+        static string Unit(int n, string unit) => $"{n} {unit}{(n == 1 ? "" : "s")}";
+
+        if (d.TotalMinutes < 1)
+            return Unit(Math.Max(1, (int)Math.Round(d.TotalSeconds)), "second");
+
+        var parts = new List<string>();
+        var days = (int)d.TotalDays;
+        if (days > 0) parts.Add(Unit(days, "day"));
+        if (d.Hours > 0) parts.Add(Unit(d.Hours, "hour"));
+        if (d.Minutes > 0) parts.Add(Unit(d.Minutes, "minute"));
+        return string.Join(" ", parts);
     }
 
     private static string FormatSession(ParkingSessionV2 s)

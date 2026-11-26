@@ -18,6 +18,7 @@
 
     <ItemGroup>
         <InternalsVisibleTo Include="ApcoaFlow.Sandbox" />
+        <InternalsVisibleTo Include="ApcoaFlowMcp.Tests" />
     </ItemGroup>
 
     <ItemGroup>

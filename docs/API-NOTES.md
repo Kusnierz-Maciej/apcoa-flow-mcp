@@ -79,6 +79,19 @@ only applies a 10 % discount (3.60 PLN). Earlier notes blaming the Carrefour `FR
 cooldown may be the same wrong-code bug — re-verify with the nested promotion name before assuming a
 cooldown.
 
+### Free-time coupons are one-use-per-cooldown; the period is on the nested promotion
+The nested promotion carries its reuse cooldown: `promotionDurationUsageTime` + `promotionDurationUsageType`
+(e.g. `240` / `"PROMO_MINUTE"` = usable once every **4 hours**), alongside `usageType:"per_person"` /
+`usageLimit:1`. **Do not** confuse these with the sibling `durationUsageType`/`durationUsageTime`/
+`durationUsageLimit` fields, which describe the free grant, not the cooldown. Only `PROMO_MINUTE` has been
+observed on the wire; the client parses the `PROMO_<UNIT>` token (`MINUTE`/`SECOND`/`HOUR`/`DAY`) and treats
+any unmapped unit as "unknown" (no cooldown shown, logged as a warning). After a session consumes a coupon,
+the same fields appear on the completed session (`GET /consumer/parkingSessionV2`: `promotionName`,
+`promotionId`, `offerDetails.promotionResponseList[].promotionDurationUsageTime`), and the coupon drops out
+of `applicableOffersWithPromotion` for the cooldown window. The MCP reports the **period** after a start
+("can be used again in 4 hours") — it does **not** derive an absolute next-available clock time (the 422
+body carries no timing).
+
 ### `GET /tariff?parkingLotId=...` returns the full pricing grid (unit = 1/100 cent!)
 Confirmed live (2026-11-25). The response is **not** flat name/description — it is the whole rate grid:
 ```

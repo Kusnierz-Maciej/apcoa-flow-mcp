@@ -36,7 +36,8 @@ public sealed class StartFreeAldiScenario : IScenario
     {
         var api = services.GetRequiredService<IApcoaFlowApi>();
         var data = services.GetRequiredService<IApcoaParkingDataSource>();
-        var sessions = new ApcoaFlowSessionService(api, data);
+        var sessions = new ApcoaFlowSessionService(
+            api, data, Microsoft.Extensions.Logging.Abstractions.NullLogger<ApcoaFlowSessionService>.Instance);
 
         // ── Gate 1: independent pre-flight. Resolve lot/tariff, find + validate the free-time promo, and
         // quote the default window WITH it. Abort unless that quote is exactly 0 cents. This does not
