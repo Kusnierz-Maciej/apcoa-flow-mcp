@@ -2,7 +2,9 @@ using ApcoaFlowApiClient;
 using ApcoaFlowMcp;
 using ApcoaFlowMcp.Apcoa;
 using ApcoaFlowMcp.Security;
+using ApcoaFlowMcp.Security.OAuth;
 using ApcoaFlowMcp.Tools;
+using Microsoft.AspNetCore.DataProtection;
 
 if (args.Contains("--stdio"))
 {
@@ -20,6 +22,18 @@ builder.Services.AddApcoaParkingRefreshService();
 builder.Services.Configure<ApcoaFlowToolsOptions>(builder.Configuration.GetSection("ApcoaFlow"));
 builder.Services.AddScoped<ApcoaFlowSessionService>();
 
+// OAuth authorization: API-key allowlist + encrypted stateless tokens carrying the APCOA credentials.
+builder.Services.Configure<SecurityOptions>(builder.Configuration.GetSection("Security"));
+builder.Services.AddSingleton<ApiKeyAllowlist>();
+builder.Services.AddSingleton<CredentialTokenService>();
+
+// Data Protection seeds token encryption. Persist keys to a stable directory and derive from the
+// configured TokenSecret so tokens survive restarts and are stable across replicas.
+var dpBuilder = builder.Services.AddDataProtection().SetApplicationName("ApcoaFlowMcp");
+var tokenSecret = builder.Configuration["Security:TokenSecret"];
+if (!string.IsNullOrWhiteSpace(tokenSecret))
+    dpBuilder.PersistKeysToFileSystem(new DirectoryInfo(DataProtectionKeyDir(tokenSecret)));
+
 builder.Services
     .AddMcpServer(options => options.ServerInstructions = McpInstructions.Text)
     .WithHttpTransport()
@@ -27,9 +41,16 @@ builder.Services
 
 var app = builder.Build();
 
+// OAuth authorization-server + protected-resource endpoints (public — no /mcp gate).
+app.MapOAuthEndpoints();
+
 app.UseWhen(
     ctx => ctx.Request.Path.StartsWithSegments("/mcp"),
-    branch => branch.UseMiddleware<ApiKeyMiddleware>());
+    branch =>
+    {
+        branch.UseMiddleware<CredentialFailureMiddleware>();
+        branch.UseMiddleware<ApiKeyMiddleware>();
+    });
 
 app.MapMcp("/mcp");
 
@@ -37,3 +58,11 @@ app.Logger.LogInformation("ApcoaFlowMcp v{Version} starting",
     typeof(Program).Assembly.GetName().Version?.ToString(3) ?? "unknown");
 
 app.Run();
+
+// Derives a per-secret key directory so changing TokenSecret rotates (invalidates) all tokens.
+static string DataProtectionKeyDir(string secret)
+{
+    var hash = Convert.ToHexString(
+        System.Security.Cryptography.SHA256.HashData(System.Text.Encoding.UTF8.GetBytes(secret)))[..16];
+    return Path.Combine(Path.GetTempPath(), "apcoaflow-mcp-dpkeys", hash);
+}
