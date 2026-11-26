@@ -355,8 +355,27 @@ public sealed class ApcoaS3ParkingDataSource : IApcoaParkingDataSource, IDisposa
             if (_decryptionKey is not null)
                 return Convert.FromBase64String(_decryptionKey);
 
-            var config = await _api.GetAppConfigAsync(_options.CompanyId, "v3", ct);
-            _decryptionKey = ExtractParkingDataKey(config);
+            object config;
+            try
+            {
+                config = await _api.GetAppConfigAsync(_options.CompanyId, "v3", ct);
+            }
+            catch (Exception ex)
+            {
+                _logger.LogError(ex, "Failed to fetch app config (company {CompanyId}) for parking data decryption key.", _options.CompanyId);
+                throw;
+            }
+
+            try
+            {
+                _decryptionKey = ExtractParkingDataKey(config);
+            }
+            catch (Exception ex)
+            {
+                _logger.LogError(ex, "Failed to extract parkingDataKey from app config (company {CompanyId}).", _options.CompanyId);
+                throw;
+            }
+
             return Convert.FromBase64String(_decryptionKey);
         }
         finally
