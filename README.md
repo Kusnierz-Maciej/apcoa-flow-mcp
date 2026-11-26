@@ -49,10 +49,10 @@ The three auth methods:
 2. **`X-Api-Key` + `Authorization: Basic`** *(HTTP)* — for clients that support custom headers. The
    `X-Api-Key` must match a configured key; the `Basic` header carries `base64(email:password)`.
 3. **stdio config account** *(stdio only)* — no network, no gate; the single APCOA account is read from
-   env vars. OAuth and `X-Api-Key` do not apply in stdio mode.
+   `ApcoaFlow__Email` / `ApcoaFlow__Password`. OAuth and `X-Api-Key` do not apply in stdio mode.
 
 > HTTP mode has **no default APCOA account** — every HTTP client supplies its own credentials via
-> method 1 or 2. The `ApcoaFlow__Email`/`Password` account applies to **stdio only**.
+> method 1 or 2.
 
 ### Docker (production / NAS)
 
@@ -68,12 +68,9 @@ Two starting points live in [`src/ApcoaFlowMcp/docker/`](src/ApcoaFlowMcp/docker
   plus Synology fixes: runs as an ACL-trusted host user so the bind mount is writable, and sets a
   human-readable `simple` console logging block.
 
-Copy whichever fits as your `docker-compose.yml`.
-
-> **Settings convention:** every setting has a default in the app's `appsettings.json`.
-> Both compose files list the non-secret keys with their defaults (commented out) so you can
-> see every knob in one place — uncomment a line to override it.
-
+Copy whichever fits as your `docker-compose.yml`. All settings have sensible defaults built in;
+override any of them with environment variables in the compose file (`Section__Key` convention).
+Each compose file lists the non-secret keys commented out, so you can see every knob in one place.
 
 > The bind-mounted directory caches the parking dataset (downloaded and decrypted from APCOA's public S3 bucket) so the server warm-starts after a restart instead of re-downloading. It is optional — if the directory isn't writable (or you omit the mount) the server still works, serving the dataset from memory and rebuilding from S3 on every start. See [Parking data](#parking-data).
 
@@ -90,17 +87,13 @@ Security__AllowedApiKeys__0=00000000-0000-0000-0000-000000000000
 Security__TokenSecret=change-me-to-a-long-random-secret
 ```
 
-> HTTP mode has **no default APCOA account**: every client supplies its own APCOA email + password,
-> either on the OAuth login screen or via an `Authorization: Basic` header. (A default account applies
-> only to stdio mode — see [Stdio mode](#stdio-mode).)
->
 > If a value contains `$`, escape each one as `$$` (Docker Compose variable interpolation). Example: `p@$w0rd!` → `p@$$w0rd!`
 
 **3. Start it:**
 
 ```bash
 docker compose up -d
-# Exposed on host port 9012
+# Exposed on host port 9012 — serve it over HTTPS (see below)
 ```
 
 **4. Connect Claude Code:**
@@ -114,17 +107,15 @@ The server supports two connection styles — pick whichever your client support
   "mcpServers": {
     "apcoa-flow": {
       "type": "http",
-      "url": "http://your-host:9012/mcp"
+      "url": "https://your-host:9012/mcp"
     }
   }
 }
 ```
 
-The client discovers the OAuth endpoints automatically and opens a **login screen** where the user
-enters their **API key** (from `Security__AllowedApiKeys`) plus their **APCOA email and password**.
-The credentials are validated against APCOA on the spot, then stored only inside an encrypted session
-token held by the client — never on the server. The session is refreshed silently, so the user does
-not have to log in again unless their API key is removed or their APCOA password changes.
+The client discovers the OAuth endpoints automatically and opens a **login screen** for the user's
+API key + APCOA email/password. The session is refreshed silently, so the user does not have to log in
+again unless their API key is removed or their APCOA password changes.
 
 **Legacy headers (for clients that support custom headers):**
 
@@ -133,7 +124,7 @@ not have to log in again unless their API key is removed or their APCOA password
   "mcpServers": {
     "apcoa-flow": {
       "type": "http",
-      "url": "http://your-host:9012/mcp",
+      "url": "https://your-host:9012/mcp",
       "headers": {
         "X-Api-Key": "your-api-key-from-.env",
         "Authorization": "Basic <base64(email:password)>"
@@ -143,14 +134,12 @@ not have to log in again unless their API key is removed or their APCOA password
 }
 ```
 
-`X-Api-Key` must match a key in `Security__AllowedApiKeys` (or the legacy `Security__ApiKey`).
-`Authorization: Basic` carries the APCOA credentials as `base64(email:password)`. Multiple users can
-share one server instance, each passing their own credentials — no server restart required.
+Multiple users can share one server instance, each passing their own credentials — no server restart required.
 
 ### Connecting from claude.ai
 
 1. Go to **claude.ai** → Settings → **Connectors** → **Add custom connector**
-2. Enter your server URL, **including the `/mcp` suffix**: `http://your-host:9012/mcp`
+2. Enter your server URL, **including the `/mcp` suffix**: `https://your-host:9012/mcp`
 3. Under **Authentication**, choose:
    - **OAuth** (recommended) — you'll be taken to the login screen to enter your API key + APCOA
      email/password; or
@@ -158,9 +147,9 @@ share one server instance, each passing their own credentials — no server rest
      if you prefer the header style.
 4. Click **Add**
 
-The server must be publicly reachable from the internet (and should be served over **HTTPS** in
-production — the session tokens carry encrypted credentials). If it's on a local NAS, expose it via a
-tunnel such as [Cloudflare Tunnel](https://developers.cloudflare.com/cloudflare-one/connections/connect-networks/) or ngrok.
+The server must be publicly reachable from the internet and served over **HTTPS** (the session tokens
+carry encrypted credentials). If it's on a local NAS, expose it via a tunnel such as
+[Cloudflare Tunnel](https://developers.cloudflare.com/cloudflare-one/connections/connect-networks/) or ngrok — both terminate TLS for you.
 
 ### Local development
 
@@ -168,25 +157,22 @@ Run the HTTP host:
 
 ```bash
 dotnet run --project src/ApcoaFlowMcp
-# Server starts at http://localhost:5200
+# Server starts at http://localhost:5200 (loopback only)
 ```
 
-HTTP mode has no default account, so every request must carry APCOA credentials. For local work the
-simplest path is the **legacy header** style — pass an `Authorization: Basic base64(email:password)`
-header (and, if you set `Security:AllowedApiKeys`/`Security:ApiKey`, a matching `X-Api-Key`). If no
-API key is configured, the `X-Api-Key` check is skipped but the Basic credentials are still required.
-
-To exercise the **OAuth** flow locally, set an API key and a token secret first:
+For local work the simplest path is the **legacy header** style — pass an
+`Authorization: Basic base64(email:password)` header (and, if you set `Security__AllowedApiKeys`, a
+matching `X-Api-Key`). To exercise the **OAuth** flow locally, set an API key and a token secret first:
 
 ```bash
 dotnet user-secrets --project src/ApcoaFlowMcp set "Security:AllowedApiKeys:0" "dev-key"
 dotnet user-secrets --project src/ApcoaFlowMcp set "Security:TokenSecret" "dev-token-secret"
 ```
 
-then point the [MCP Inspector](https://github.com/modelcontextprotocol/inspector) (or a client) at
+then point the [MCP Inspector](https://github.com/modelcontextprotocol/inspector) (or Claude Code) at
 `http://localhost:5200/mcp` and complete the login screen with `dev-key` + your APCOA email/password.
 
-Connect Claude Code by adding to your MCP config (`.mcp.json` in the project root or `~/.claude/mcp.json`):
+Claude Code config (`.mcp.json` in the project root or `~/.claude/mcp.json`):
 
 ```json
 {
@@ -229,50 +215,20 @@ Example client configuration:
 
 `find_parking` searches an offline dataset, because APCOA has no live search API — the app downloads static, encrypted parking tiles from a public S3 bucket and searches them on-device. This server does the same: on first use it downloads and decrypts every country tile, builds an in-memory spatial index (~1 MB), and persists a compact snapshot to disk.
 
-The snapshot lives at `ParkingData:StorePath` (default `/data/parking`). Bind-mount a host directory there (writable by the user the container runs as — see the compose example above) so the index warm-starts after a restart instead of re-downloading from S3. If the path isn't writable the server falls back to serving from memory and rebuilding on each start.
+The snapshot lives at `ParkingData__StorePath`. Bind-mount a host directory there (writable by the user the container runs as) so the index warm-starts after a restart instead of re-downloading from S3. If the path isn't writable the server falls back to serving from memory and rebuilding on each start.
 
-> **Synology NAS:** shares enforce POSIX ACLs that override `chmod`/`chown`, so a `chown -R 1654` on the bind-mount directory does **not** make it writable (the `everyone` ACL entry caps non-listed users at read-only). Instead, run the container as a host user the share's ACL already trusts — on Synology that's the built-in `ContainerManager` account. Get its id with `id ContainerManager` and set it in compose, e.g. `user: "106808:106808"`. `user: "0:0"` (root) also works.
+Freshness and indexing are tunable via `ParkingData__*` environment variables:
 
-Freshness is tunable via the `ParkingData` configuration section (defaults shown):
-
-```json
-{
-  "ParkingData": {
-    "StorePath": "/data/parking",
-    "SoftRefreshAge": "12:00:00",
-    "HardRefreshAge": "48:00:00",
-    "BackgroundRefreshInterval": "24:00:00",
-    "GeohashPrecision": 6,
-    "CompanyId": 9
-  }
-}
-```
-
-- **SoftRefreshAge** — past this, a search returns current data immediately and refreshes in the background.
-- **HardRefreshAge** — past this, the next search blocks on a rebuild before answering.
-- **BackgroundRefreshInterval** — how often the web host proactively rebuilds (not used in stdio mode).
-- **GeohashPrecision** — spatial bucket size; 6 ≈ 1.2 × 0.6 km cells.
-- **CompanyId** — APCOA tenant used to fetch the dataset decryption key.
-
-Override any of these with environment variables, e.g. `ParkingData__HardRefreshAge=96:00:00`.
+- **ParkingData__SoftRefreshAge** — past this, a search returns current data immediately and refreshes in the background.
+- **ParkingData__HardRefreshAge** — past this, the next search blocks on a rebuild before answering.
+- **ParkingData__BackgroundRefreshInterval** — how often the web host proactively rebuilds (not used in stdio mode).
+- **ParkingData__GeohashPrecision** — spatial bucket size; 6 ≈ 1.2 × 0.6 km cells.
+- **ParkingData__CompanyId** — APCOA tenant used to fetch the dataset decryption key.
 
 ## Session settings
 
-Session behaviour is tunable via the `ApcoaFlow` configuration section (defaults shown):
-
-```json
-{
-  "ApcoaFlow": {
-    "MaxSessionCostPln": 100,
-    "CurrentLocationRadiusMeters": 300
-  }
-}
-```
-
-- **MaxSessionCostPln** — the most a single `start_session` may cost (PLN). A quote above this is refused; use `start_expensive_session` to bypass.
-- **CurrentLocationRadiusMeters** — default search radius for `start_session_current_location` (the tool may override per call).
-
-Override via environment variables, e.g. `ApcoaFlow__MaxSessionCostPln=50`. Credentials (`ApcoaFlow__Email`/`ApcoaFlow__Password`) live in the same section but belong in `.env` / user-secrets, not here.
+- **ApcoaFlow__MaxSessionCostPln** — the most a single `start_session` may cost (PLN). A quote above this is refused; use `start_expensive_session` to bypass.
+- **ApcoaFlow__CurrentLocationRadiusMeters** — default search radius for `start_session_current_location` (the tool may override per call).
 
 ## Running tests
 

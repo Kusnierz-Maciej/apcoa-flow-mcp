@@ -64,6 +64,19 @@ builder.Services.AddSingleton<CredentialTokenService>();
 // configured TokenSecret so tokens survive restarts and are stable across replicas.
 var dpBuilder = builder.Services.AddDataProtection().SetApplicationName("ApcoaFlowMcp");
 var tokenSecret = builder.Configuration["Security:TokenSecret"];
+
+// HTTP mode fails fast if the OAuth token secret is missing or left at the .env.example placeholder —
+// a known secret would let anyone forge session tokens carrying arbitrary APCOA credentials.
+const string PlaceholderTokenSecret = "change-me-to-a-long-random-secret";
+if (string.IsNullOrWhiteSpace(tokenSecret) || tokenSecret == PlaceholderTokenSecret)
+{
+    Console.Error.WriteLine(
+        "FATAL: Security__TokenSecret is not set (or still the placeholder). Set it to a long, " +
+        "random, stable secret before starting the HTTP server. See docker/.env.example.");
+    Environment.ExitCode = 1;
+    return;
+}
+
 if (!string.IsNullOrWhiteSpace(tokenSecret))
     dpBuilder.PersistKeysToFileSystem(new DirectoryInfo(DataProtectionKeyDir(tokenSecret)));
 
