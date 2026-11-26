@@ -94,17 +94,9 @@ jobs:
             echo
             echo "## Image"
             echo
-            echo "### Release ${TAG}"
-            echo
             echo "[![Docker images](https://img.shields.io/badge/Docker_images-${TAG}-blue?logo=docker)](${pkg_url}?tag=${TAG})"
             echo
             echo "    docker pull ${image_lc}:${TAG}"
-            echo
-            echo "### Latest"
-            echo
-            echo "[![Docker images](https://img.shields.io/badge/Docker_images-latest-blue?logo=docker)](${pkg_url}?tag=latest)"
-            echo
-            echo "    docker pull ${image_lc}:latest"
           } > notes.md
 
           gh release create "$TAG" --title "$TAG" --notes-file notes.md

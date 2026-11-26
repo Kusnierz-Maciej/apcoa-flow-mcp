@@ -67,6 +67,13 @@ The three auth methods:
 
 The image is published to GHCR on every release — no build or clone required.
 
+[![Docker images](https://img.shields.io/badge/Docker_images-latest-blue?logo=docker)](https://github.com/Kusnierz-Maciej/apcoa-flow-mcp/pkgs/container/apcoa-flow-mcp?tag=latest)
+
+    docker pull ghcr.io/kusnierz-maciej/apcoa-flow-mcp:latest
+
+Each release is also tagged with its version (e.g. `v1.8.0`) — see the
+[releases](https://github.com/Kusnierz-Maciej/apcoa-flow-mcp/releases) page.
+
 **1. Create a `docker-compose.yml`:**
 
 Two starting points live in [`src/ApcoaFlowMcp/docker/`](src/ApcoaFlowMcp/docker/):
