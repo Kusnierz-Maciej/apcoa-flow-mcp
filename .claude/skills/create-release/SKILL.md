@@ -100,45 +100,41 @@ On success the workflow has already created a release with raw commit bullets.
 
 ### 3. Transcribe the notes
 
-Read the auto-generated raw release notes:
+The workflow produces two sections: a raw `## Commits` list (`- <sha> <title>`)
+and a final, correctly-formatted `## Image` section (badges + lowercase pull
+commands). **Only the commits part needs transcribing — leave `## Image` as-is.**
+
+Read the auto-generated notes and split off the image section:
 
 ```bash
-gh release view <tag> --json body -q .body
+body=$(gh release view <tag> --json body -q .body)
+image=$(printf '%s' "$body" | sed -n '/^## Image$/,$p')   # keep verbatim
 ```
 
-Those are `- <sha> <title>` lines. Rewrite them into a readable
-**## What's changed** section: group related commits, lead with user-facing
-features and fixes, drop pure CI/chore noise unless it matters to operators, and
-phrase each bullet around the user impact rather than the implementation.
-
-Keep the `## Image` section at the bottom. The polished body:
+Rewrite the commit bullets into a readable **## What's changed** section: group
+related commits, lead with user-facing features and fixes, drop pure CI/chore
+noise unless it matters to operators, and phrase each bullet around user impact
+rather than implementation. Then recombine with the untouched `## Image`:
 
 ```
 ## What's changed
 
 - <grouped, rewritten bullets>
 
-## Image
-
-### Release <tag>
-
-[![Docker images](https://img.shields.io/badge/Docker_images-<tag>-blue?logo=docker)](https://github.com/Kusnierz-Maciej/apcoa-flow-mcp/pkgs/container/apcoa-flow-mcp?tag=<tag>)
-
-    docker pull ghcr.io/kusnierz-maciej/apcoa-flow-mcp:<tag>
-
-### Latest
-
-[![Docker images](https://img.shields.io/badge/Docker_images-latest-blue?logo=docker)](https://github.com/Kusnierz-Maciej/apcoa-flow-mcp/pkgs/container/apcoa-flow-mcp?tag=latest)
-
-    docker pull ghcr.io/kusnierz-maciej/apcoa-flow-mcp:latest
+<the verbatim ## Image section from $image>
 ```
 
-**Show the user the polished bullets and wait for confirmation**, then update
-the release in place:
+**Show the user the polished "What's changed" bullets and wait for
+confirmation**, then update the release in place (reusing the captured image
+section so the badges/pull commands stay exactly as the workflow generated them):
 
 ```bash
-gh release edit <tag> --notes "$(cat <<'EOF'
-...polished body...
+gh release edit <tag> --notes "$(cat <<EOF
+## What's changed
+
+- <polished bullets>
+
+${image}
 EOF
 )"
 ```

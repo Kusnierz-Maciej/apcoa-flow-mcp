@@ -78,7 +78,13 @@ jobs:
             exit 0
           fi
 
+          # GHCR image paths must be lowercase; the owner may be mixed-case.
+          image_lc="${REGISTRY}/$(echo "$IMAGE_NAME" | tr '[:upper:]' '[:lower:]')"
+          pkg_url="https://github.com/${GITHUB_REPOSITORY}/pkgs/container/apcoa-flow-mcp"
+
           # Raw changelog: every commit since the previous tag as "- <sha> <title>".
+          # These bullets are transcribed into a polished "## What's changed" section
+          # afterwards (see the create-release skill); the "## Image" section below is final.
           prev=$(git describe --tags --abbrev=0 "${TAG}^" 2>/dev/null || echo "")
           range=${prev:+$prev..}${TAG}
           {
@@ -88,8 +94,17 @@ jobs:
             echo
             echo "## Image"
             echo
-            echo "    docker pull ${REGISTRY}/${IMAGE_NAME}:${TAG}"
-            echo "    docker pull ${REGISTRY}/${IMAGE_NAME}:latest"
+            echo "### Release ${TAG}"
+            echo
+            echo "[![Docker images](https://img.shields.io/badge/Docker_images-${TAG}-blue?logo=docker)](${pkg_url}?tag=${TAG})"
+            echo
+            echo "    docker pull ${image_lc}:${TAG}"
+            echo
+            echo "### Latest"
+            echo
+            echo "[![Docker images](https://img.shields.io/badge/Docker_images-latest-blue?logo=docker)](${pkg_url}?tag=latest)"
+            echo
+            echo "    docker pull ${image_lc}:latest"
           } > notes.md
 
           gh release create "$TAG" --title "$TAG" --notes-file notes.md
