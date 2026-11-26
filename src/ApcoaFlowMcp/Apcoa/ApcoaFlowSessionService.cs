@@ -110,11 +110,26 @@ public sealed class ApcoaFlowSessionService(
         bool bypassCap,
         CancellationToken ct)
     {
+        logger.LogInformation("StartAsync: parking {ParkingId}, plate {Plate}, mode {Mode}, duration {Duration} min.",
+            parkingId, licensePlate, mode, durationMinutes);
+
         // 1. Resolve lot + tariff from the public parkingLots endpoint.
-        var lots = await api.GetParkingLotsAsync(parkingId, ct: ct);
+        List<ParkingLot> lots;
+        try
+        {
+            lots = await api.GetParkingLotsAsync(parkingId, ct: ct);
+        }
+        catch (Refit.ApiException ex)
+        {
+            logger.LogError(ex, "GetParkingLots failed for parking {ParkingId}: HTTP {Status}.", parkingId, (int)ex.StatusCode);
+            throw;
+        }
         var lot = lots.FirstOrDefault(l => l.LotId is not null && l.PrimaryTariffId is not null);
         if (lot?.LotId is null || lot.PrimaryTariffId is null)
+        {
+            logger.LogWarning("No bookable lot/tariff found for parking {ParkingId} ({LotCount} lots returned).", parkingId, lots.Count);
             return Refused($"Could not resolve a bookable lot/tariff for parking {parkingId}.");
+        }
 
         var lotId = lot.LotId.Value;
         var tariffId = lot.PrimaryTariffId.Value;
@@ -125,11 +140,23 @@ public sealed class ApcoaFlowSessionService(
         StartResult Tag(StartResult r) => r with { ParkingId = parkingId, ParkingName = parkingName };
 
         // 2. Resolve the consumer: vehicle (by plate or default), default payment method, profile id.
-        var consumer = await api.GetConsumerAsync(ct: ct);
+        ConsumerProfile consumer;
+        try
+        {
+            consumer = await api.GetConsumerAsync(ct: ct);
+        }
+        catch (Refit.ApiException ex)
+        {
+            logger.LogError(ex, "GetConsumer failed: HTTP {Status}.", (int)ex.StatusCode);
+            throw;
+        }
         var vehicle = consumer.VehicleInformationResponses
             .FirstOrDefault(v => string.Equals(Normalize(v.VehicleNumber), Normalize(licensePlate), StringComparison.OrdinalIgnoreCase));
         if (vehicle is null)
+        {
+            logger.LogWarning("Plate '{Plate}' not found on account (account has {Count} vehicle(s)).", licensePlate, consumer.VehicleInformationResponses.Count);
             return Refused($"License plate '{licensePlate}' is not registered on the account. Use get_registered_cars to see available plates.");
+        }
 
         var payment = consumer.ConsumerUserPaymentMethods.FirstOrDefault(p => p.IsDefault == 1)
                       ?? consumer.ConsumerUserPaymentMethods.FirstOrDefault();
@@ -152,13 +179,24 @@ public sealed class ApcoaFlowSessionService(
         //    by the PLATE (not the consumer id). Each returned offer carries the real promotion in its
         //    nested promotionResponseList — Offer.PromotionId/PromotionName surface that (the offer's own
         //    id/name are just the display code and must NOT be sent to validate/breakdown/start).
-        var offers = await api.GetApplicableOffersAsync(new ApplicableOffersRequest
+        List<Offer> offers;
+        try
         {
-            ParkingLot = lotId,
-            Identifier = vehicle.VehicleNumber,
-            Company = Company,
-        }, ct);
+            offers = await api.GetApplicableOffersAsync(new ApplicableOffersRequest
+            {
+                ParkingLot = lotId,
+                Identifier = vehicle.VehicleNumber,
+                Company = Company,
+            }, ct);
+        }
+        catch (Refit.ApiException ex)
+        {
+            logger.LogWarning(ex, "GetApplicableOffers failed for lot {LotId}: HTTP {Status} — proceeding without promotions.", lotId, (int)ex.StatusCode);
+            offers = [];
+        }
         var promo = offers.FirstOrDefault(o => o.IsActiveFreeTime);
+        logger.LogDebug("GetApplicableOffers: {Count} offer(s) for lot {LotId}, free-time promo: {Promo}.",
+            offers.Count, lotId, promo?.Name ?? "none");
 
         var checkIn = DateTimeOffset.UtcNow;
         var requested = durationMinutes is { } dm ? TimeSpan.FromMinutes(dm) : (TimeSpan?)null;
@@ -169,7 +207,14 @@ public sealed class ApcoaFlowSessionService(
         {
             var validateWindow = fw <= maxLot ? fw : maxLot;
             if (!await PromotionValidatesAsync(promo, lotId, vehicle.VehicleNumber, consumer.Id, checkIn, validateWindow, ct))
+            {
+                logger.LogInformation("Promotion '{Promo}' (lot {Lot}) failed validation — ignoring it.", promo.Name, lotId);
                 promo = null;
+            }
+            else
+            {
+                logger.LogInformation("Promotion '{Promo}' (lot {Lot}) validated OK, free window {Window} min.", promo.Name, lotId, fw.TotalMinutes);
+            }
         }
 
         // Cancel / refund note for this lot+tariff (so the user knows if stopping early refunds).
@@ -256,6 +301,8 @@ public sealed class ApcoaFlowSessionService(
         }
 
         // 8. Start the session.
+        logger.LogInformation("Starting session: parking {ParkingId} lot {LotId}, plate {Plate}, {Minutes} min, cost {Cost} PLN, promo {Promo}.",
+            parkingId, lotId, vehicle.VehicleNumber, minutes, costPln, promo?.Name ?? "none");
         StartSessionResponse response;
         try
         {
@@ -279,6 +326,7 @@ public sealed class ApcoaFlowSessionService(
         }
         catch (Refit.ApiException ex) when ((int)ex.StatusCode == 424)
         {
+            logger.LogWarning("StartParkingSession returned 424 (LIMIT_EXCEEDED) for parking {ParkingId} — fetching active sessions.", parkingId);
             // The API rejects a start with HTTP 424 FailedDependency / LIMIT_EXCEEDED (statusCode 5012)
             // when a session is already active (one at a time per account). Fetch the active session(s)
             // and tell the user whether one is already running HERE (so they may just use it) or
@@ -315,7 +363,14 @@ public sealed class ApcoaFlowSessionService(
 
             return Tag(new StartResult(false, 0m, 0, null, null, sb.ToString(), null) { ExistingSession = primary });
         }
+        catch (Refit.ApiException ex)
+        {
+            logger.LogError(ex, "StartParkingSession failed for parking {ParkingId}: HTTP {Status}.", parkingId, (int)ex.StatusCode);
+            throw;
+        }
 
+        logger.LogInformation("Session started: id {SessionId}, parking {ParkingId}, plate {Plate}, {Minutes} min, {Kind}.",
+            response.SessionId, parkingId, vehicle.VehicleNumber, minutes, quote.IsFree ? "free" : $"{costPln:0.00} PLN");
         var kind = quote.IsFree ? "free" : $"{costPln:0.00} PLN";
 
         // A consumed coupon normally carries a recognised reuse cooldown (e.g. PROMO_MINUTE=240 → 4h). If
@@ -335,14 +390,26 @@ public sealed class ApcoaFlowSessionService(
     /// <summary>Stops a session and returns the final (completed) session with its cost.</summary>
     public async Task<ParkingSessionV2?> StopAsync(long sessionId, CancellationToken ct)
     {
-        await api.StopParkingSessionAsync(new StopParkingSessionRequest
+        logger.LogInformation("StopAsync: session {SessionId}.", sessionId);
+        try
         {
-            ParkingSessionId = sessionId,
-            SessionCheckOutTime = DateTimeOffset.UtcNow,
-        }, ct);
+            await api.StopParkingSessionAsync(new StopParkingSessionRequest
+            {
+                ParkingSessionId = sessionId,
+                SessionCheckOutTime = DateTimeOffset.UtcNow,
+            }, ct);
+        }
+        catch (Refit.ApiException ex)
+        {
+            logger.LogError(ex, "StopParkingSession failed for session {SessionId}: HTTP {Status}.", sessionId, (int)ex.StatusCode);
+            throw;
+        }
 
         var completed = await api.GetParkingSessionsAsync(new ParkingSessionV2Query { Status = "COMPLETED", PageSize = 10 }, ct);
-        return completed.FirstOrDefault(s => s.Id == sessionId);
+        var result = completed.FirstOrDefault(s => s.Id == sessionId);
+        logger.LogInformation("StopAsync: session {SessionId} stopped, final cost {Cost} {Currency}.",
+            sessionId, result?.Amount, result?.CurrencyCode ?? "?");
+        return result;
     }
 
     public Task<List<ParkingSessionV2>> GetActiveAsync(CancellationToken ct) =>
@@ -561,9 +628,11 @@ public sealed class ApcoaFlowSessionService(
 
             return true;
         }
-        catch (Refit.ApiException)
+        catch (Refit.ApiException ex)
         {
             // Transport/deserialisation failure — treat the promo as not usable rather than risk a charge.
+            logger.LogWarning(ex, "PromotionValidates call failed for promo '{Promo}' (lot {Lot}): HTTP {Status} — treating as not usable.",
+                promo.PromotionName, lotId, (int)ex.StatusCode);
             return false;
         }
     }

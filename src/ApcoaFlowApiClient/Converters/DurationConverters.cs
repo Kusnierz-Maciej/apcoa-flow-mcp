@@ -55,3 +55,16 @@ public class MillisecondsTimeSpanConverter : JsonConverter<TimeSpan>
     public override void Write(Utf8JsonWriter writer, TimeSpan value, JsonSerializerOptions options) =>
         writer.WriteNumberValue((long)value.TotalMilliseconds);
 }
+
+/// <summary>Milliseconds → <see cref="TimeSpan"/>?; tolerates a JSON null (e.g. the failed-login body sends ttl:null).</summary>
+public class NullableMillisecondsTimeSpanConverter : JsonConverter<TimeSpan?>
+{
+    public override TimeSpan? Read(ref Utf8JsonReader reader, Type typeToConvert, JsonSerializerOptions options) =>
+        reader.TokenType == JsonTokenType.Null ? null : TimeSpan.FromMilliseconds(reader.GetInt64());
+
+    public override void Write(Utf8JsonWriter writer, TimeSpan? value, JsonSerializerOptions options)
+    {
+        if (value is { } v) writer.WriteNumberValue((long)v.TotalMilliseconds);
+        else writer.WriteNullValue();
+    }
+}
