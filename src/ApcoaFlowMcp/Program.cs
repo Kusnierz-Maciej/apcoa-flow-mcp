@@ -5,6 +5,9 @@ using ApcoaFlowMcp.Security;
 using ApcoaFlowMcp.Security.OAuth;
 using ApcoaFlowMcp.Tools;
 using Microsoft.AspNetCore.DataProtection;
+using OpenTelemetry.Logs;
+using OpenTelemetry.Resources;
+using OpenTelemetry.Trace;
 
 if (args.Contains("--stdio"))
 {
@@ -13,6 +16,36 @@ if (args.Contains("--stdio"))
 }
 
 var builder = WebApplication.CreateBuilder(args);
+
+var resource = ResourceBuilder.CreateDefault()
+    .AddService("apcoa-flow-mcp",
+        serviceVersion: typeof(Program).Assembly.GetName().Version?.ToString(3) ?? "unknown");
+
+if (builder.Configuration.GetValue<bool>("Telemetry:Enabled"))
+{
+    var otlpEndpoint = builder.Configuration["Telemetry:OtlpEndpoint"];
+
+    builder.Services.AddOpenTelemetry()
+        .WithTracing(tracing => tracing
+            .SetResourceBuilder(resource)
+            .AddAspNetCoreInstrumentation()
+            .AddOtlpExporter(o =>
+            {
+                if (otlpEndpoint is not null) o.Endpoint = new Uri(otlpEndpoint);
+            }))
+        .WithLogging(logging => logging
+            .SetResourceBuilder(resource)
+            .AddOtlpExporter(o =>
+            {
+                if (otlpEndpoint is not null) o.Endpoint = new Uri(otlpEndpoint);
+            }));
+
+    builder.Logging.AddOpenTelemetry(o =>
+    {
+        o.IncludeScopes = true;
+        o.IncludeFormattedMessage = true;
+    });
+}
 
 builder.Services.AddHttpContextAccessor();
 builder.Services.AddTransient<IApcoaFlowCredentialProvider, HttpContextCredentialProvider>();

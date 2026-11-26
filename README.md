@@ -60,38 +60,20 @@ The image is published to GHCR on every release — no build or clone required.
 
 **1. Create a `docker-compose.yml`:**
 
-```yaml
-services:
-  apcoa-flow-mcp:
-    container_name: apcoa-flow-mcp
-    image: ghcr.io/kusnierz-maciej/apcoa-flow-mcp:latest   # or pin a version, e.g. :v1.0.0
-    ports:
-      - "9012:8080"
-    env_file:
-      # Secrets (API key + optional default credentials). See .env below.
-      - .env
-    environment:
-      - ASPNETCORE_ENVIRONMENT=Production
-      # Non-secret settings — all optional, defaults shown. Override via the Section__Key convention.
-      - ApcoaFlow__MaxSessionCostPln=100
-      - ApcoaFlow__CurrentLocationRadiusMeters=300
-      - ParkingData__CompanyId=9
-      - ParkingData__GeohashPrecision=6
-      - ParkingData__SoftRefreshAge=12:00:00
-      - ParkingData__HardRefreshAge=48:00:00
-      - ParkingData__BackgroundRefreshInterval=24:00:00
-      - ParkingData__StorePath=/data/parking
-    volumes:
-      # Bind mount to a host directory the container can write to (warm-starts the parking cache).
-      # It must be writable by the user the container runs as. On a Synology NAS, run as an
-      # ACL-trusted host user (see the `user:` line) rather than chowning — Synology ACLs override
-      # chmod/chown, so `chown -R 1654` does not grant write.
-      - ./data/parking:/data/parking
-    # Run as a host user the share's ACL allows to write. On Synology use ContainerManager —
-    # find its id with `id ContainerManager` (e.g. 106808:106808). `user: "0:0"` (root) also works.
-    user: "106808:106808"
-    restart: unless-stopped
-```
+Two starting points live in [`src/ApcoaFlowMcp/docker/`](src/ApcoaFlowMcp/docker/):
+
+- [`docker-compose.prod.yml`](src/ApcoaFlowMcp/docker/docker-compose.prod.yml) — clean, generic
+  production setup. Start here for any host.
+- [`docker-compose.synology.yml`](src/ApcoaFlowMcp/docker/docker-compose.synology.yml) — the above
+  plus Synology fixes: runs as an ACL-trusted host user so the bind mount is writable, and sets a
+  human-readable `simple` console logging block.
+
+Copy whichever fits as your `docker-compose.yml`.
+
+> **Settings convention:** every setting has a default in the app's `appsettings.json`.
+> Both compose files list the non-secret keys with their defaults (commented out) so you can
+> see every knob in one place — uncomment a line to override it.
+
 
 > The bind-mounted directory caches the parking dataset (downloaded and decrypted from APCOA's public S3 bucket) so the server warm-starts after a restart instead of re-downloading. It is optional — if the directory isn't writable (or you omit the mount) the server still works, serving the dataset from memory and rebuilding from S3 on every start. See [Parking data](#parking-data).
 
