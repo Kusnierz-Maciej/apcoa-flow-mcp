@@ -53,6 +53,9 @@ public sealed class ParkingDataRefreshService : BackgroundService
     /// </summary>
     private async Task SafeRefreshAsync(bool warmOnly, CancellationToken ct)
     {
+        // Root span for the hosted-service run (no request context here); load/build spans nest under it.
+        using var activity = ApcoaTelemetry.Source.StartActivity(
+            warmOnly ? "parking_index.warm" : "parking_index.scheduled_refresh");
         try
         {
             if (warmOnly)
@@ -68,6 +71,8 @@ public sealed class ParkingDataRefreshService : BackgroundService
         catch (Exception ex)
         {
             _logger.LogWarning(ex, "Scheduled parking index refresh failed; keeping current data.");
+            activity?.AddException(ex);
+            activity?.SetStatus(System.Diagnostics.ActivityStatusCode.Error, ex.Message);
         }
     }
 }

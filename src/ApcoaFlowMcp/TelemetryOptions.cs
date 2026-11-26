@@ -12,6 +12,17 @@ public sealed class TelemetryOptions
     public string? OtlpEndpoint { get; set; }
 }
 
+/// <summary>Requests not worth a trace: static icons and OAuth discovery documents (fetched by clients on every connect).</summary>
+public static class TelemetryNoise
+{
+    public static bool IsNoise(PathString path) =>
+        path.StartsWithSegments("/.well-known")
+        || path.Equals("/favicon.ico", StringComparison.OrdinalIgnoreCase)
+        || path.Equals("/apple-touch-icon.png", StringComparison.OrdinalIgnoreCase)
+        || (path.Value is { } p && p.StartsWith("/icon-", StringComparison.OrdinalIgnoreCase)
+                                && p.EndsWith(".png", StringComparison.OrdinalIgnoreCase));
+}
+
 /// <summary>When telemetry is enabled, the OTLP endpoint must be an absolute http(s) URI.</summary>
 public sealed class TelemetryOptionsValidator : IValidateOptions<TelemetryOptions>
 {

@@ -50,6 +50,45 @@ Telemetry is off by default. To enable, set env vars in `docker-compose.prod.yml
 - Telemetry__OtlpEndpoint=http://alloy:4317
 ```
 
-This sends logs to the Alloy container in the logging stack, which forwards them to Loki.
-Traces are discarded (no Tempo). To retain traces, add a Tempo container and wire
-`otelcol.exporter.otlp` in `config.alloy`.
+This sends logs and traces to the Alloy container in the logging stack, which forwards
+logs to Loki and traces to Tempo.
+
+Each trace is built from four span sources:
+
+| Source | Spans |
+|---|---|
+| ASP.NET Core instrumentation | incoming request (root), e.g. `POST /mcp/` — tagged `user.email`; unhandled exceptions recorded. Static icons and `/.well-known/*` are not traced. |
+| `Experimental.ModelContextProtocol` (MCP SDK) | one per JSON-RPC request, e.g. `tools/call find_parking` — tagged `gen_ai.tool.name`, `mcp.method.name`, `mcp.session.id`; tool exceptions set `error.type` |
+| `System.Net.Http` (.NET built-in) | each outbound APCOA API / S3 call, **with query string** (redaction disabled) |
+| `ApcoaFlow` (app) | `parking_index.*` (warm / load / build / tile / scheduled_refresh / background_refresh), `apcoa.login` |
+
+**Business tags** on the tool span (`apcoa.*`): `parking.id`, `parking.name`, `lot.id`, `tariff.id`,
+`plate`, `start.mode`, `start.bypass_cap`, `duration_min`, `cost_pln`, `confirmed_cost_pln`,
+`promotion`, `session.id`, `distance_m`, and `outcome`.
+
+**Outcomes** — soft failures (the tool returns normally but did not act) set span status **Error**:
+
+| `apcoa.outcome` | Error? |
+|---|---|
+| `started`, `stopped`, `quote` (paid, awaiting confirmation), `not_free` (free-only tool at a paid parking) | no |
+| `cost_cap_exceeded`, `cost_mismatch`, `plate_not_registered`, `no_bookable_lot`, `no_payment_method`, `no_consumer_profile`, `exceeds_free_window`, `no_parking_nearby`, `session_already_active`, `credentials_rejected` | yes |
+
+A `401`/`419` token rejection adds an `apcoa.token_rejected_retrying` event to the tool span (explains
+the duplicate HTTP span that follows).
+
+Useful TraceQL:
+
+```
+{ span.gen_ai.tool.name = "find_parking" }
+{ span.apcoa.lot.id = 41905 }
+{ span.apcoa.cost_pln > 20 }
+{ span.user.email = "someone@example.com" }
+{ status = error }
+```
+
+> **Personal data:** traces carry the user's email, license plates and (via URLs) consumer ids.
+> That is intended for a self-hosted stack — don't point `Telemetry:OtlpEndpoint` at a shared or
+> third-party backend without revisiting this.
+
+Telemetry off (`Telemetry:Enabled=false`) costs effectively nothing: with no listener,
+`StartActivity` returns `null` and every tag call is a null check.

@@ -49,6 +49,10 @@ public class ApcoaFlowAuthHandler : DelegatingHandler
         {
             _logger?.LogWarning("APCOA returned HTTP {Status}; invalidating the cached token and re-logging in once.",
                 (int)response.StatusCode);
+            // Explains the duplicate HTTP span that follows (same request re-sent with a fresh token).
+            ApcoaTelemetry.Event("apcoa.token_rejected_retrying",
+                ("http.response.status_code", (int)response.StatusCode),
+                ("url.path", request.RequestUri?.AbsolutePath));
 
             _tokens.Invalidate(credentials, token);
 
@@ -67,6 +71,7 @@ public class ApcoaFlowAuthHandler : DelegatingHandler
                 _logger?.LogError("APCOA still returned HTTP {Status} after a fresh login — credentials rejected.",
                     (int)response.StatusCode);
                 _tokens.Invalidate(credentials, token);
+                ApcoaTelemetry.Fail("credentials_rejected", $"HTTP {(int)response.StatusCode} after re-login");
                 throw new ApcoaFlowCredentialsRejectedException($"HTTP {(int)response.StatusCode} after re-login");
             }
         }
@@ -90,7 +95,13 @@ public class ApcoaFlowAuthHandler : DelegatingHandler
 
     private async Task<string> LoginAsync(ApcoaFlowClientOptions credentials, CancellationToken cancellationToken)
     {
+        // Only runs on a token-cache miss, so the span marks when (and how often) we really log in.
+        using var activity = ApcoaTelemetry.Source.StartActivity("apcoa.login");
+        activity?.SetTag(ApcoaTelemetry.Tags.UserEmail, credentials.Email);
         var outcome = await ApcoaFlowLogin.TryLoginAsync(credentials.Email, credentials.Password, _logger, cancellationToken);
+        activity?.SetTag(ApcoaTelemetry.Tags.Outcome, outcome.Kind.ToString());
+        if (outcome.Kind != LoginOutcomeKind.Ok)
+            activity?.SetStatus(System.Diagnostics.ActivityStatusCode.Error, outcome.Kind.ToString());
         return outcome.Kind switch
         {
             LoginOutcomeKind.Ok => outcome.Token!,

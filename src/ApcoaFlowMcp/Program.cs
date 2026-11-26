@@ -34,10 +34,26 @@ if (telemetry.Enabled)
     // Only applied when valid — an invalid endpoint is reported by TelemetryOptionsValidator instead.
     TelemetryOptionsValidator.IsValidEndpoint(telemetry.OtlpEndpoint, out var otlpEndpoint);
 
+    // Keep query strings in HttpClient span URLs (url.full) — .NET redacts them by default. They carry
+    // ids, the plate and tariff parameters that make APCOA calls debuggable. No secrets travel in query
+    // strings (credentials are in the login body, tokens in headers). Process-wide; telemetry-only.
+    AppContext.SetSwitch("System.Net.Http.DisableUriRedaction", true);
+
     builder.Services.AddOpenTelemetry()
         .WithTracing(tracing => tracing
             .SetResourceBuilder(resource)
-            .AddAspNetCoreInstrumentation()
+            .AddAspNetCoreInstrumentation(o =>
+            {
+                // Attach unhandled exceptions (type, message, stack trace) to the request span.
+                o.RecordException = true;
+                o.Filter = ctx => !TelemetryNoise.IsNoise(ctx.Request.Path);
+            })
+            // MCP SDK spans: one per JSON-RPC request, e.g. "tools/call find_parking" (tag gen_ai.tool.name).
+            .AddSource("Experimental.ModelContextProtocol")
+            // .NET built-in HttpClient spans: outbound APCOA API + S3 calls.
+            .AddSource("System.Net.Http")
+            // App spans: parking index load/build/refresh, APCOA login; business tags on tool spans.
+            .AddSource(ApcoaTelemetry.SourceName)
             .AddOtlpExporter(o =>
             {
                 if (otlpEndpoint is not null) o.Endpoint = otlpEndpoint;

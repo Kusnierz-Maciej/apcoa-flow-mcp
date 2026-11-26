@@ -86,9 +86,10 @@ public sealed class ApcoaFlowSessionService(
         var nearby = await parkingData.FindNearbyAsync(latitude, longitude, radiusMeters / 1000.0, ct: ct);
         var closest = nearby.FirstOrDefault();
         if (closest.Parking is null)
-            return Refused($"No parking found within {radiusMeters:0} m of your location.");
+            return Refused($"No parking found within {radiusMeters:0} m of your location.", "no_parking_nearby");
 
         var distanceMeters = (int)Math.Round(closest.DistanceKm * 1000);
+        ApcoaTelemetry.Tag(ApcoaTelemetry.Tags.DistanceMeters, distanceMeters);
         var result = await StartAsync(closest.Parking.Id, licensePlate, durationMinutes, mode,
             confirmedCostPln, maxCostPln, bypassCap, ct);
         return result with { DistanceMeters = distanceMeters };
@@ -112,6 +113,11 @@ public sealed class ApcoaFlowSessionService(
     {
         logger.LogInformation("StartAsync: parking {ParkingId}, plate {Plate}, mode {Mode}, duration {Duration} min.",
             parkingId, licensePlate, mode, durationMinutes);
+        ApcoaTelemetry.Tag(ApcoaTelemetry.Tags.ParkingId, parkingId);
+        ApcoaTelemetry.Tag(ApcoaTelemetry.Tags.Plate, licensePlate);
+        ApcoaTelemetry.Tag(ApcoaTelemetry.Tags.StartMode, mode.ToString());
+        ApcoaTelemetry.Tag(ApcoaTelemetry.Tags.BypassCap, bypassCap);
+        ApcoaTelemetry.Tag(ApcoaTelemetry.Tags.ConfirmedCostPln, (double?)confirmedCostPln);
 
         // 1. Resolve lot + tariff from the public parkingLots endpoint.
         List<ParkingLot> lots;
@@ -128,12 +134,15 @@ public sealed class ApcoaFlowSessionService(
         if (lot?.LotId is null || lot.PrimaryTariffId is null)
         {
             logger.LogWarning("No bookable lot/tariff found for parking {ParkingId} ({LotCount} lots returned).", parkingId, lots.Count);
-            return Refused($"Could not resolve a bookable lot/tariff for parking {parkingId}.");
+            return Refused($"Could not resolve a bookable lot/tariff for parking {parkingId}.", "no_bookable_lot");
         }
 
         var lotId = lot.LotId.Value;
         var tariffId = lot.PrimaryTariffId.Value;
         var parkingName = lot.NearbyParkingLot?.Name;
+        ApcoaTelemetry.Tag(ApcoaTelemetry.Tags.LotId, lotId);
+        ApcoaTelemetry.Tag(ApcoaTelemetry.Tags.TariffId, tariffId);
+        ApcoaTelemetry.Tag(ApcoaTelemetry.Tags.ParkingName, parkingName);
         var maxLot = lot.MaxDuration is { } m && m > TimeSpan.Zero ? m : TimeSpan.MaxValue;
 
         // Stamps parking identity onto any result produced once the parking is resolved.
@@ -155,17 +164,17 @@ public sealed class ApcoaFlowSessionService(
         if (vehicle is null)
         {
             logger.LogWarning("Plate '{Plate}' not found on account (account has {Count} vehicle(s)).", licensePlate, consumer.VehicleInformationResponses.Count);
-            return Refused($"License plate '{licensePlate}' is not registered on the account. Use get_registered_cars to see available plates.");
+            return Refused($"License plate '{licensePlate}' is not registered on the account. Use get_registered_cars to see available plates.", "plate_not_registered");
         }
 
         var payment = consumer.ConsumerUserPaymentMethods.FirstOrDefault(p => p.IsDefault == 1)
                       ?? consumer.ConsumerUserPaymentMethods.FirstOrDefault();
         if (payment is null)
-            return Refused("No payment method is configured on the account.");
+            return Refused("No payment method is configured on the account.", "no_payment_method");
 
         // The session's consumerProfileId is the default profile's id, NOT the top-level consumer id.
         if (consumer.DefaultProfileId is not { } profileId)
-            return Refused("No consumer profile is available on the account.");
+            return Refused("No consumer profile is available on the account.", "no_consumer_profile");
 
         // 3. Find an active free-time promotion for this lot, then VALIDATE it BEFORE using it to
         //    decide the duration. The tariff breakdown applies a promo optimistically even when it is
@@ -231,11 +240,12 @@ public sealed class ApcoaFlowSessionService(
                 // No usable free tier: refuse, but INCLUDE pricing + point to the paid tool.
                 var ladder = await BuildPriceLadderAsync(tariffId, lotId, checkIn, vehicle.VehicleNumber, consumer.Id, maxLot, ct);
                 var msg = FormatNoFreeMessage(parkingId, ladder);
-                return Tag(Refused(msg)) with { PriceLadder = ladder, CancelRefundNote = cancelNote };
+                // Expected answer for start_free_session at a paid parking — not an error.
+                return Tag(Refused(msg, "not_free", isError: false)) with { PriceLadder = ladder, CancelRefundNote = cancelNote };
             }
 
             if (requested is { } r && r > freeWindow)
-                return Tag(Refused($"Requested {r.TotalMinutes:0} min exceeds the free window of {freeWindow.TotalMinutes:0} min for this parking.")) with { CancelRefundNote = cancelNote };
+                return Tag(Refused($"Requested {r.TotalMinutes:0} min exceeds the free window of {freeWindow.TotalMinutes:0} min for this parking.", "exceeds_free_window")) with { CancelRefundNote = cancelNote };
 
             window = requested is { } rq && rq > freeWindow ? rq : freeWindow;
             window = window <= maxLot ? window : maxLot;
@@ -256,6 +266,9 @@ public sealed class ApcoaFlowSessionService(
         var quote = await QuoteAsync(tariffId, lotId, window, checkIn, vehicle.VehicleNumber, promo, consumer.Id, ct);
         var costPln = quote.TotalPayablePln;
         var minutes = (int)window.TotalMinutes;
+        ApcoaTelemetry.Tag(ApcoaTelemetry.Tags.DurationMinutes, minutes);
+        ApcoaTelemetry.Tag(ApcoaTelemetry.Tags.CostPln, (double)costPln);
+        ApcoaTelemetry.Tag(ApcoaTelemetry.Tags.Promotion, promo?.Name);
 
         // A note describing the free window applied by a promo, so the paid confirmation makes clear
         // how much of the time is free vs charged (empty when no free-time promo applies).
@@ -268,7 +281,7 @@ public sealed class ApcoaFlowSessionService(
         if (mode == StartMode.OnlyFree && !quote.IsFree)
         {
             var ladder = await BuildPriceLadderAsync(tariffId, lotId, checkIn, vehicle.VehicleNumber, consumer.Id, maxLot, ct);
-            return Tag(Refused(FormatNoFreeMessage(parkingId, ladder))) with { PriceLadder = ladder, CancelRefundNote = cancelNote };
+            return Tag(Refused(FormatNoFreeMessage(parkingId, ladder), "not_free", isError: false)) with { PriceLadder = ladder, CancelRefundNote = cancelNote };
         }
 
         // 7. Free → start now. Paid → require confirmation and the cap.
@@ -282,10 +295,15 @@ public sealed class ApcoaFlowSessionService(
                     with { PriceLadder = ladder, CancelRefundNote = cancelNote };
 
             if (!bypassCap && costPln > maxCostPln)
+            {
+                ApcoaTelemetry.Fail("cost_cap_exceeded", $"{costPln:0.00} PLN > cap {maxCostPln:0.00} PLN");
                 return PaidQuote($"Cost {costPln:0.00} PLN for {minutes} min exceeds the limit of {maxCostPln:0.00} PLN. Use start_expensive_session to override.{freeNote}{FormatLadderSuffix(ladder)}");
+            }
 
             if (confirmedCostPln is null)
             {
+                // First step of the two-step paid flow — a normal outcome, not an error.
+                ApcoaTelemetry.Outcome("quote");
                 // Lead with the SHORTEST startable option, then list the rest, and tell the caller to
                 // re-invoke with the chosen durationMinutes + confirmedCostPln.
                 var shortest = ladder.Count > 0 ? ladder[0] : new PriceTier(minutes, costPln);
@@ -297,7 +315,10 @@ public sealed class ApcoaFlowSessionService(
             // The confirmed cost must match the live cost exactly — refuse if it differs either way
             // (price changed, promo expired, or a stale/guessed confirmation).
             if (costPln != confirmedCostPln.Value)
+            {
+                ApcoaTelemetry.Fail("cost_mismatch", $"live {costPln:0.00} PLN != confirmed {confirmedCostPln.Value:0.00} PLN");
                 return PaidQuote($"Live cost {costPln:0.00} PLN for {minutes} min does not match the confirmed {confirmedCostPln.Value:0.00} PLN; not starting. Re-confirm with the exact current cost.{freeNote}{FormatLadderSuffix(ladder)}");
+            }
         }
 
         // 8. Start the session.
@@ -334,8 +355,9 @@ public sealed class ApcoaFlowSessionService(
             var stillActive = await api.GetParkingSessionsAsync(
                 new ParkingSessionV2Query { Status = "ACTIVE", PageSize = 10 }, ct);
 
+            ApcoaTelemetry.Fail("session_already_active", "HTTP 424 LIMIT_EXCEEDED");
             if (stillActive.Count == 0)
-                return Tag(Refused("The API rejected the start with LIMIT_EXCEEDED, but no active session was found. Try again in a moment, or call get_active_sessions."));
+                return Tag(Refused("The API rejected the start with LIMIT_EXCEEDED, but no active session was found. Try again in a moment, or call get_active_sessions.", "session_already_active"));
 
             // Prefer a session at the parking the user was trying to start at.
             var sameParking = stillActive.FirstOrDefault(s => s.ParkingId == parkingId);
@@ -372,6 +394,8 @@ public sealed class ApcoaFlowSessionService(
         logger.LogInformation("Session started: id {SessionId}, parking {ParkingId}, plate {Plate}, {Minutes} min, {Kind}.",
             response.SessionId, parkingId, vehicle.VehicleNumber, minutes, quote.IsFree ? "free" : $"{costPln:0.00} PLN");
         var kind = quote.IsFree ? "free" : $"{costPln:0.00} PLN";
+        ApcoaTelemetry.Outcome("started");
+        ApcoaTelemetry.Tag(ApcoaTelemetry.Tags.SessionId, response.SessionId);
 
         // A consumed coupon normally carries a recognised reuse cooldown (e.g. PROMO_MINUTE=240 → 4h). If
         // the API ever sends a cooldown in a unit we don't map, ReuseCooldown is null and we show nothing —
@@ -391,6 +415,7 @@ public sealed class ApcoaFlowSessionService(
     public async Task<ParkingSessionV2?> StopAsync(long sessionId, CancellationToken ct)
     {
         logger.LogInformation("StopAsync: session {SessionId}.", sessionId);
+        ApcoaTelemetry.Tag(ApcoaTelemetry.Tags.SessionId, sessionId);
         try
         {
             await api.StopParkingSessionAsync(new StopParkingSessionRequest
@@ -407,6 +432,10 @@ public sealed class ApcoaFlowSessionService(
 
         var completed = await api.GetParkingSessionsAsync(new ParkingSessionV2Query { Status = "COMPLETED", PageSize = 10 }, ct);
         var result = completed.FirstOrDefault(s => s.Id == sessionId);
+        ApcoaTelemetry.Outcome("stopped");
+        ApcoaTelemetry.Tag(ApcoaTelemetry.Tags.CostPln, (double?)result?.Amount);
+        ApcoaTelemetry.Tag(ApcoaTelemetry.Tags.ParkingName, result?.ParkingName);
+        ApcoaTelemetry.Tag(ApcoaTelemetry.Tags.Plate, result?.LicensePlate);
         logger.LogInformation("StopAsync: session {SessionId} stopped, final cost {Cost} {Currency}.",
             sessionId, result?.Amount, result?.CurrencyCode ?? "?");
         return result;
@@ -637,8 +666,18 @@ public sealed class ApcoaFlowSessionService(
         }
     }
 
-    private static StartResult Refused(string message) =>
-        new(false, 0m, 0, null, null, message, null);
+    /// <summary>
+    /// A start that did not happen. Records <paramref name="outcome"/> on the current span and, unless
+    /// <paramref name="isError"/> is false (an expected answer such as "not free"), marks it failed.
+    /// </summary>
+    private static StartResult Refused(string message, string outcome = "refused", bool isError = true)
+    {
+        if (isError)
+            ApcoaTelemetry.Fail(outcome, message);
+        else
+            ApcoaTelemetry.Outcome(outcome);
+        return new(false, 0m, 0, null, null, message, null);
+    }
 
     private static string Normalize(string? s) => (s ?? string.Empty).Replace(" ", "").Trim();
 

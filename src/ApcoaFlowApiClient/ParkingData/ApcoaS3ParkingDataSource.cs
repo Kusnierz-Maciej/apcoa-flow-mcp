@@ -115,6 +115,7 @@ public sealed class ApcoaS3ParkingDataSource : IApcoaParkingDataSource, IDisposa
                 if (_index is not null)
                     return _index;
 
+                using var activity = ApcoaTelemetry.Source.StartActivity("parking_index.load");
                 var snapshot = await _store.LoadAsync(ct);
                 if (snapshot is not null && Age(snapshot.BuiltAtUtc) < _options.HardRefreshAge)
                 {
@@ -122,9 +123,12 @@ public sealed class ApcoaS3ParkingDataSource : IApcoaParkingDataSource, IDisposa
                         "Loaded parking index from disk: {Count} entries, built {BuiltAt:u}.",
                         snapshot.Entries.Count, snapshot.BuiltAtUtc);
                     _index = new ParkingSpatialIndex(snapshot, _options.GeohashPrecision);
+                    activity?.SetTag(ApcoaTelemetry.Tags.IndexSource, "disk");
+                    activity?.SetTag(ApcoaTelemetry.Tags.IndexEntries, snapshot.Entries.Count);
                     return _index;
                 }
 
+                activity?.SetTag(ApcoaTelemetry.Tags.IndexSource, "s3");
                 await BuildIndexCoreAsync(ct);
                 return _index!;
             }
@@ -161,6 +165,10 @@ public sealed class ApcoaS3ParkingDataSource : IApcoaParkingDataSource, IDisposa
 
         _backgroundRefresh = Task.Run(async () =>
         {
+            // Detach from the request that triggered it: the rebuild outlives that request, so it gets
+            // its own trace instead of dangling off the end of an unrelated tool call.
+            System.Diagnostics.Activity.Current = null;
+            using var activity = ApcoaTelemetry.Source.StartActivity("parking_index.background_refresh");
             try
             {
                 await BuildIndexAsync(CancellationToken.None);
@@ -168,6 +176,8 @@ public sealed class ApcoaS3ParkingDataSource : IApcoaParkingDataSource, IDisposa
             catch (Exception ex)
             {
                 _logger.LogWarning(ex, "Background parking index refresh failed; keeping current data.");
+                activity?.AddException(ex);
+                activity?.SetStatus(System.Diagnostics.ActivityStatusCode.Error, ex.Message);
             }
         });
     }
@@ -197,22 +207,34 @@ public sealed class ApcoaS3ParkingDataSource : IApcoaParkingDataSource, IDisposa
     private async Task BuildIndexCoreAsync(CancellationToken ct)
     {
         _logger.LogInformation("Building parking index from S3 (all countries)…");
+        using var activity = ApcoaTelemetry.Source.StartActivity("parking_index.build");
 
         var key = await GetDecryptionKeyAsync(ct);
 
         // Each tile file is country-specific in name, so iterate the (country, tile) pairs.
         // Dedupe by id: a parking appears in exactly one tile, but guard against overlap anyway.
         var byId = new Dictionary<int, ParkingEntry>();
+        int tiles = 0, failedTiles = 0;
         foreach (var (cc, countryTiles) in CountryTiles)
         {
             foreach (var tile in countryTiles)
             {
                 ct.ThrowIfCancellationRequested();
+                tiles++;
                 var entries = await DownloadTileAsync(tile, cc, key, ct);
+                if (entries is null)
+                {
+                    failedTiles++;
+                    continue;
+                }
                 foreach (var e in entries)
                     byId[e.Id] = e;
             }
         }
+
+        activity?.SetTag(ApcoaTelemetry.Tags.IndexTiles, tiles);
+        activity?.SetTag(ApcoaTelemetry.Tags.IndexFailedTiles, failedTiles);
+        activity?.SetTag(ApcoaTelemetry.Tags.IndexEntries, byId.Count);
 
         var snapshot = new ParkingSnapshot
         {
@@ -240,11 +262,16 @@ public sealed class ApcoaS3ParkingDataSource : IApcoaParkingDataSource, IDisposa
     /// <summary>
     /// Downloads and decrypts a single S3 tile into slim entries. A missing/empty tile (≤28 bytes is
     /// just a GCM nonce+tag with no payload) or any download/decrypt failure yields an empty list and
-    /// a warning, so one bad tile never aborts the whole build.
+    /// a warning, so one bad tile never aborts the whole build. Returns null (vs. empty) on failure so
+    /// the caller can count failed tiles.
     /// </summary>
-    private async Task<IReadOnlyList<ParkingEntry>> DownloadTileAsync(
+    private async Task<IReadOnlyList<ParkingEntry>?> DownloadTileAsync(
         string geohash2, string countryCode, byte[] key, CancellationToken ct)
     {
+        // One span per tile: its HTTP child span is the download; the remainder is decrypt + parse.
+        using var activity = ApcoaTelemetry.Source.StartActivity("parking_index.tile");
+        activity?.SetTag("apcoa.tile", $"{geohash2}/{countryCode}");
+
         var url = $"{S3BaseUrl}/apcoa_{geohash2}_{countryCode}_parking";
         byte[] bytes;
         try
@@ -254,21 +281,29 @@ public sealed class ApcoaS3ParkingDataSource : IApcoaParkingDataSource, IDisposa
         catch (HttpRequestException ex)
         {
             _logger.LogWarning(ex, "Failed to download tile {Tile}/{Country}; skipping.", geohash2, countryCode);
-            return [];
+            activity?.SetStatus(System.Diagnostics.ActivityStatusCode.Error, "download failed");
+            return null;
         }
 
         if (bytes.Length <= 28)
+        {
+            activity?.SetTag(ApcoaTelemetry.Tags.IndexEntries, 0);
             return [];
+        }
 
         try
         {
             var decrypted = DecryptGcm(bytes, key);
-            return ParseEntries(decrypted);
+            var entries = ParseEntries(decrypted);
+            activity?.SetTag(ApcoaTelemetry.Tags.IndexEntries, entries.Count);
+            return entries;
         }
         catch (Exception ex)
         {
             _logger.LogWarning(ex, "Failed to decrypt/parse tile {Tile}/{Country}; skipping.", geohash2, countryCode);
-            return [];
+            activity?.AddException(ex);
+            activity?.SetStatus(System.Diagnostics.ActivityStatusCode.Error, "decrypt/parse failed");
+            return null;
         }
     }
 

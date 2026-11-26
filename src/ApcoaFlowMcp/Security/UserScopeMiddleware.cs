@@ -16,6 +16,9 @@ public sealed class UserScopeMiddleware(RequestDelegate next)
             return;
         }
 
+        // Same identity on the request span, so traces are searchable by user ({ span.user.email = "…" }).
+        System.Diagnostics.Activity.Current?.SetTag(ApcoaFlowApiClient.ApcoaTelemetry.Tags.UserEmail, email);
+
         using (logger.BeginScope("{UserEmail}", email))
         {
             await next(context);
