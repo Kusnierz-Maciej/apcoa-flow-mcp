@@ -1,8 +1,8 @@
 namespace ApcoaFlowApiClient.Tests;
 
 /// <summary>
-/// Live-API smoke test for authentication. The full read-only, pricing, and session-lifecycle flows
-/// are covered by <see cref="LiveApiCaptureTests"/> and <see cref="LiveApiSessionTests"/>.
+/// Live-API smoke test for authentication. Public-endpoint access and the session lifecycle
+/// are covered by <see cref="LiveApiPublicEndpointTests"/> and <see cref="LiveApiSessionTests"/>.
 /// </summary>
 [Category("LiveApi")]
 public class ApcoaFlowApiTests
