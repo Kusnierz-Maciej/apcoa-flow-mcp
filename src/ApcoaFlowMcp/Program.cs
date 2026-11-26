@@ -41,6 +41,8 @@ builder.Services
 
 var app = builder.Build();
 
+app.UseMiddleware<RequestLoggingMiddleware>();
+
 // OAuth authorization-server + protected-resource endpoints (public — no /mcp gate).
 app.MapOAuthEndpoints();
 
@@ -50,6 +52,7 @@ app.UseWhen(
     {
         branch.UseMiddleware<CredentialFailureMiddleware>();
         branch.UseMiddleware<ApiKeyMiddleware>();
+        branch.UseMiddleware<UserScopeMiddleware>();
     });
 
 app.MapMcp("/mcp");
