@@ -5,20 +5,20 @@ namespace ApcoaFlowApiClient.Models.Auth;
 
 public class LoginResponse
 {
-    public int UserId { get; set; }
+    public int? UserId { get; set; }
 
-    /// <summary>Bearer token — use this as the Authorization header value.</summary>
-    public string AuthToken { get; set; } = string.Empty;
+    /// <summary>Bearer token — use this as the Authorization header value. Null on a failed login.</summary>
+    public string? AuthToken { get; set; }
 
-    /// <summary>Token lifetime (API sends milliseconds; observed 90 days).</summary>
+    /// <summary>Token lifetime (API sends milliseconds; observed 90 days). Null on a failed login.</summary>
     [JsonPropertyName("ttl")]
-    [JsonConverter(typeof(MillisecondsTimeSpanConverter))]
-    public TimeSpan Ttl { get; set; }
+    [JsonConverter(typeof(NullableMillisecondsTimeSpanConverter))]
+    public TimeSpan? Ttl { get; set; }
 
     [JsonConverter(typeof(IsoDateTimeOffsetConverter))]
     public DateTimeOffset? Created { get; set; }
 
-    public string RefreshToken { get; set; } = string.Empty;
+    public string? RefreshToken { get; set; }
 
     [JsonConverter(typeof(IsoDateTimeOffsetConverter))]
     public DateTimeOffset? RefreshTokenStartDate { get; set; }
