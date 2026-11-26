@@ -82,7 +82,11 @@ builder.Services.AddSingleton(sp =>
     new CredentialTokenService(sp.GetRequiredService<IOptions<SecurityOptions>>().Value.TokenSecret!));
 
 builder.Services
-    .AddMcpServer(options => options.ServerInstructions = McpInstructions.Text)
+    .AddMcpServer(options =>
+    {
+        options.ServerInfo = McpServerIdentity.Create();
+        options.ServerInstructions = McpInstructions.Text;
+    })
     .WithHttpTransport()
     .WithTools<ApcoaFlowTools>();
 
@@ -103,6 +107,10 @@ var forwardedHeaders = new ForwardedHeadersOptions
 forwardedHeaders.KnownIPNetworks.Clear();
 forwardedHeaders.KnownProxies.Clear();
 app.UseForwardedHeaders(forwardedHeaders);
+
+// Favicon / touch icons (wwwroot) for the OAuth sign-in page and for clients that look up a
+// connector's icon from the server origin. Public, like the OAuth endpoints.
+app.UseStaticFiles();
 
 app.UseMiddleware<RequestLoggingMiddleware>();
 

@@ -288,7 +288,10 @@ public static class OAuthEndpoints
             <html lang="en"><head><meta charset="utf-8">
             <meta name="viewport" content="width=device-width, initial-scale=1">
             <meta name="color-scheme" content="light dark">
-            <title>APCOA Flow MCP — Sign in</title>
+            <title>Unofficial APCOA Flow MCP — Sign in</title>
+            <link rel="icon" href="/favicon.ico" sizes="16x16 32x32 48x48">
+            <link rel="icon" href="/icon-192.png" type="image/png" sizes="192x192">
+            <link rel="apple-touch-icon" href="/apple-touch-icon.png">
             <style>
               body{font-family:system-ui,sans-serif;background:#f4f5f7;margin:0;padding:2rem;color:#1a1a2e}
               .card{max-width:24rem;margin:3rem auto;background:#fff;border-radius:12px;padding:1.75rem;
@@ -313,7 +316,7 @@ public static class OAuthEndpoints
               }
             </style></head>
             <body><div class="card">
-              <h1>Connect APCOA Flow</h1>
+              <h1>Connect APCOA Flow (unofficial)</h1>
               {{errorBlock}}
               <form id="login" method="post" action="/authorize">
                 <input type="hidden" name="client_id" value="{{H(clientId)}}">

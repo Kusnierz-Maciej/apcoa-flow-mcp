@@ -26,7 +26,11 @@ public static class StdioHost
         builder.Services.AddScoped<ApcoaFlowSessionService>();
 
         builder.Services
-            .AddMcpServer(options => options.ServerInstructions = McpInstructions.Text)
+            .AddMcpServer(options =>
+            {
+                options.ServerInfo = McpServerIdentity.Create();
+                options.ServerInstructions = McpInstructions.Text;
+            })
             .WithStdioServerTransport()
             .WithTools<ApcoaFlowTools>();
 
