@@ -20,6 +20,9 @@ services:
       #- ParkingData__BackgroundRefreshInterval=24:00:00
       # StorePath must match the bind mount target below.
       - ParkingData__StorePath=/data/parking
+      # Security — require an allowlisted MCP API key (set false to drop the key gate; APCOA
+      # credentials are still required). When true, at least one Security__AllowedApiKeys__N must be set.
+      #- Security__RequireMcpApiKey=true
       # Logging
       #- Logging__LogLevel__Default=Information
       #- Logging__LogLevel__Microsoft.AspNetCore=Warning

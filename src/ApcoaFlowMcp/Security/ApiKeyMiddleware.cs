@@ -15,16 +15,11 @@ public class ApiKeyMiddleware
     public const string PasswordItemKey = "apcoaflow-password";
 
     private readonly RequestDelegate _next;
-    private readonly string? _apiKey;
 
-    public ApiKeyMiddleware(RequestDelegate next, IConfiguration configuration)
+    public ApiKeyMiddleware(RequestDelegate next)
     {
-        _next   = next;
-        _apiKey = NullIfEmpty(configuration["Security:ApiKey"]);
+        _next = next;
     }
-
-    private static string? NullIfEmpty(string? value) =>
-        string.IsNullOrWhiteSpace(value) ? null : value;
 
     public async Task InvokeAsync(
         HttpContext context,
@@ -54,13 +49,19 @@ public class ApiKeyMiddleware
             return;
         }
 
-        // Path B: legacy X-Api-Key + Basic.
-        if (!string.IsNullOrWhiteSpace(_apiKey))
+        // Path B: legacy X-Api-Key + Basic. The key gate is enforced unless RequireMcpApiKey is off.
+        // When a key IS required but none is configured, IsAllowed returns false → fail closed.
+        if (allowlist.RequireApiKey)
         {
             var provided = context.Request.Headers["X-Api-Key"].FirstOrDefault();
-            if (provided != _apiKey)
+            if (!allowlist.IsAllowed(provided))
             {
-                logger.LogWarning("Rejected /mcp request: missing or incorrect X-Api-Key.");
+                if (!allowlist.IsEnabled)
+                    logger.LogWarning(
+                        "Rejected /mcp request: an API key is required but none is configured " +
+                        "(Security__AllowedApiKeys is empty). Set a key or Security__RequireMcpApiKey=false.");
+                else
+                    logger.LogWarning("Rejected /mcp request: missing or incorrect X-Api-Key.");
                 context.Response.StatusCode = StatusCodes.Status401Unauthorized;
                 await context.Response.WriteAsync("Unauthorized");
                 return;

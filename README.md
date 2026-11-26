@@ -53,6 +53,11 @@ The three auth methods:
 
 > HTTP mode has **no default APCOA account** — every HTTP client supplies its own credentials via
 > method 1 or 2.
+>
+> **Disabling the API-key gate:** set `Security__RequireMcpApiKey=false` for a trusted/private
+> deployment. The `X-Api-Key` check is dropped and the OAuth login screen no longer asks for an API
+> key — APCOA email + password are still required. Default is `true`; while it is on, at least one
+> `Security__AllowedApiKeys__N` must be configured or every request is rejected.
 
 ### Docker (production / NAS)
 

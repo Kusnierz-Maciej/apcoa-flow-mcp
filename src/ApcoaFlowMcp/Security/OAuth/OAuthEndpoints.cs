@@ -75,6 +75,8 @@ public static class OAuthEndpoints
     }
 
     private static IResult AuthorizeForm(
+        HttpContext ctx,
+        ApiKeyAllowlist allowlist,
         [FromQuery(Name = "client_id")] string? clientId,
         [FromQuery(Name = "redirect_uri")] string? redirectUri,
         [FromQuery] string? state,
@@ -89,7 +91,7 @@ public static class OAuthEndpoints
         if (string.IsNullOrWhiteSpace(redirectUri) || string.IsNullOrWhiteSpace(codeChallenge))
             return Results.BadRequest("redirect_uri and code_challenge are required.");
 
-        return Html(RenderForm(clientId, redirectUri, state, codeChallenge, error: null));
+        return Html(RenderForm(clientId, redirectUri, state, codeChallenge, allowlist.RequireApiKey, error: null));
     }
 
     private static async Task<IResult> AuthorizeSubmit(
@@ -114,17 +116,17 @@ public static class OAuthEndpoints
         if (string.IsNullOrWhiteSpace(redirectUri) || string.IsNullOrWhiteSpace(codeChallenge))
             return Results.BadRequest("Missing authorization parameters.");
 
-        // 1. API-key allowlist gate.
+        // 1. API-key allowlist gate (auto-passes when RequireMcpApiKey is off).
         if (!allowlist.IsAllowed(apiKey))
         {
             logger.LogWarning("OAuth authorize denied: API key not in allowlist.");
-            return Html(RenderForm(clientId, redirectUri, state, codeChallenge,
+            return Html(RenderForm(clientId, redirectUri, state, codeChallenge, allowlist.RequireApiKey,
                 "Invalid API key."), StatusCodes.Status401Unauthorized);
         }
 
         // 2. Validate the APCOA credentials by a real login — classify bad-creds vs API error.
         if (string.IsNullOrWhiteSpace(email) || string.IsNullOrWhiteSpace(password))
-            return Html(RenderForm(clientId, redirectUri, state, codeChallenge,
+            return Html(RenderForm(clientId, redirectUri, state, codeChallenge, allowlist.RequireApiKey,
                 "APCOA email and password are required."), StatusCodes.Status400BadRequest);
 
         var outcome = await loginValidator.ValidateAsync(email, password, ct);
@@ -132,19 +134,22 @@ public static class OAuthEndpoints
         {
             case LoginOutcomeKind.BadCredentials:
                 logger.LogInformation("OAuth authorize: APCOA credentials rejected.");
-                return Html(RenderForm(clientId, redirectUri, state, codeChallenge,
+                return Html(RenderForm(clientId, redirectUri, state, codeChallenge, allowlist.RequireApiKey,
                     "APCOA rejected these credentials. Check your email and password."),
                     StatusCodes.Status401Unauthorized);
             case LoginOutcomeKind.ApiError:
                 logger.LogWarning("OAuth authorize: APCOA API error during validation ({Detail}).", outcome.Detail);
-                return Html(RenderForm(clientId, redirectUri, state, codeChallenge,
+                return Html(RenderForm(clientId, redirectUri, state, codeChallenge, allowlist.RequireApiKey,
                     "APCOA service is temporarily unavailable. Please try again."),
                     StatusCodes.Status503ServiceUnavailable);
         }
 
         // 3. Mint a single-use, short-lived authorization code binding the creds + PKCE + redirect.
+        // When no API key is required, there is no key to hash — embed an empty hash (IsHashAllowed
+        // passes it through in that mode).
+        var apiKeyHash = allowlist.RequireApiKey ? CredentialTokenService.HashApiKey(apiKey!) : string.Empty;
         var code = tokens.Protect(new TokenPayload(
-            TokenKind.Code, email!, password!, CredentialTokenService.HashApiKey(apiKey!),
+            TokenKind.Code, email!, password!, apiKeyHash,
             codeChallenge, redirectUri), CodeTtl);
 
         logger.LogInformation("OAuth authorize: credentials validated, issuing authorization code.");
@@ -264,10 +269,19 @@ public static class OAuthEndpoints
         Results.Content(html, "text/html; charset=utf-8", Encoding.UTF8, statusCode);
 
     private static string RenderForm(
-        string? clientId, string redirectUri, string? state, string codeChallenge, string? error)
+        string? clientId, string redirectUri, string? state, string codeChallenge, bool requireApiKey, string? error)
     {
         string H(string? v) => WebUtility.HtmlEncode(v ?? string.Empty);
         var errorBlock = error is null ? "" : $"<p class=\"error\">{H(error)}</p>";
+
+        var apiKeyBlock = requireApiKey
+            ? """
+                <label for="mcp-api-key">MCP server API key</label>
+                <input id="mcp-api-key" name="api_key" type="password"
+                       autocapitalize="none" spellcheck="false" required>
+                <p class="field-hint">Provided by whoever runs this MCP server (not your APCOA password).</p>
+            """
+            : "";
 
         return $$"""
             <!doctype html>
@@ -313,12 +327,7 @@ public static class OAuthEndpoints
                 <label for="apcoa_password">APCOA account password</label>
                 <input id="apcoa_password" name="apcoa_password" type="password"
                        autocomplete="current-password" required>
-
-                <label for="mcp-api-key">MCP server API key</label>
-                <input id="mcp-api-key" name="api_key" type="password"
-                       autocapitalize="none" spellcheck="false" required>
-                <p class="field-hint">Provided by whoever runs this MCP server (not your APCOA password).</p>
-
+            {{apiKeyBlock}}
                 <button type="submit">Sign in</button>
               </form>
               <p class="hint">Your APCOA credentials are used to sign in on your behalf and are stored only

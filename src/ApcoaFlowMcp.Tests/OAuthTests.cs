@@ -69,8 +69,13 @@ public class OAuthTests
 
     // ─── ApiKeyAllowlist ───────────────────────────────────────────────────────────────────────────
 
-    private static ApiKeyAllowlist Allowlist(string[]? keys = null, string? legacy = null) =>
-        new(Options.Create(new SecurityOptions { AllowedApiKeys = keys ?? [], ApiKey = legacy }));
+    private static ApiKeyAllowlist Allowlist(string[]? keys = null, string? legacy = null, bool requireKey = true) =>
+        new(Options.Create(new SecurityOptions
+        {
+            AllowedApiKeys = keys ?? [],
+            ApiKey = legacy,
+            RequireMcpApiKey = requireKey,
+        }));
 
     [Test]
     public async Task Allowlist_AllowsConfiguredKey_RejectsOthers()
@@ -100,6 +105,31 @@ public class OAuthTests
         await Assert.That(Allowlist(["alpha", "bravo"]).IsHashAllowed(hash)).IsTrue();
         // Remove 'alpha' (simulating the admin pulling the key + restart) → its tokens are rejected.
         await Assert.That(Allowlist(["bravo"]).IsHashAllowed(hash)).IsFalse();
+    }
+
+    [Test]
+    public async Task Allowlist_RequirementDisabled_PassesEverything()
+    {
+        // RequireMcpApiKey=false: the key gate is off, so any (or no) key passes, as does any hash.
+        var a = Allowlist(keys: [], requireKey: false);
+        await Assert.That(a.RequireApiKey).IsFalse();
+        await Assert.That(a.IsAllowed("anything")).IsTrue();
+        await Assert.That(a.IsAllowed("")).IsTrue();
+        await Assert.That(a.IsAllowed(null)).IsTrue();
+        await Assert.That(a.IsHashAllowed("")).IsTrue();
+        await Assert.That(a.IsHashAllowed(null)).IsTrue();
+    }
+
+    [Test]
+    public async Task Allowlist_RequiredButEmpty_FailsClosed()
+    {
+        // RequireMcpApiKey=true with no keys configured → nothing can match → every request rejected.
+        var a = Allowlist(keys: [], requireKey: true);
+        await Assert.That(a.RequireApiKey).IsTrue();
+        await Assert.That(a.IsEnabled).IsFalse();
+        await Assert.That(a.IsAllowed("anything")).IsFalse();
+        await Assert.That(a.IsAllowed("")).IsFalse();
+        await Assert.That(a.IsHashAllowed(CredentialTokenService.HashApiKey("anything"))).IsFalse();
     }
 
     // ─── PKCE ──────────────────────────────────────────────────────────────────────────────────────
