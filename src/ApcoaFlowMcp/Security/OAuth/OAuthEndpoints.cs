@@ -298,6 +298,7 @@ public static class OAuthEndpoints
                     background:#fff;color:#1a1a2e}
               button{margin-top:1.25rem;width:100%;padding:.7rem;border:0;border-radius:8px;background:#2d6cdf;color:#fff;
                      font-size:1rem;font-weight:600;cursor:pointer} button:hover{background:#245bc0}
+              button:disabled{opacity:.65;cursor:progress} input:read-only{opacity:.65}
               .error{background:#fde8e8;color:#9b1c1c;padding:.6rem .75rem;border-radius:8px;font-size:.85rem}
               .field-hint{color:#667085;font-size:.72rem;margin:.3rem 0 0}
               .hint{color:#667085;font-size:.78rem;margin-top:1rem}
@@ -314,7 +315,7 @@ public static class OAuthEndpoints
             <body><div class="card">
               <h1>Connect APCOA Flow</h1>
               {{errorBlock}}
-              <form method="post" action="/authorize">
+              <form id="login" method="post" action="/authorize">
                 <input type="hidden" name="client_id" value="{{H(clientId)}}">
                 <input type="hidden" name="redirect_uri" value="{{H(redirectUri)}}">
                 <input type="hidden" name="state" value="{{H(state)}}">
@@ -328,11 +329,31 @@ public static class OAuthEndpoints
                 <input id="apcoa_password" name="apcoa_password" type="password"
                        autocomplete="current-password" required>
             {{apiKeyBlock}}
-                <button type="submit">Sign in</button>
+                <button id="submit" type="submit">Sign in</button>
               </form>
               <p class="hint">Your APCOA credentials are used to sign in on your behalf and are stored only
               inside your encrypted session token — never on the server.</p>
-            </div></body></html>
+            </div>
+            <script>
+              // Loading state: lock the form while the APCOA login runs (it can take a few seconds).
+              // Inputs go read-only, not disabled — disabled fields would be left out of the POST.
+              const form = document.getElementById('login');
+              const button = document.getElementById('submit');
+              const fields = form.querySelectorAll('input:not([type=hidden])');
+              const setBusy = busy => {
+                fields.forEach(f => f.readOnly = busy);
+                button.disabled = busy;
+                button.textContent = busy ? 'Signing in…' : 'Sign in';
+                form.setAttribute('aria-busy', String(busy));
+              };
+              form.addEventListener('submit', e => {
+                if (button.disabled) { e.preventDefault(); return; } // swallow double submits
+                setBusy(true);
+              });
+              // Back/forward cache restores the locked page — unlock it.
+              window.addEventListener('pageshow', e => { if (e.persisted) setBusy(false); });
+            </script>
+            </body></html>
             """;
     }
 
