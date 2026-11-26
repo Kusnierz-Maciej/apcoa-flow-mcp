@@ -28,61 +28,73 @@ and [`docs/API-NOTES.md`](docs/API-NOTES.md) for notes on the underlying APCOA F
 
 ## Running the MCP server
 
+### Transports & authentication
+
+The server runs in one of **two transport modes**, and HTTP mode offers **three authentication methods**:
+
+| Transport | How it's used | Auth methods | APCOA credentials come from |
+|---|---|---|---|
+| **HTTP** (default) | Remote server; clients connect to `…/mcp` over the network. Serve over **HTTPS** in production. | **1. OAuth 2.1** — client runs the login flow; **2. `X-Api-Key` + `Authorization: Basic`** headers | Per user: the OAuth login screen, or the `Basic` header |
+| **stdio** (`--stdio`) | Client spawns the server as a local subprocess; MCP over stdin/stdout. | **3. none** — local process, no gate | A single account from `ApcoaFlow__Email` / `ApcoaFlow__Password` |
+
+The three auth methods:
+
+1. **OAuth 2.1** *(HTTP)* — the standard flow for remote clients, and the **only** option for clients
+   that can't send custom headers (e.g. ChatGPT, some claude.ai setups). The client discovers the
+   endpoints and opens a login screen where the user enters an **API key** (from
+   `Security__AllowedApiKeys`) plus their **own APCOA email + password**. Credentials are validated
+   against APCOA at login and then stored only inside an encrypted, client-held session token — never on
+   the server. Requires `Security__TokenSecret`. Removing a key from `Security__AllowedApiKeys` and
+   restarting ends every session created with it.
+2. **`X-Api-Key` + `Authorization: Basic`** *(HTTP)* — for clients that support custom headers. The
+   `X-Api-Key` must match a configured key; the `Basic` header carries `base64(email:password)`.
+3. **stdio config account** *(stdio only)* — no network, no gate; the single APCOA account is read from
+   env vars. OAuth and `X-Api-Key` do not apply in stdio mode.
+
+> HTTP mode has **no default APCOA account** — every HTTP client supplies its own credentials via
+> method 1 or 2. The `ApcoaFlow__Email`/`Password` account applies to **stdio only**.
+
 ### Docker (production / NAS)
 
 The image is published to GHCR on every release — no build or clone required.
 
 **1. Create a `docker-compose.yml`:**
 
-```yaml
-services:
-  apcoa-flow-mcp:
-    container_name: apcoa-flow-mcp
-    image: ghcr.io/kusnierz-maciej/apcoa-flow-mcp:latest   # or pin a version, e.g. :v1.0.0
-    ports:
-      - "9012:8080"
-    env_file:
-      # Secrets (API key + optional default credentials). See .env below.
-      - .env
-    environment:
-      - ASPNETCORE_ENVIRONMENT=Production
-      # Non-secret settings — all optional, defaults shown. Override via the Section__Key convention.
-      - ApcoaFlow__MaxSessionCostPln=100
-      - ApcoaFlow__CurrentLocationRadiusMeters=300
-      - ParkingData__CompanyId=9
-      - ParkingData__GeohashPrecision=6
-      - ParkingData__SoftRefreshAge=12:00:00
-      - ParkingData__HardRefreshAge=48:00:00
-      - ParkingData__BackgroundRefreshInterval=24:00:00
-      - ParkingData__StorePath=/data/parking
-    volumes:
-      # Bind mount to a host directory the container can write to (warm-starts the parking cache).
-      # It must be writable by the user the container runs as. On a Synology NAS, run as an
-      # ACL-trusted host user (see the `user:` line) rather than chowning — Synology ACLs override
-      # chmod/chown, so `chown -R 1654` does not grant write.
-      - ./data/parking:/data/parking
-    # Run as a host user the share's ACL allows to write. On Synology use ContainerManager —
-    # find its id with `id ContainerManager` (e.g. 106808:106808). `user: "0:0"` (root) also works.
-    user: "106808:106808"
-    restart: unless-stopped
-```
+Two starting points live in [`src/ApcoaFlowMcp/docker/`](src/ApcoaFlowMcp/docker/):
+
+- [`docker-compose.prod.yml`](src/ApcoaFlowMcp/docker/docker-compose.prod.yml) — clean, generic
+  production setup. Start here for any host.
+- [`docker-compose.synology.yml`](src/ApcoaFlowMcp/docker/docker-compose.synology.yml) — the above
+  plus Synology fixes: runs as an ACL-trusted host user so the bind mount is writable, and sets a
+  human-readable `simple` console logging block.
+
+Copy whichever fits as your `docker-compose.yml`.
+
+> **Settings convention:** every setting has a default in the app's `appsettings.json`.
+> Both compose files list the non-secret keys with their defaults (commented out) so you can
+> see every knob in one place — uncomment a line to override it.
+
 
 > The bind-mounted directory caches the parking dataset (downloaded and decrypted from APCOA's public S3 bucket) so the server warm-starts after a restart instead of re-downloading. It is optional — if the directory isn't writable (or you omit the mount) the server still works, serving the dataset from memory and rebuilding from S3 on every start. See [Parking data](#parking-data).
 
 **2. Create a `.env` next to it:**
 
 ```
-# Required: gates access to the server. Any long random string works — a GUID is a good choice.
+# Required: API key(s) that gate access. Any long random string works — a GUID is a good choice.
 # Generate one with:  uuidgen   (macOS/Linux)   or   [guid]::NewGuid()  (PowerShell)
-Security__ApiKey=00000000-0000-0000-0000-000000000000
+# Add more keys for more users; removing one and restarting ends every session created with it.
+Security__AllowedApiKeys__0=00000000-0000-0000-0000-000000000000
 
-# Optional: a default APCOA Flow account, used only when a client does not send its
-# own Authorization: Basic header. Omit both lines if every client passes credentials.
-ApcoaFlow__Email=your@email.com
-ApcoaFlow__Password=yourpassword
+# Required for OAuth: a long, STABLE random secret that encrypts session tokens.
+# Changing it invalidates all issued tokens (everyone must re-authorize).
+Security__TokenSecret=change-me-to-a-long-random-secret
 ```
 
-> If your password contains `$`, escape each one as `$$` (Docker Compose variable interpolation). Example: `p@$w0rd!` → `p@$$w0rd!`
+> HTTP mode has **no default APCOA account**: every client supplies its own APCOA email + password,
+> either on the OAuth login screen or via an `Authorization: Basic` header. (A default account applies
+> only to stdio mode — see [Stdio mode](#stdio-mode).)
+>
+> If a value contains `$`, escape each one as `$$` (Docker Compose variable interpolation). Example: `p@$w0rd!` → `p@$$w0rd!`
 
 **3. Start it:**
 
@@ -92,6 +104,29 @@ docker compose up -d
 ```
 
 **4. Connect Claude Code:**
+
+The server supports two connection styles — pick whichever your client supports.
+
+**OAuth (recommended; required by clients that don't allow custom headers):**
+
+```json
+{
+  "mcpServers": {
+    "apcoa-flow": {
+      "type": "http",
+      "url": "http://your-host:9012/mcp"
+    }
+  }
+}
+```
+
+The client discovers the OAuth endpoints automatically and opens a **login screen** where the user
+enters their **API key** (from `Security__AllowedApiKeys`) plus their **APCOA email and password**.
+The credentials are validated against APCOA on the spot, then stored only inside an encrypted session
+token held by the client — never on the server. The session is refreshed silently, so the user does
+not have to log in again unless their API key is removed or their APCOA password changes.
+
+**Legacy headers (for clients that support custom headers):**
 
 ```json
 {
@@ -108,33 +143,48 @@ docker compose up -d
 }
 ```
 
-`X-Api-Key` must match `Security__ApiKey` in your `.env` file.
-
-`Authorization: Basic` carries APCOA Flow credentials encoded as `base64(email:password)`. If omitted, the server falls back to `ApcoaFlow__Email`/`ApcoaFlow__Password` from `.env`. This means multiple users can share one server instance, each passing their own credentials — no server restart required.
+`X-Api-Key` must match a key in `Security__AllowedApiKeys` (or the legacy `Security__ApiKey`).
+`Authorization: Basic` carries the APCOA credentials as `base64(email:password)`. Multiple users can
+share one server instance, each passing their own credentials — no server restart required.
 
 ### Connecting from claude.ai
 
 1. Go to **claude.ai** → Settings → **Connectors** → **Add custom connector**
 2. Enter your server URL, **including the `/mcp` suffix**: `http://your-host:9012/mcp`
-3. Under **Authentication**, select **No sign-in**
-4. Under **Request headers**, add:
-   - `X-Api-Key`: `your-api-key`
-   - `Authorization`: `Basic <base64(email:password)>`
-5. Click **Add**
+3. Under **Authentication**, choose:
+   - **OAuth** (recommended) — you'll be taken to the login screen to enter your API key + APCOA
+     email/password; or
+   - **No sign-in** + **Request headers** `X-Api-Key` and `Authorization: Basic <base64(email:password)>`
+     if you prefer the header style.
+4. Click **Add**
 
-The server must be publicly reachable from the internet. If it's on a local NAS, expose it via a tunnel such as [Cloudflare Tunnel](https://developers.cloudflare.com/cloudflare-one/connections/connect-networks/) or ngrok.
+The server must be publicly reachable from the internet (and should be served over **HTTPS** in
+production — the session tokens carry encrypted credentials). If it's on a local NAS, expose it via a
+tunnel such as [Cloudflare Tunnel](https://developers.cloudflare.com/cloudflare-one/connections/connect-networks/) or ngrok.
 
 ### Local development
 
-```bash
-dotnet user-secrets --project src/ApcoaFlowMcp set "ApcoaFlow:Email" "your@email.com"
-dotnet user-secrets --project src/ApcoaFlowMcp set "ApcoaFlow:Password" "yourpassword"
+Run the HTTP host:
 
+```bash
 dotnet run --project src/ApcoaFlowMcp
 # Server starts at http://localhost:5200
 ```
 
-No API key is required in development — `Security:ApiKey` is unset so the middleware lets all requests through.
+HTTP mode has no default account, so every request must carry APCOA credentials. For local work the
+simplest path is the **legacy header** style — pass an `Authorization: Basic base64(email:password)`
+header (and, if you set `Security:AllowedApiKeys`/`Security:ApiKey`, a matching `X-Api-Key`). If no
+API key is configured, the `X-Api-Key` check is skipped but the Basic credentials are still required.
+
+To exercise the **OAuth** flow locally, set an API key and a token secret first:
+
+```bash
+dotnet user-secrets --project src/ApcoaFlowMcp set "Security:AllowedApiKeys:0" "dev-key"
+dotnet user-secrets --project src/ApcoaFlowMcp set "Security:TokenSecret" "dev-token-secret"
+```
+
+then point the [MCP Inspector](https://github.com/modelcontextprotocol/inspector) (or a client) at
+`http://localhost:5200/mcp` and complete the login screen with `dev-key` + your APCOA email/password.
 
 Connect Claude Code by adding to your MCP config (`.mcp.json` in the project root or `~/.claude/mcp.json`):
 

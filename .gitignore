@@ -24,3 +24,6 @@ TestResults/
 
 # ApcoaFlow.Sandbox dump output (contains live tokens — never commit)
 src/ApcoaFlow.Sandbox/out/
+
+# Local parking-data cache (runtime snapshot; dev StorePath points at ./tmp)
+src/ApcoaFlowMcp/tmp/

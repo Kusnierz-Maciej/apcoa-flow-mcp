@@ -1,0 +1,49 @@
+services:
+  apcoa-flow-mcp:
+    container_name: apcoa-flow-mcp
+    image: ghcr.io/kusnierz-maciej/apcoa-flow-mcp:latest   # or pin a version, e.g. :v1.0.0
+    ports:
+      - "9012:8080"
+    env_file:
+      # Secrets live here (credentials + API key). See .env.example.
+      - .env
+    environment:
+      - ASPNETCORE_ENVIRONMENT=Production
+      # Non-secret settings — all overridable via env (Section__Key convention).
+      # Defaults shown; uncomment to change.
+      #- ApcoaFlow__MaxSessionCostPln=100
+      #- ApcoaFlow__CurrentLocationRadiusMeters=300
+      #- ParkingData__CompanyId=9
+      #- ParkingData__GeohashPrecision=6
+      #- ParkingData__SoftRefreshAge=12:00:00
+      #- ParkingData__HardRefreshAge=48:00:00
+      #- ParkingData__BackgroundRefreshInterval=24:00:00
+      # StorePath must match the bind mount target below.
+      - ParkingData__StorePath=/data/parking
+
+      # Logging — human-readable single-line console (good for `docker logs` on the NAS).
+      - Logging__LogLevel__Default=Information
+      - Logging__LogLevel__Microsoft.AspNetCore=Warning
+      - Logging__LogLevel__System.Net.Http.HttpClient=Warning
+      - Logging__LogLevel__ModelContextProtocol=Warning
+      - Logging__Console__FormatterName=simple
+      - Logging__Console__FormatterOptions__SingleLine=true
+      - Logging__Console__FormatterOptions__IncludeScopes=true
+
+      # Telemetry — OTLP export to the logging stack's Alloy receiver.
+      #- Telemetry__Enabled=true
+      #- Telemetry__OtlpEndpoint=http://alloy:4317
+    volumes:
+      # Bind mount: point the left side at a directory on the NAS that the container can write to,
+      # so the parking snapshot warm-starts after a restart. If it isn't writable the server still
+      # runs — it just serves the dataset from memory and re-downloads it on each restart.
+      #
+      # Synology note: the image runs as UID 1654, but Synology shares enforce POSIX ACLs that
+      # override `chmod`/`chown` — a `chown -R 1654` does NOT grant write (the `everyone` ACL caps
+      # non-listed users at read-only). The reliable fix is to run the container as a user the share's
+      # ACL already trusts. On Synology that is `ContainerManager` (the built-in Docker account); find
+      # its id with `id ContainerManager` and set `user:` below. `user: "0:0"` (root) also works.
+      - ./data/parking:/data/parking
+    # Run as an ACL-trusted host user so the bind mount is writable (see Synology note above).
+    user: "106808:106808"   # ContainerManager (uid:gid) — change to your own `id ContainerManager`
+    restart: unless-stopped

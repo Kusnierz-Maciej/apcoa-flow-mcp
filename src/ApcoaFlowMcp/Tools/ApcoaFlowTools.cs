@@ -14,7 +14,8 @@ namespace ApcoaFlowMcp.Tools;
 public sealed class ApcoaFlowTools(
     ApcoaFlowSessionService sessions,
     ApcoaFlowApiClient.ParkingData.IApcoaParkingDataSource parkingData,
-    IOptions<ApcoaFlowToolsOptions> options)
+    IOptions<ApcoaFlowToolsOptions> options,
+    ILogger<ApcoaFlowTools> logger)
 {
     private readonly ApcoaFlowToolsOptions _options = options.Value;
 
@@ -27,6 +28,9 @@ public sealed class ApcoaFlowTools(
         [Description("Optional name filter, e.g. a retail brand like \"Carrefour\" or \"Biedronka\". Case- and accent-insensitive.")] string? nameContains = null,
         CancellationToken ct = default)
     {
+        using var _ = logger.BeginScope("{Tool}", "find_parking");
+        logger.LogInformation("lat={Lat}, lon={Lon}, radius={Radius} m, filter={Filter}.",
+            latitude, longitude, radiusMeters, nameContains ?? "(none)");
         var results = await parkingData.FindNearbyAsync(latitude, longitude, radiusMeters / 1000.0, nameContains, ct);
         if (results.Count == 0)
             return "No parkings found for the given location/filter.";
@@ -45,6 +49,8 @@ public sealed class ApcoaFlowTools(
     [Description("List the license plates registered on the account. Returns one line per car as \"plate [default] - status\".")]
     public async Task<string> GetRegisteredCarsAsync(CancellationToken ct = default)
     {
+        using var _ = logger.BeginScope("{Tool}", "get_registered_cars");
+        logger.LogInformation("Fetching registered cars.");
         var cars = await sessions.GetVehiclesAsync(ct);
         if (cars.Count == 0)
             return "No registered cars on the account.";
@@ -63,6 +69,8 @@ public sealed class ApcoaFlowTools(
     [Description("Returns the currently active parking session(s), or a message if none is running. You don't need to call this before starting — start_session detects an already-active session itself — but it's useful to inspect running sessions or get an id to end.")]
     public async Task<string> GetActiveSessionsAsync(CancellationToken ct = default)
     {
+        using var _ = logger.BeginScope("{Tool}", "get_active_sessions");
+        logger.LogInformation("Fetching active sessions.");
         var active = await sessions.GetActiveAsync(ct);
         if (active.Count == 0)
             return "No active parking session.";
@@ -73,6 +81,8 @@ public sealed class ApcoaFlowTools(
     [Description("Returns the user's recent completed parking sessions, most recent first, with cost and duration.")]
     public async Task<string> GetSessionHistoryAsync(CancellationToken ct = default)
     {
+        using var _ = logger.BeginScope("{Tool}", "get_session_history");
+        logger.LogInformation("Fetching session history.");
         var history = await sessions.GetHistoryAsync(ct);
         if (history.Count == 0)
             return "No past parking sessions.";
@@ -95,6 +105,9 @@ public sealed class ApcoaFlowTools(
         [Description("For a PAID session: the exact cost in PLN you are confirming (the chosen option's price from a prior call's quote). Must match the live cost exactly. Omit on the first call.")] decimal? confirmedCostPln = null,
         CancellationToken ct = default)
     {
+        using var _ = logger.BeginScope("{Tool}", "start_session");
+        logger.LogInformation("parking={ParkingId}, plate={Plate}, duration={Duration} min, confirmedCost={Cost} PLN.",
+            parkingId, licensePlate, durationMinutes, confirmedCostPln);
         var result = await sessions.StartAsync(
             parkingId, licensePlate, durationMinutes, ApcoaFlowSessionService.StartMode.Normal,
             confirmedCostPln, _options.MaxSessionCostPln, bypassCap: false, ct);
@@ -187,6 +200,8 @@ public sealed class ApcoaFlowTools(
         [Description("The session id (from get_active_sessions)")] long sessionId,
         CancellationToken ct = default)
     {
+        using var _ = logger.BeginScope("{Tool}", "end_session");
+        logger.LogInformation("session={SessionId}.", sessionId);
         var ended = await sessions.StopAsync(sessionId, ct);
         if (ended is null)
             return $"Session {sessionId} was ended (no completed record returned to confirm cost).";

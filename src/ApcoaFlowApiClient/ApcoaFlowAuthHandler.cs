@@ -1,7 +1,6 @@
 using System.Net;
 using System.Net.Http.Headers;
-using ApcoaFlowApiClient.Models.Auth;
-using Refit;
+using Microsoft.Extensions.Logging;
 
 namespace ApcoaFlowApiClient;
 
@@ -15,11 +14,16 @@ public class ApcoaFlowAuthHandler : DelegatingHandler
 
     private readonly IApcoaFlowCredentialProvider _credentials;
     private readonly ApcoaFlowTokenStore _tokens;
+    private readonly ILogger<ApcoaFlowAuthHandler>? _logger;
 
-    public ApcoaFlowAuthHandler(IApcoaFlowCredentialProvider credentials, ApcoaFlowTokenStore tokens)
+    public ApcoaFlowAuthHandler(
+        IApcoaFlowCredentialProvider credentials,
+        ApcoaFlowTokenStore tokens,
+        ILogger<ApcoaFlowAuthHandler>? logger = null)
     {
         _credentials = credentials;
         _tokens = tokens;
+        _logger = logger;
     }
 
     protected override async Task<HttpResponseMessage> SendAsync(HttpRequestMessage request, CancellationToken cancellationToken)
@@ -43,6 +47,9 @@ public class ApcoaFlowAuthHandler : DelegatingHandler
 
         if (IsAuthFailure(response.StatusCode))
         {
+            _logger?.LogWarning("APCOA returned HTTP {Status}; invalidating the cached token and re-logging in once.",
+                (int)response.StatusCode);
+
             _tokens.Invalidate(credentials, token);
 
             token = await _tokens.GetOrLoginAsync(credentials, ct => LoginAsync(credentials, ct), cancellationToken);
@@ -51,6 +58,17 @@ public class ApcoaFlowAuthHandler : DelegatingHandler
             ApplyAppHeaders(retryRequest);
             retryRequest.Headers.Authorization = new AuthenticationHeaderValue("Bearer", token);
             response = await base.SendAsync(retryRequest, cancellationToken);
+
+            // If it STILL fails auth after a fresh login, the credentials themselves are no longer
+            // valid (e.g. the user changed their APCOA password). Surface that distinctly so the MCP
+            // layer can force re-authentication, rather than returning an opaque 401 body.
+            if (IsAuthFailure(response.StatusCode))
+            {
+                _logger?.LogError("APCOA still returned HTTP {Status} after a fresh login — credentials rejected.",
+                    (int)response.StatusCode);
+                _tokens.Invalidate(credentials, token);
+                throw new ApcoaFlowCredentialsRejectedException($"HTTP {(int)response.StatusCode} after re-login");
+            }
         }
 
         return response;
@@ -70,22 +88,16 @@ public class ApcoaFlowAuthHandler : DelegatingHandler
         }
     }
 
-    private static async Task<string> LoginAsync(ApcoaFlowClientOptions credentials, CancellationToken cancellationToken)
+    private async Task<string> LoginAsync(ApcoaFlowClientOptions credentials, CancellationToken cancellationToken)
     {
-        var http = new HttpClient { BaseAddress = new Uri(ApcoaFlowClientOptions.BaseUrl) };
-        foreach (var (name, value) in ApcoaFlowClientOptions.AppHeaders)
-            http.DefaultRequestHeaders.TryAddWithoutValidation(name, value);
-
-        var loginApi = RestService.For<IApcoaFlowApi>(http);
-
-        var response = await loginApi.LoginAsync(new LoginRequest
+        var outcome = await ApcoaFlowLogin.TryLoginAsync(credentials.Email, credentials.Password, _logger, cancellationToken);
+        return outcome.Kind switch
         {
-            Email = credentials.Email,
-            Password = credentials.Password,
-            LocationCode = "PL"
-        }, cancellationToken);
-
-        return response.AuthToken;
+            LoginOutcomeKind.Ok => outcome.Token!,
+            LoginOutcomeKind.BadCredentials => throw new ApcoaFlowCredentialsRejectedException(outcome.Detail),
+            _ => throw new HttpRequestException(
+                $"APCOA login failed with an API error ({outcome.Detail}). Try again shortly."),
+        };
     }
 
     private static async Task<HttpRequestMessage> CloneRequestAsync(HttpRequestMessage original)

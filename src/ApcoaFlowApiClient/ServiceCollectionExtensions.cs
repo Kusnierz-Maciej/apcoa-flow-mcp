@@ -16,6 +16,7 @@ public static class ServiceCollectionExtensions
     {
         services.AddSingleton<ApcoaFlowTokenStore>();
         services.AddTransient<ApcoaFlowAuthHandler>();
+        services.AddTransient<IApcoaFlowLoginValidator, ApcoaFlowLoginValidator>();
 
         var builder = services
             .AddRefitClient<IApcoaFlowApi>()

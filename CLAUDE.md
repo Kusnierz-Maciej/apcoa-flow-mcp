@@ -37,3 +37,13 @@ Keep casual probing **read-only**. Starting / extending / stopping a session is
 billable and the test account is limited. Parking **616319** (lot 41905, tariff
 108014) is the only target with unlimited free start/stop — use it for any write
 test. The seeded `dump-sessions` scenario is strictly read-only.
+
+## Configuration conventions
+
+When adding or changing any setting:
+
+1. **Default in `appsettings.json`** — every key has a sensible default here.
+2. **Dev overrides in `appsettings.Development.json`** — only values that differ from the default.
+3. **`appsettings.Production.json`** — only values that differ from the default; omit anything that matches.
+4. **`docker/docker-compose.prod.yml`** (clean, generic) and **`docker/docker-compose.synology.yml`** (prod + Synology ACL `user:` fix and a `simple` console logging block) — keep a commented reference block with default values so operators can see all knobs in one place. Uncomment to override.
+5. **Document in README** — every operator-facing setting should be described.
