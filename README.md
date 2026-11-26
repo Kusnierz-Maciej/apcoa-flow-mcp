@@ -253,7 +253,8 @@ Freshness and indexing are tunable via `ParkingData__*` environment variables:
 Tests use TUnit (run via Microsoft.Testing.Platform) and come in three kinds:
 
 - **Unit** (`ApcoaFlowMcp.Tests`) — the MCP session orchestration (`start_session` free/paid logic,
-  promo validation, already-active handling) against a fully mocked API. No credentials, no network.
+  promo validation, already-active handling) against a fully mocked API, plus the startup settings
+  validators. No credentials, no network.
 - **Offline** (`ApcoaFlowApiClient.Tests`, no `LiveApi` category) — the spatial index, the on-disk
   snapshot store, and the tariff/promotion/cost logic. No credentials, no network.
 - **Live** (`[Category("LiveApi")]`) — exercise the real APCOA Flow API to catch upstream changes.
@@ -276,6 +277,13 @@ Credentials for the live tests (never stored in the repo):
 ```bash
 dotnet user-secrets --project src/ApcoaFlowApiClient.Tests set "ApcoaFlow:Email" "your@email.com"
 dotnet user-secrets --project src/ApcoaFlowApiClient.Tests set "ApcoaFlow:Password" "yourpassword"
+```
+
+Or pass them as environment variables (these override user-secrets — handy for CI or a one-off run):
+
+```bash
+ApcoaFlow__Email=your@email.com ApcoaFlow__Password=yourpassword \
+  dotnet test --project src/ApcoaFlowApiClient.Tests --treenode-filter '/**[Category=LiveApi]'
 ```
 
 Run the live tests (needs credentials):
