@@ -69,11 +69,10 @@ public class OAuthTests
 
     // ─── ApiKeyAllowlist ───────────────────────────────────────────────────────────────────────────
 
-    private static ApiKeyAllowlist Allowlist(string[]? keys = null, string? legacy = null, bool requireKey = true) =>
+    private static ApiKeyAllowlist Allowlist(string[]? keys = null, bool requireKey = true) =>
         new(Options.Create(new SecurityOptions
         {
             AllowedApiKeys = keys ?? [],
-            ApiKey = legacy,
             RequireMcpApiKey = requireKey,
         }));
 
@@ -86,14 +85,6 @@ public class OAuthTests
         await Assert.That(a.IsAllowed("charlie")).IsFalse();
         await Assert.That(a.IsAllowed("")).IsFalse();
         await Assert.That(a.IsAllowed(null)).IsFalse();
-    }
-
-    [Test]
-    public async Task Allowlist_LegacySingleKey_IsAccepted()
-    {
-        var a = Allowlist(legacy: "legacy-key");
-        await Assert.That(a.IsAllowed("legacy-key")).IsTrue();
-        await Assert.That(a.IsAllowed("nope")).IsFalse();
     }
 
     [Test]

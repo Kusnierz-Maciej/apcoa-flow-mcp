@@ -122,7 +122,7 @@ The client discovers the OAuth endpoints automatically and opens a **login scree
 API key + APCOA email/password. The session is refreshed silently, so the user does not have to log in
 again unless their API key is removed or their APCOA password changes.
 
-**Legacy headers (for clients that support custom headers):**
+**Header auth (for clients that support custom headers):**
 
 ```json
 {
@@ -165,7 +165,7 @@ dotnet run --project src/ApcoaFlowMcp
 # Server starts at http://localhost:5200 (loopback only)
 ```
 
-For local work the simplest path is the **legacy header** style — pass an
+For local work the simplest path is the **header** style — pass an
 `Authorization: Basic base64(email:password)` header (and, if you set `Security__AllowedApiKeys`, a
 matching `X-Api-Key`). To exercise the **OAuth** flow locally, set an API key and a token secret first:
 
@@ -192,7 +192,7 @@ Claude Code config (`.mcp.json` in the project root or `~/.claude/mcp.json`):
 
 ## Stdio mode
 
-For MCP clients that launch the server as a subprocess, run it with `--stdio`. The server then talks MCP over stdin/stdout instead of HTTP, and logs go to stderr. There is no HTTP endpoint, so `Security__ApiKey` is not used. The APCOA Flow account is read from environment variables:
+For MCP clients that launch the server as a subprocess, run it with `--stdio`. The server then talks MCP over stdin/stdout instead of HTTP, and logs go to stderr. There is no HTTP endpoint, so the API key is not used. The APCOA Flow account is read from environment variables:
 
 ```bash
 ApcoaFlow__Email=your@email.com ApcoaFlow__Password=yourpassword \

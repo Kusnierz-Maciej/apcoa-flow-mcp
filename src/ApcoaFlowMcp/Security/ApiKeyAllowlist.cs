@@ -5,13 +5,10 @@ using Microsoft.Extensions.Options;
 
 namespace ApcoaFlowMcp.Security;
 
-/// <summary>Binds <c>Security:AllowedApiKeys</c> (+ legacy single <c>Security:ApiKey</c>) and <c>Security:TokenSecret</c>.</summary>
+/// <summary>Binds <c>Security:AllowedApiKeys</c> and <c>Security:TokenSecret</c>.</summary>
 public sealed class SecurityOptions
 {
     public string[] AllowedApiKeys { get; set; } = [];
-
-    /// <summary>Legacy single key — treated as an additional allowed key for the header path.</summary>
-    public string? ApiKey { get; set; }
 
     /// <summary>Secret seeding token encryption. Must be set and stable in production.</summary>
     public string? TokenSecret { get; set; }
@@ -23,9 +20,9 @@ public sealed class SecurityOptions
     /// </summary>
     public bool RequireMcpApiKey { get; set; } = true;
 
-    /// <summary>All configured keys (allowlist + legacy single), empty entries removed.</summary>
+    /// <summary>All configured keys, empty entries removed.</summary>
     public IEnumerable<string> AllKeys =>
-        AllowedApiKeys.Append(ApiKey ?? string.Empty).Where(k => !string.IsNullOrWhiteSpace(k));
+        AllowedApiKeys.Where(k => !string.IsNullOrWhiteSpace(k));
 }
 
 /// <summary>
