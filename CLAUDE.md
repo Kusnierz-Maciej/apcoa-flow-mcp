@@ -38,7 +38,8 @@ files there to analyse the issue.
   findings as **dated** lines (`FOUND (2026-11-27): …`) so it's clear when the API
   last behaved that way. Read-only: `dump-sessions` (account snapshot),
   `investigate-carrefour`, `investigate-aldi` (lots, coupon, tariff breakdowns),
-  `dump-tariff` (raw `/tariff` grid). `login-probe` touches no data but makes one
+  `dump-tariff` (raw `/tariff` grid), `tools-smoke` (the read tools' exact output and
+  log lines next to the wire — use it after changing tool formatting). `login-probe` touches no data but makes one
   wrong-password login (APCOA locks after 5 per 2 minutes — run sparingly).
   `probe-silent-successes` and `start-free-aldi` write, but can't charge (free-only
   starts, ended immediately; the former only on 616319).

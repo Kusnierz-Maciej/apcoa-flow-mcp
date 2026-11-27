@@ -13,6 +13,7 @@ public static class ScenarioRegistry
         new DumpTariffScenario(),
         new LoginProbeScenario(),
         new ProbeSilentSuccessesScenario(),
+        new ToolsSmokeScenario(),
     ];
 
     public static IScenario? Find(string name) =>
