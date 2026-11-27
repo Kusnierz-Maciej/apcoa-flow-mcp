@@ -30,8 +30,9 @@ public sealed class ApcoaFlowPrompts
         $"""
         Start a free APCOA parking session where I am now.
         1. {PickPlate(plate)}
-        2. Use my current location (ask me for it if you don't have it). Call find_parkings with it to see the nearest
-           parking, tell me that parking and the plate, and ask me to confirm before starting.
+        2. Use my current location (ask me for it if you don't have it). Call find_parkings with it and the plate
+           (licensePlate) to see the nearest parking and whether it's free for my car right now; tell me that parking and
+           the plate, and ask me to confirm before starting.
         3. Start it with start_free_session_here (or start_free_session with the parking's id if I picked one of
            several). If it reports the parking isn't free, tell me the price and stop —
            don't start a paid session unless I explicitly ask for one.
@@ -47,8 +48,8 @@ public sealed class ApcoaFlowPrompts
         $"""
         Start a free APCOA parking session at "{parking}".
         1. {PickPlate(plate)}
-        2. Find the parking's id with find_parkings (query "{parking}"; add my location if the name alone is ambiguous).
-           If more than one parking could match, ask me which.
+        2. Find the parking's id with find_parkings (query "{parking}", licensePlate = the plate; add my location if the
+           name alone is ambiguous). If more than one parking could match, ask me which, preferring ones free now.
         3. Tell me the parking and the plate, and ask me to confirm before starting.
         4. Start it with start_free_session. If it reports the parking isn't free, tell me the price and stop —
            don't start a paid session unless I explicitly ask for one.
