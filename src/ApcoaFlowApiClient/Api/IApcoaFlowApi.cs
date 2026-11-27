@@ -42,9 +42,23 @@ public interface IApcoaFlowApi
     [Get("/api/v1/prices")]
     Task<PriceQuote> GetPriceAsync([Query] PriceQuery query, CancellationToken ct = default);
 
+    /// <summary>
+    /// The app's duration presets for a space (shape not modelled yet). Didn't answer within 20–30 s twice
+    /// (2026-11-27): don't rely on it; call it only with a timeout.
+    /// </summary>
+    [Get("/api/v1/prices/lengthOfStayPresets")]
+    Task<System.Text.Json.JsonElement> GetLengthOfStayPresetsAsync([AliasAs("spaceId")] string spaceId,
+        [AliasAs("licensePlateId")] string licensePlateId, [AliasAs("startDate")] string? startDate = null, CancellationToken ct = default);
+
     /// <summary>Quote an extension of a running session by <paramref name="duration"/> seconds.</summary>
     [Get("/api/v1/prices/updatedPrice")]
     Task<PriceQuote> GetUpdatedPriceAsync([AliasAs("sessionId")] string sessionId, [AliasAs("duration")] int duration, CancellationToken ct = default);
+
+    // ── Benefits ───────────────────────────────────────────────────────────────────────────────
+
+    /// <summary>The account's benefits (vouchers, subscriptions, contracts); <c>[]</c> so far. Shape not modelled yet.</summary>
+    [Get("/api/v1/benefits")]
+    Task<List<System.Text.Json.JsonElement>> GetBenefitsAsync(CancellationToken ct = default);
 
     // ── Sessions ───────────────────────────────────────────────────────────────────────────────
 
@@ -108,4 +122,10 @@ public sealed class PriceQuery
     [AliasAs("Duration")] public int? Duration { get; set; }
     [AliasAs("StartDate")] public string? StartDate { get; set; }
     [AliasAs("EndDate")] public string? EndDate { get; set; }
+
+    /// <summary>
+    /// A promo code to apply to the quote (the app's promo-code field). An unknown code is silently ignored: no error,
+    /// <c>promocode</c> stays null in the answer (2026-11-27).
+    /// </summary>
+    [AliasAs("Promocode")] public string? Promocode { get; set; }
 }

@@ -8,6 +8,8 @@ public static class ScenarioRegistry
         new LoginScenario(),
         new AccountScenario(),
         new FindSpacesScenario(),
+        new QuotesScenario(),
+        new ExpiredTokenScenario(),
     ];
 
     public static IScenario? Find(string name) =>

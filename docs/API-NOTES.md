@@ -67,8 +67,8 @@ Parking places are **spaces**, with GUID ids. There's no offline dataset: the ap
     parkingIconUrl, countryCode, isUserCountry}`. `tariffCode` is the space's **location code** (what users type);
     searching for it returns exactly that space.
   - With a position: nearest first, `distance` in **km**; 20 hits by default, `size=50` gave 30 (2026-11-27).
-  - Without a position: arbitrary order, and the same names came back with **different ids** than with a position
-    (which of them quotes is still to check).
+  - Without a position: arbitrary order, and the same names came back with **different ids** than with a position.
+    Both ids are real spaces with identical details, and both quote (2026-11-27).
   - `places` are geocoded streets/towns, not spaces.
 - `GET /api/v1/spaces/getByBoundingBox?NELatitude&NELongitude&SWLatitude&SWLongitude&Zoom` → map pins `[{id, name,
   coordinates, parkingType: "startStop" | "anpr", chargingType, mapPinImage, geoBorder, isMunicipality}]`
@@ -80,11 +80,13 @@ Parking places are **spaces**, with GUID ids. There's no offline dataset: the ap
   address, parkingOverview: [{title, imageUrl}], sessionsStartAutomatically, prices: [{sectionName, prices: [{label,
   price}], description}], allowedPSPs, hasLengthOfStayPreset, ctaButtonType: "startParking", isMunicipality,
   countryCode, disclaimer, …}`. `prices` is the readable tariff table, not a quote. Biedronka spaces:
-  `defaultLengthOfStayInMinutes: 90` (= their free window) and `maxDuration: 43200` (unit to confirm).
+  `defaultLengthOfStayInMinutes: 90` (= their free window) and `maxDuration: 43200` (**minutes**: 30 days; quotes
+  don't enforce it, a 31-day quote still comes back).
 
 ## Prices
 
-Amounts are strings: `"PLN 5.00"` (currency, space, invariant decimal).
+Amounts are strings: `"PLN 5.00"` (currency, space, invariant decimal); large amounts have a thousands separator:
+`"PLN 2,698.00"`.
 
 - **Quote a start**: `GET /api/v1/prices?SpaceId&LicensePlateId&Duration&StartDate` (what the app sends; `StartDate`
   UTC with milliseconds). **`Duration` is in seconds.** → `{priceItems, priceDetailItems, totalPrice,
@@ -93,7 +95,14 @@ Amounts are strings: `"PLN 5.00"` (currency, space, invariant decimal).
   - The quote already includes whatever the space gives this plate: Biedronka's free 1.5 h (once per 4 h per space)
     shows as PLN 0.00 for up to 90 min and as the full price once used. Quotes right after a session can lag for a
     minute.
-  - A 1-minute quote usually costs the same as 15 minutes (minimum charge).
+  - A 1-minute quote usually costs the same as 15 minutes (minimum charge). Quotes list a "Convenience fee" line.
+  - Biedronka Opole on 2026-11-27: 1–90 min PLN 0.00, 91 min 2.00, 4 h 10.00, 24 h 90.00. Ostrów (Friday evening):
+    up to 4 h PLN 0.00, 12 h 5.00 (crosses Saturday 06–15).
+  - **Promo codes**: `Promocode=<code>` on the quote (and `promoCode` on start/extend). An unknown code is
+    **silently ignored**: same price, `promocode: null`, no error. A real code hasn't been seen yet.
+- `GET /api/v1/prices/lengthOfStayPresets?spaceId&licensePlateId&startDate` (the app's duration presets) didn't
+  answer within 20–30 s twice: not used.
+- `GET /api/v1/benefits` → `[]` on both accounts so far (vouchers, subscriptions, contracts live here).
 - **Quote an extension**: `GET /api/v1/prices/updatedPrice?sessionId&duration` (seconds to add) → the same shape,
   with the new `endDate`.
 

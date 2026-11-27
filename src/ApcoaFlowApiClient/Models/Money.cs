@@ -3,7 +3,8 @@ using System.Globalization;
 namespace ApcoaFlowApiClient.Models;
 
 /// <summary>
-/// An amount as the API formats it: <c>"PLN 5.00"</c> (currency, space, invariant decimal). Every price field
+/// An amount as the API formats it: <c>"PLN 5.00"</c> (currency, space, invariant decimal; large amounts with a
+/// thousands separator, <c>"PLN 2,698.00"</c>). Every price field
 /// (<c>totalPrice</c>, <c>priceItems[].price</c>, history <c>totalPrice</c>) uses this form.
 /// </summary>
 public readonly record struct Money(string Currency, decimal Amount)

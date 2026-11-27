@@ -17,6 +17,7 @@ public class WireFormatTests
     [Arguments("PLN 0.00", "PLN", 0.00)]
     [Arguments("PLN 5.00", "PLN", 5.00)]
     [Arguments("PLN 1234.56", "PLN", 1234.56)]
+    [Arguments("PLN 2,698.00", "PLN", 2698.00)] // thousands separator on large amounts (30-day quote, 2026-11-27)
     public async Task Prices_parse_as_currency_and_amount(string text, string currency, double amount)
     {
         var money = Money.Parse(text);

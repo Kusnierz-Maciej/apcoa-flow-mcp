@@ -92,7 +92,7 @@ public sealed class SpaceAddress
 /// <summary>
 /// <c>GET /api/v1/spaces/{spaceId}</c>: the space screen. No <c>geoBorder</c> here (only the bbox pins carry it).
 /// <c>prices</c> is the human-readable tariff table, not a quote. Seen 2026-11-27 (Biedronka Opole):
-/// <c>maxDuration: 43200</c> and <c>defaultLengthOfStayInMinutes: 90</c> (= the free 1.5 h).
+/// <c>maxDuration: 43200</c> (minutes: 30 days) and <c>defaultLengthOfStayInMinutes: 90</c> (= the free 1.5 h).
 /// </summary>
 public sealed class SpaceDetails
 {
@@ -102,7 +102,7 @@ public sealed class SpaceDetails
     [JsonConverter(typeof(StringOrNumberConverter))]
     public string? TariffCode { get; set; }
 
-    /// <summary>Longest stay; unit to confirm (43200 = 30 days in minutes or 12 h in seconds). Null = no limit.</summary>
+    /// <summary>Longest stay in minutes (43200 = 30 days, 2026-11-27); null = no limit. Quotes don't enforce it.</summary>
     public int? MaxDuration { get; set; }
 
     /// <summary>The app's preselected duration (Biedronka: 90 = its free window).</summary>
