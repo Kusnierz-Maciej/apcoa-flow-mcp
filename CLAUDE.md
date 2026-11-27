@@ -86,7 +86,7 @@ I() { npx -y @modelcontextprotocol/inspector --cli http://localhost:5200/mcp \
 I --method tools/list --strict          # schema portability: full report on stderr, exit 6 on errors
 I --method tools/call --tool-name get_registered_cars
 I --method tools/call --tool-name find_parking --tool-arg latitude=50.4433 longitude=18.863 radiusMeters=500
-I --method tools/call --tool-name end_session --tool-args-json '{"sessionId":2000000000}'   # error path
+I --method tools/call --tool-name end_session --tool-args-json '{"sessionId":2000000000,"parkingName":"Test"}'   # error path
 I --method prompts/list
 I --method prompts/get --prompt-name park_free_at --prompt-args parking=Carrefour
 ```

@@ -183,8 +183,9 @@ Parking: Carrefour Tarnowskie Góry ul. Kościuszki 5 [9882]. Can't start here �
 
 ## `start_free_session` — write
 
-Start a **free-only** session at a parking (by id). Auto-applies a **validated** active free-time
-promotion and starts only if the session is actually free (cost 0). If it would cost anything, it
+Start a **free-only** session at a parking (by id). Starts only if the session is actually free (cost 0):
+either the base tariff is free (e.g. parking 616319), or a **validated** active free-time promotion applies,
+which it auto-applies. If it would cost anything, it
 starts **nothing** and instead reports the **price options** and suggests `start_session` for a paid
 session. Never incurs a charge — the safe default for "park free at this parking". When a usable promo
 applies the session fills the whole free window: a `durationMinutes` shorter than the free window is

@@ -15,11 +15,15 @@ Unofficial MCP server for [APCOA Flow](https://www.apcoa.pl/krotkotrwale-parkowa
 | `get_active_sessions` | Currently running session(s), or a message if none. |
 | `get_session_history` | Recent completed sessions, most recent first, with cost. |
 | `start_session` | Start a session at a parking (by id) for a plate. **May cost money.** Free starts immediately. If paid, it does **not** start on the first call: it returns the **shortest available duration and its price**, the other price options, and a note on whether stopping early refunds — then you confirm by calling again with both `durationMinutes` (the option you chose) and the exact `confirmedCostPln`. Resolves lot/tariff automatically, auto-applies a free-time promotion **only when it validates as usable** (filling the free window), and when a coupon is consumed reports when it can be used again. Enforces a max-cost cap. |
-| `start_free_session` | Start a session at a parking only if it is actually **free** (auto-applies a validated free-time promotion). Never charges. If no free tier is available it starts nothing and instead reports the price options and suggests `start_session`. |
+| `start_free_session` | Start a session at a parking only if it is actually **free** (a free base tariff, or a validated free-time promotion, which it applies automatically). Never charges. If no free tier is available it starts nothing and instead reports the price options and suggests `start_session`. |
 | `start_session_current_location` | Like `start_session` (may cost money), but at the closest parking to a given GPS location within a radius (metres, default 300). |
 | `start_free_session_current_location` | Free-only variant of the above — closest parking by location, started only if free. |
 | `start_expensive_session` | Same as `start_session` but bypasses the max-cost cap (separate tool so it can be permissioned independently). |
 | `end_session` | End an active session by id; returns the final cost. |
+
+Tools that act on a parking or session by id (`start_session`, `start_free_session`, `start_expensive_session`,
+`end_session`) also take the parking's name (`parkingName`). It isn't sent to APCOA — it makes the client's
+permission prompt show *which* parking is about to be started or ended.
 
 Cost, duration and distance are user-facing in PLN, minutes and metres respectively.
 
@@ -150,7 +154,9 @@ The server supports two connection styles — pick whichever your client support
 ```
 
 The client discovers the OAuth endpoints automatically and opens a **login screen** for the user's
-API key + APCOA email/password. The session is refreshed silently, so the user does not have to log in
+API key + APCOA email/password. If something is wrong, the page says so under the field concerned (the API
+key, or email + password) and keeps everything typed — nothing is cleared or sent back by the server. The
+session is refreshed silently, so the user does not have to log in
 again unless their API key is removed or their APCOA password changes. If the password changes, tool
 calls return a plain "reconnect this connector" error — disconnect and connect it again.
 

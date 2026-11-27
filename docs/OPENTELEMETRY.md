@@ -41,6 +41,20 @@ Open **http://localhost:18888** → Structured Logs or Traces → select service
 Each MCP request shows up as a trace. All log lines within the request carry the
 same `TraceId` and `RequestId`, so you can filter a single request's logs in one click.
 
+**Logs per tool call** (console and OTLP alike): every tool writes **one line after the call** with ids, counts
+and the outcome (the same value as the `apcoa.outcome` span tag), e.g.
+
+```
+start_free_session [616319] Tarnowskie Góry ul. Oświęcimska: started; plate STA 0521, 15 min, 0.00 PLN (confirmed -), session 84428202, promotion -, distance - m, requested as Tarnowskie Góry ul. Oświęcimska
+end_session [84428202] Tarnowskie Góry ul. Oświęcimska: stopped, final cost 0.0 PLN
+get_session_history: 10 session(s), 0.00 PLN in total
+```
+
+By default (README settings table) the log also has one start + one finished line per HTTP request
+(`Microsoft.AspNetCore.Hosting.Diagnostics`), each APCOA/S3 call with status and duration
+(`System.Net.Http.HttpClient`, query strings shown as `?*`) and each MCP method with its timing and tool result
+(`ModelContextProtocol`). Telemetry export itself stays off unless `Telemetry__Enabled=true`.
+
 ## Production
 
 Telemetry is off by default. To enable, set env vars in `docker-compose.prod.yml`:
