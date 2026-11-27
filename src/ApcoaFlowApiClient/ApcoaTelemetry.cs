@@ -37,6 +37,10 @@ public static class ApcoaTelemetry
         public const string ParkingIds = "apcoa.parking.ids";
         public const string Plates = "apcoa.plates";
         public const string SessionIds = "apcoa.session.ids";
+        public const string ClientName = "apcoa.client.name";
+        public const string ClientVersion = "apcoa.client.version";
+        public const string ClientTraceContext = "apcoa.client.trace_context";
+        public const string ClientMetaKeys = "apcoa.client.meta_keys";
         public const string Outcome = "apcoa.outcome";
         public const string IndexEntries = "apcoa.parking_index.entries";
         public const string IndexSource = "apcoa.parking_index.source";

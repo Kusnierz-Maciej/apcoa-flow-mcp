@@ -38,7 +38,8 @@ public static class StdioHost
                 options.ServerInstructions = McpInstructions.Text;
             })
             .WithStdioServerTransport()
-            .WithApcoaFlowTools();
+            .WithApcoaFlowTools()
+            .WithRequestFilters(filters => filters.AddCallToolFilter(ClientContextFilter.Create));
 
         var host = builder.Build();
         if (!StartupValidation.TryValidate(host.Services))

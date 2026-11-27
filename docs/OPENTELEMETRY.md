@@ -75,6 +75,9 @@ Each trace is built from four span sources:
 | `name_filter` | `find_parking` |
 | `results.count` | every read tool: parkings found, cars, active sessions, history entries |
 | `parking.ids` / `plates` / `session.ids` | `find_parking` / `get_registered_cars` / `get_active_sessions` + `get_session_history` (first 20) |
+| `client.name`, `client.version` | every tool call: the calling MCP client (from `_meta` `io.modelcontextprotocol/clientInfo`, else the initialize handshake) |
+| `client.trace_context` | every tool call: `meta` (client sent `traceparent` in `params._meta`), `http` (HTTP `traceparent` header) or `none` |
+| `client.meta_keys` | every tool call: the `_meta` key **names** the client sent (never values) |
 | `outcome` | every tool |
 
 Long lists are capped at 20 values (`ApcoaTelemetry.MaxListedValues`; the count tag has the full size). No
@@ -95,6 +98,23 @@ API failures that end a tool with an error (`ToolErrors` in `Tools/ToolErrors.cs
 A `401`/`419` token rejection adds an `apcoa.token_rejected_retrying` event to the tool span (explains
 the duplicate HTTP span that follows).
 
+**One trace per chat turn.** If the client propagates W3C trace context — `traceparent` in `params._meta`
+(SEP-414) or the HTTP `traceparent` header — the server continues the client's trace (the MCP SDK and ASP.NET Core
+do that already), so all tool calls of one turn land in **one trace**. `ClientContextFilter` (a call-tool request
+filter registered in both hosts) records whether that happened as `apcoa.client.trace_context`, plus a log line per
+call: `tools/call <tool> from <client> <version>: trace context <meta|http|none>; _meta keys [...]`. Clients that
+don't (`none`) get one trace per tool call; group those by `user.email` and time.
+
+**Observed clients** (2026-11-27, listonic-mcp with the same filter):
+
+| Client | Trace context | Result |
+|---|---|---|
+| Claude Code 2.1.332, default | `none` | one trace per tool call |
+| Claude Code 2.1.332 with its own telemetry on (`CLAUDE_CODE_ENABLE_TELEMETRY=1` + an OTLP traces exporter) | `http` (W3C `traceparent` header) | **all tool calls of one prompt share one trace**, each under its own Claude Code span |
+| claude.ai | not tested yet (deploy and check `apcoa.client.trace_context`) | per public reports: no trace context, no conversation id |
+
+Claude Code also sends `claudecode/toolUseId` in `_meta`: an id per tool call, not per conversation.
+
 Useful TraceQL:
 
 ```
@@ -103,6 +123,8 @@ Useful TraceQL:
 { span.apcoa.cost_pln > 20 }
 { span.user.email = "someone@example.com" }
 { status = error }
+{ span.apcoa.client.trace_context = "meta" }                      # calls that joined a client trace
+{ span.apcoa.client.name = "claude-code" }                        # per client (name as the client reports it)
 ```
 
 > **Personal data:** traces carry the user's email, license plates and (via URLs) consumer ids.
