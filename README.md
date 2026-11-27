@@ -136,7 +136,8 @@ The server supports two connection styles — pick whichever your client support
 
 The client discovers the OAuth endpoints automatically and opens a **login screen** for the user's
 API key + APCOA email/password. The session is refreshed silently, so the user does not have to log in
-again unless their API key is removed or their APCOA password changes.
+again unless their API key is removed or their APCOA password changes. If the password changes, tool
+calls return a plain "reconnect this connector" error — disconnect and connect it again.
 
 **Header auth (for clients that support custom headers):**
 

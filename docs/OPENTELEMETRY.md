@@ -73,6 +73,11 @@ Each trace is built from four span sources:
 | `started`, `stopped`, `quote` (paid, awaiting confirmation), `not_free` (free-only tool at a paid parking) | no |
 | `cost_cap_exceeded`, `cost_mismatch`, `plate_not_registered`, `no_bookable_lot`, `no_payment_method`, `no_consumer_profile`, `exceeds_free_window`, `no_parking_nearby`, `session_already_active`, `credentials_rejected` | yes |
 
+API failures that end a tool with an error (`ToolErrors` in `Tools/ToolErrors.cs`) also mark the span
+**Error** with one of `credentials_rejected`, `not_found`, `forbidden`, `rate_limited`, `unavailable`,
+`rejected_request`; the model gets a plain-language message instead of the SDK's opaque
+"An error occurred invoking …".
+
 A `401`/`419` token rejection adds an `apcoa.token_rejected_retrying` event to the tool span (explains
 the duplicate HTTP span that follows).
 

@@ -142,7 +142,6 @@ app.UseWhen(
     ctx => ctx.Request.Path.StartsWithSegments("/mcp"),
     branch =>
     {
-        branch.UseMiddleware<CredentialFailureMiddleware>();
         branch.UseMiddleware<ApiKeyMiddleware>();
         branch.UseMiddleware<UserScopeMiddleware>();
     });
