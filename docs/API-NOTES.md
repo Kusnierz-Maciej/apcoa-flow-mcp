@@ -149,7 +149,7 @@ Amounts are strings: `"PLN 5.00"` (currency, space, invariant decimal); large am
   - Works for a running pre-pay session (`isSessionActive: true`); a running **post-pay** one is `404 SessionNotFound`.
   - `endDate` is the real stop time for post-pay, but stays the **planned** end for pre-pay even after an early stop.
 
-## Test spaces
+## Test parkings
 
 Tests focus on **free options**; no test relies on paid behaviour or a grace period. Write tests (start / extend /
 stop) only where a **dated** quote for the test car says PLN 0.00 right before the start, and end the session within

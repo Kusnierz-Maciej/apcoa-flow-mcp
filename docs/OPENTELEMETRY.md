@@ -156,7 +156,7 @@ Useful TraceQL:
 { span.apcoa.client.name = "claude-code" }                        # per client (name as the client reports it)
 ```
 
-> **Personal data:** traces carry the user's email, license plates and (via URLs) space, vehicle and session ids.
+> **Personal data:** traces carry the user's email, license plates and (via URLs) parking, vehicle and session ids.
 > That is intended for a self-hosted stack — don't point `Telemetry:OtlpEndpoint` at a shared or
 > third-party backend without revisiting this.
 

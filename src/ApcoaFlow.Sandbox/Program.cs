@@ -14,7 +14,7 @@ using ApcoaFlow.Sandbox.Scenarios;
 // exchange (full headers + body, request and response) plus run.log and meta.txt.
 //
 // SAFETY: starting / extending / stopping sessions can be BILLABLE. Keep casual probing read-only.
-// Write only on a space with a dated PLN 0.00 quote (docs/API-NOTES.md "Test spaces": Ostrów outside
+// Write only on a space with a dated PLN 0.00 quote (docs/API-NOTES.md "Test parkings": Ostrów outside
 // Sat 06–15, a Biedronka inside its free window), and only with the user's OK.
 // ─────────────────────────────────────────────────────────────────────────────────────────────
 

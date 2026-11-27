@@ -16,7 +16,7 @@ open only the topic you need.
 
 ## Debugging API / MCP issues — use ApcoaFlow.Sandbox
 
-The API client is `src/ApcoaFlowApiClient`; what the API does (hosts, sign-in, endpoints, quirks, test spaces) is
+The API client is `src/ApcoaFlowApiClient`; what the API does (hosts, sign-in, endpoints, quirks, test parkings) is
 in `docs/API-NOTES.md`.
 
 When diagnosing an API or MCP problem (unexpected status codes, odd response bodies, auth/header issues, retry
@@ -53,8 +53,8 @@ path at the end — read the `.http` files there to analyse the issue.
 
 ### Safety — sessions can be billable
 
-Keep casual probing **read-only**. Write (start / extend / stop) only on a space with a **dated PLN 0.00 quote**
-for the test car (`docs/API-NOTES.md` "Test spaces": Ostrów Wlkp. III outside Sat 06–15, or a Biedronka inside its
+Keep casual probing **read-only**. Write (start / extend / stop) only on a parking with a **dated PLN 0.00 quote**
+for the test car (`docs/API-NOTES.md` "Test parkings": Ostrów Wlkp. III outside Sat 06–15, or a Biedronka inside its
 free window), and only with the user's OK.
 
 ## Checking the MCP server — MCP Inspector CLI
@@ -94,7 +94,7 @@ I --method tools/call --tool-name get_vehicles
 - stdio (`--method` must come **before** the server command; in Development the server reads its own
   user-secrets, id `apcoa-flow-mcp`; otherwise pass `-e ApcoaFlow__Email=… -e ApcoaFlow__Password=…`):
   `npx -y @modelcontextprotocol/inspector --cli --method tools/list -e DOTNET_ENVIRONMENT=Development dotnet run --project src/ApcoaFlowMcp -- --stdio 2>/dev/null`
-- **Safety:** same as the sandbox — read tools freely; session-starting tools only on a space with a dated
+- **Safety:** same as the sandbox — read tools freely; session-starting tools only on a parking with a dated
   PLN 0.00 quote, with the user's OK.
 - For the OAuth sign-in page and other UI, use the Inspector web UI (`npx @modelcontextprotocol/inspector`,
   transport Streamable HTTP) — see README.
@@ -130,6 +130,9 @@ the latest release.
   sessions also end them after every test (`[After(Test)]`).
 - Use the account's **first registered vehicle** (`LiveApi.FirstRegisteredCar`); never hard-code a plate or id, and
   don't cache account data between tests (tests must not depend on each other).
-- Start sessions **only on a space with a dated PLN 0.00 quote** for that vehicle, checked right before the start:
-  Ostrów Wlkp. III by default, else a `search`-found Biedronka inside its free window (once per 4 h per space:
-  rotate). See "Test spaces" in `docs/API-NOTES.md`.
+- Start sessions **only on a parking with a dated PLN 0.00 quote** for that vehicle, checked right before the start:
+  Ostrów Wlkp. III by default, else a `search`-found Biedronka inside its free window (once per 4 h per parking:
+  rotate). See "Test parkings" in `docs/API-NOTES.md`.
+- **Live tests focus on free options** and never rely on paid behaviour or a grace period (assume none: a paid start
+  costs its quote). "Biedronka" is the example query for parkings that come with free time; search for them, never
+  hard-code one. Paid checks only by hand, with the user's OK each time.

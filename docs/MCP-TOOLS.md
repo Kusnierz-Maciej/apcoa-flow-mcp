@@ -2,7 +2,8 @@
 
 The human-facing reference for the server's tools: names, inputs, example outputs. Update it in the same change
 whenever a tool is added, renamed, or changes its parameters, behaviour or output. Tool names follow the APCOA Flow
-API's naming (vehicles, spaces, sessions).
+API's naming, except that a parking (the API's "space") is always called a parking: a parking is the place, a
+session is parking there.
 
 The 2.0.0 tool set is being rebuilt around the current APCOA Flow API; tools are added here as they land.
 

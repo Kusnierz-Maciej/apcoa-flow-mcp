@@ -8,8 +8,7 @@ Unofficial MCP server for [APCOA Flow](https://www.apcoa.pl/krotkotrwale-parkowa
 
 ## MCP tools
 
-The server is being rebuilt for 2.0.0 around the current APCOA Flow API (spaces, quotes, sessions). Available
-now:
+A **parking** is the place; a **session** is parking there.
 
 | Tool | Description |
 |---|---|
@@ -49,6 +48,16 @@ Cost, duration and distance are user-facing in PLN, minutes and metres respectiv
 
 See [`docs/MCP-TOOLS.md`](docs/MCP-TOOLS.md) for the detailed tool reference (inputs + example outputs)
 and [`docs/API-NOTES.md`](docs/API-NOTES.md) for notes on the underlying APCOA Flow API.
+
+### Known limitations
+
+- **Payment**: only the account's **default** payment method, and only when it's a saved card charged without any
+  extra step. No 3-D Secure, Apple Pay or hosted payment page; set a saved card as the default in the APCOA Flow app.
+- **Sign-in** with e-mail + password needs the e-mail to be verified in the APCOA Flow app.
+- **Pre-pay** parkings charge at start and don't refund an early stop.
+- **Plate-recognition** parkings start and end sessions by themselves; the start tools refuse there.
+- Not supported: promo codes, booking ahead, favourites, adding vehicles or payment methods, EV charging,
+  permits/passes/season tickets, receipts or invoices.
 
 ## Running the MCP server
 
@@ -101,7 +110,7 @@ The image is published to GHCR on every release — no build or clone required.
 
     docker pull ghcr.io/kusnierz-maciej/apcoa-flow-mcp:latest
 
-Each release is also tagged with its version (e.g. `v1.8.0`) — see the
+Each release is also tagged with its version (e.g. `v2.0.0`) — see the
 [releases](https://github.com/Kusnierz-Maciej/apcoa-flow-mcp/releases) page.
 
 **1. Create a `docker-compose.yml`:**
@@ -111,8 +120,7 @@ Two starting points live in [`src/ApcoaFlowMcp/docker/`](src/ApcoaFlowMcp/docker
 - [`docker-compose.prod.yml`](src/ApcoaFlowMcp/docker/docker-compose.prod.yml) — clean, generic
   production setup. Start here for any host.
 - [`docker-compose.synology.yml`](src/ApcoaFlowMcp/docker/docker-compose.synology.yml) — the above
-  plus Synology fixes: runs as an ACL-trusted host user so the bind mount is writable, and sets a
-  human-readable `simple` console logging block.
+  plus a human-readable `simple` console logging block for `docker logs` on the NAS.
 
 Copy whichever fits as your `docker-compose.yml`. All settings have sensible defaults built in;
 override any of them with environment variables in the compose file (`Section__Key` convention).
@@ -234,8 +242,8 @@ Code works the same way, or send the legacy headers (`X-Api-Key: dev-key` +
 The Inspector's CLI mode (scripted `tools/list --strict`, tool calls) is described in `CLAUDE.md`.
 
 To see exactly what goes over the wire, use the diagnostic sandbox — see `CLAUDE.md`
-(`dotnet run --project src/ApcoaFlow.Sandbox`). Write tests only on a space with a dated PLN 0.00 quote for
-the test car (see "Test spaces" in [`docs/API-NOTES.md`](docs/API-NOTES.md)); any other start can cost money.
+(`dotnet run --project src/ApcoaFlow.Sandbox`). Write tests only on a parking with a dated PLN 0.00 quote for
+the test car (see "Test parkings" in [`docs/API-NOTES.md`](docs/API-NOTES.md)); any other start can cost money.
 
 Claude Code config (`.mcp.json` in the project root or `~/.claude/mcp.json`):
 
@@ -359,6 +367,9 @@ has one (listed in [`docs/API-NOTES.md`](docs/API-NOTES.md#contracts-guarded-by-
 CI against the latest release, and an issue is opened (or updated) when they fail. They:
 
 - run **one at a time** (never in parallel) — one real account, one rate limit;
+- focus on **free options**: read-only checks of search, free time in quotes and parking details, plus one free
+  session cycle per run on a parking whose dated quote is PLN 0.00 (the reusable test parking, else a parking found
+  with the query "Biedronka"; skipped when none is free). Nothing paid, and nothing relies on a grace period;
 - use the account's first registered vehicle (never a hard-coded plate);
 - end any running session once when the run starts (so a crashed run is cleaned up by the next one) and after each
   test class;
