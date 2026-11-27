@@ -1,4 +1,6 @@
 using System.Collections.Concurrent;
+using System.Security.Cryptography;
+using System.Text;
 
 namespace ApcoaFlowApiClient;
 
@@ -15,8 +17,12 @@ public sealed class ApcoaFlowTokenStore
         public string? Token;
     }
 
-    private static string KeyFor(ApcoaFlowClientOptions options) =>
-        $"{options.Email}:{options.Password}";
+    /// <summary>
+    /// Cache key: SHA-256 of email + NUL + password, so plaintext passwords are never kept as dictionary keys.
+    /// The NUL separator keeps ("a:b","c") and ("a","b:c") distinct.
+    /// </summary>
+    internal static string KeyFor(ApcoaFlowClientOptions options) =>
+        Convert.ToHexString(SHA256.HashData(Encoding.UTF8.GetBytes($"{options.Email}\0{options.Password}")));
 
     public async Task<string> GetOrLoginAsync(
         ApcoaFlowClientOptions credentials,
