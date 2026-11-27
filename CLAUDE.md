@@ -36,8 +36,8 @@ path at the end — read the `.http` files there to analyse the issue.
 - Add a new probe by implementing `IScenario` (in `Scenarios/`) and registering it in `ScenarioRegistry`. Each
   scenario carries a WHAT/WHY/FOUND doc header; write findings as **dated** lines (`FOUND (2026-11-27): …`) so it's
   clear when the API last behaved that way. All read-only so far: `login` (password + refresh grants, e-mail and phone),
-  `account` (profile, vehicles, payment methods, sessions, history), `find-spaces` (search, bounding box, space
-  details, polygons).
+  `account` (profile, vehicles, payment methods, sessions, history), `find-parkings` (search, bounding box, parking
+  details, outlines), `quotes` (prices, free window), `expired-token` (~66 min, run in the background).
 - **When the web app knows a flow we haven't seen**, drive it in the Chrome DevTools MCP: sign in with
   `tools/chrome/login-inject.sh` (manual sign-in there fails on the bot check; the script's header has the steps),
   turn on `guard.js` (blocks writes), capture the calls, then write a sandbox scenario that replays them through

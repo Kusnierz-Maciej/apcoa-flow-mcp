@@ -7,7 +7,7 @@ public static class ScenarioRegistry
     [
         new LoginScenario(),
         new AccountScenario(),
-        new FindSpacesScenario(),
+        new FindParkingsScenario(),
         new QuotesScenario(),
         new ExpiredTokenScenario(),
     ];

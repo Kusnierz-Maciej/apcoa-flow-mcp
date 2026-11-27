@@ -80,6 +80,8 @@ builder.Services.AddHttpContextAccessor();
 builder.Services.AddTransient<IApcoaFlowCredentialProvider, HttpContextCredentialProvider>();
 builder.Services.AddApcoaFlowApiClient(
     rateLimit: builder.Configuration.GetSection(ApcoaFlowRateLimitOptions.Section));
+builder.Services.AddScoped<ParkingFinder>();
+builder.Services.AddScoped<Pricing>();
 builder.Services.AddOptions<ApcoaFlowToolsOptions>()
     .Bind(builder.Configuration.GetSection("ApcoaFlow"))
     .ValidateDataAnnotations()

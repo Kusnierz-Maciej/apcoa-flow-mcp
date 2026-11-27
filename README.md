@@ -14,10 +14,14 @@ now:
 | Tool | Description |
 |---|---|
 | `get_vehicles` | The vehicles (license plates) on the account, with the default flagged and the user's description. |
+| `find_parkings` | Parkings by text (name, brand, town, location code) and/or near a position; near a position nearest first, measured to the parking's outline when it has one. |
+| `get_parking` | One parking's tariff table, rules, status and longest stay. |
+| `get_price` | The price of a stay starting now for one of your vehicles (free time included), and how long it can be free. |
+| `get_active_sessions` | Running sessions with time left. |
+| `get_session_history` | Recent sessions with cost. |
 
-Coming next: searching spaces (by name, brand, town, location code, or nearest to a position — using the space's
-outline on the map when it has one), price quotes, starting free and paid sessions (paid ones only with the
-account's default saved card), running sessions, history, and ending a session.
+Coming next: starting free and paid sessions (paid ones only with the account's default saved card), starting at
+the parking you're at, extending and ending a session, and prompts.
 
 Cost, duration and distance are user-facing in PLN, minutes and metres respectively.
 

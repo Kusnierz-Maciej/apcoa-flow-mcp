@@ -78,7 +78,7 @@ internal static class ToolErrors
         return status switch
         {
             HttpStatusCode.NotFound => new("not_found",
-                $"APCOA couldn't find that space or session (HTTP {code}). Search again for current ids."),
+                $"APCOA couldn't find that parking or session (HTTP {code}). Search again for current ids."),
             HttpStatusCode.Unauthorized => new("credentials_rejected", CredentialsRejected),
             HttpStatusCode.Forbidden => new("forbidden",
                 $"APCOA refused the request (HTTP {code}). Wait a few minutes before trying again."),
@@ -87,7 +87,7 @@ internal static class ToolErrors
             _ when code >= 500 => new("unavailable",
                 $"APCOA is temporarily unavailable (HTTP {code}). Try again in a moment."),
             _ => new("rejected_request",
-                $"APCOA rejected the request (HTTP {code}). Check the space, vehicle and session ids and try again."),
+                $"APCOA rejected the request (HTTP {code}). Check the parking, vehicle and session ids and try again."),
         };
     }
 }

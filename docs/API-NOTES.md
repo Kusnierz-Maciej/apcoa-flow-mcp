@@ -72,7 +72,8 @@ Parking places are **spaces**, with GUID ids. There's no offline dataset: the ap
   - `places` are geocoded streets/towns, not spaces.
 - `GET /api/v1/spaces/getByBoundingBox?NELatitude&NELongitude&SWLatitude&SWLongitude&Zoom` → map pins `[{id, name,
   coordinates, parkingType: "startStop" | "anpr", chargingType, mapPinImage, geoBorder, isMunicipality}]`
-  (`[]` for an empty view, 500 without parameters).
+  (`[]` for an empty view, 500 without parameters). `Zoom` changes nothing and there's no cap: the whole of Poland
+  returns all 525 pins (2026-11-27).
   - **`geoBorder`** is the space's outline, when it has one (78 of 525 Polish spaces, 2026-11-27):
     `{coordinates: [{latitude, longitude}, …], color: null}`, a closed ring (last point = first). Only these pins
     carry it; search hits and space details don't.

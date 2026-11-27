@@ -19,6 +19,11 @@ public class ToolAnnotationTests
 
     [Test]
     [Arguments("get_vehicles")]
+    [Arguments("find_parkings")]
+    [Arguments("get_parking")]
+    [Arguments("get_price")]
+    [Arguments("get_active_sessions")]
+    [Arguments("get_session_history")]
     public async Task Reads_AreReadOnly_AndIdempotent(string name)
     {
         await Assert.That(Tool(name).ReadOnly).IsTrue();

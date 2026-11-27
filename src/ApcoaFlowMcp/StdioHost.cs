@@ -26,7 +26,9 @@ public static class StdioHost
         builder.Services.AddTransient<IApcoaFlowCredentialProvider, ConfigurationCredentialProvider>();
         builder.Services.AddApcoaFlowApiClient(
             rateLimit: builder.Configuration.GetSection(ApcoaFlowRateLimitOptions.Section));
-                builder.Services.AddOptions<ApcoaFlowToolsOptions>()
+        builder.Services.AddScoped<ParkingFinder>();
+        builder.Services.AddScoped<Pricing>();
+        builder.Services.AddOptions<ApcoaFlowToolsOptions>()
             .Bind(builder.Configuration.GetSection("ApcoaFlow"))
             .ValidateDataAnnotations()
             .ValidateOnStart();

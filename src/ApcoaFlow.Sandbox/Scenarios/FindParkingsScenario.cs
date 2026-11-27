@@ -20,11 +20,13 @@ namespace ApcoaFlow.Sandbox.Scenarios;
 /// a polygon (6–21 pts, closed); ±0.5° zoom 10 around Katowice: 25 pins. <c>spaces/{id}</c> of 4 Biedronkas:
 /// <c>maxDuration 43200</c>, <c>defaultLengthOfStayInMinutes 90</c>, <c>parkingOverview</c> is a list
 /// <c>[{title, imageUrl}]</c>.
+/// FOUND (2026-11-27): <c>Zoom</c> changes nothing (8–18: same 25 pins around Katowice) and there's no cap: the
+/// whole of Poland returns all 525 pins at zoom 6 and 16.
 /// </summary>
-public sealed class FindSpacesScenario : IScenario
+public sealed class FindParkingsScenario : IScenario
 {
-    public string Name => "find-spaces";
-    public string Description => "Space search: search / getByBoundingBox / spaces/{id}, polygons (geoBorder). Read-only.";
+    public string Name => "find-parkings";
+    public string Description => "Parking search: search / getByBoundingBox / spaces/{id}, outlines (geoBorder), zoom. Read-only.";
 
     private static readonly (string Name, double Lat, double Lon) Katowice = ("Katowice", 50.2599, 19.0216);
     private static readonly (string Name, double Lat, double Lon) Ostrow = ("Ostrów Wlkp. (test space)", 51.651796, 17.836953);
@@ -82,6 +84,25 @@ public sealed class FindSpacesScenario : IScenario
         await Box(Ostrow, 0.01, 15);
         await Box(Katowice, 0.05, 13);
         await Box(Katowice, 0.5, 10);
+
+        // Does Zoom change what comes back (clustering / caps)? Same box, several zooms.
+        foreach (var zoom in new[] { 8, 10, 13, 16, 18 })
+        {
+            var pins = await api.GetSpacesByBoundingBoxAsync(new BoundingBoxQuery
+            {
+                NeLatitude = Katowice.Lat + 0.5, NeLongitude = Katowice.Lon + 0.5,
+                SwLatitude = Katowice.Lat - 0.5, SwLongitude = Katowice.Lon - 0.5, Zoom = zoom,
+            }, ct);
+            run.Log($"zoom probe ±0.5° Katowice zoom {zoom}: {pins.Count} pins");
+        }
+        foreach (var zoom in new[] { 6, 16 })
+        {
+            var pins = await api.GetSpacesByBoundingBoxAsync(new BoundingBoxQuery
+            {
+                NeLatitude = 54.9, NeLongitude = 24.2, SwLatitude = 49.0, SwLongitude = 14.1, Zoom = zoom,
+            }, ct);
+            run.Log($"zoom probe all of Poland zoom {zoom}: {pins.Count} pins");
+        }
 
         foreach (var id in seenIds.Distinct().Take(4))
         {

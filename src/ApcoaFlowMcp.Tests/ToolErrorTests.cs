@@ -68,7 +68,7 @@ public class ToolErrorTests
         var api = FakeApi.Create();
         api.GetVehiclesAsync(Arg.Any<CancellationToken>()).ThrowsAsync(await Api(HttpStatusCode.BadGateway));
 
-        var ex = await Assert.ThrowsAsync<McpException>(() => new ApcoaFlowTools(api, NullLogger<ApcoaFlowTools>.Instance).GetVehiclesAsync());
+        var ex = await Assert.ThrowsAsync<McpException>(() => FakeApi.Tools(api).GetVehiclesAsync());
 
         await Assert.That(ex!.Message).Contains("temporarily unavailable");
     }
@@ -80,7 +80,7 @@ public class ToolErrorTests
         api.GetVehiclesAsync(Arg.Any<CancellationToken>())
             .ThrowsAsync(new InvalidOperationException("Refit wrapper", new ApcoaFlowCredentialsRejectedException("invalid_grant")));
 
-        var ex = await Assert.ThrowsAsync<McpException>(() => new ApcoaFlowTools(api, NullLogger<ApcoaFlowTools>.Instance).GetVehiclesAsync());
+        var ex = await Assert.ThrowsAsync<McpException>(() => FakeApi.Tools(api).GetVehiclesAsync());
 
         await Assert.That(ex!.Message).IsEqualTo(ToolErrors.CredentialsRejected);
     }

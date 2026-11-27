@@ -24,6 +24,13 @@ public static class ApcoaTelemetry
         public const string ClientMetaKeys = "apcoa.client.meta_keys";
         public const string ResultsCount = "apcoa.results.count";
         public const string LicensePlates = "apcoa.license_plates";
+        public const string LicensePlate = "apcoa.license_plate";
+        public const string ParkingId = "apcoa.parking.id";
+        public const string ParkingName = "apcoa.parking.name";
+        public const string ParkingIds = "apcoa.parking.ids";
+        public const string SessionId = "apcoa.session.id";
+        public const string SessionIds = "apcoa.session.ids";
+        public const string CostPln = "apcoa.cost_pln";
     }
 
     /// <summary>Longest list attribute we record (ids, plates); a count tag carries the full size.</summary>

@@ -31,7 +31,7 @@ public class TelemetryTests
     [Test]
     public async Task GetVehicles_TagsCountPlatesAndOutcome()
     {
-        var tools = new ApcoaFlowTools(FakeApi.Create(), Microsoft.Extensions.Logging.Abstractions.NullLogger<ApcoaFlowTools>.Instance);
+        var tools = FakeApi.Tools(FakeApi.Create());
 
         using var span = TestSource.StartActivity("tools/call get_vehicles")!;
         await tools.GetVehiclesAsync();
