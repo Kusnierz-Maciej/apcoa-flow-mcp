@@ -6,6 +6,12 @@ Unofficial MCP server for [APCOA Flow](https://www.apcoa.pl/krotkotrwale-parkowa
 ![GitHub Actions Workflow Status](https://img.shields.io/github/actions/workflow/status/Kusnierz-Maciej/apcoa-flow-mcp/verify-api-contract.yml?branch=main&label=APCOA%20api%20compatibility)  
 ![Dynamic JSON Badge](https://img.shields.io/badge/dynamic/json?url=https%3A%2F%2Fapi.github.com%2Frepos%2FKusnierz-Maciej%2Fapcoa-flow-mcp%2Factions%2Fworkflows%2F429259354%2Fruns%3Fstatus%3Dcompleted%26per_page%3D1&query=%24.workflow_runs%5B0%5D.run_started_at&label=APCOA%20api%20compatibility&cacheSeconds=300)    
 
+> [!WARNING]
+> This server (1.x) works with the **current APCOA Flow app and its API**, which APCOA is retiring on
+> **26 December 2026**. It does **not** support the **new APCOA Flow app** (a new API and new accounts), which
+> replaces it ([APCOA announcement](https://www.apcoa.pl/migracja-do-nowej-aplikacji-flow)).
+> Support for the new app is in progress and will ship as 2.0.0.
+
 ## MCP tools
 
 | Tool | Description |
