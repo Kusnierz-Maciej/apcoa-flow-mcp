@@ -164,6 +164,19 @@ here.
 | Sessions and history are lists | `Sessions_and_history_are_lists` |
 | Stopping an unknown session is `404 SessionNotFound` | `Stopping_an_unknown_session_is_404_SessionNotFound` |
 
+One free cycle per run (`SessionContractTests.Free_session_lifecycle`, on Ostrów or a Biedronka with a dated 0.00
+quote; skipped when none is free):
+
+| Behaviour | Checked |
+|---|---|
+| A free start with the default saved card runs at once, nothing pending | `startParking` → `{id}`, no `pendingId` / `clientSecret` |
+| A started session is listed by `sessions` right away (`active`, vehicle, parking) | ✓ |
+| A second start for the same plate is `400 ParkingSessionInvalidArgument` | ✓ |
+| A free extension: `updatedPrice` gives the new `endDate`, `updateParkingDuration` moves the same session's end | ✓ |
+| Stop is 204, and the session leaves `sessions`; a second stop is 204 too | ✓ |
+| Extending a stopped session is `400 ParkingSessionInvalidArgument` | ✓ |
+| `sessionsHistory/{id}` has it, not active, PLN 0.00 | ✓ (polled up to ~10 s) |
+
 ## Trusted, not tested
 
 Behaviours relied on without a live test, because testing them costs money or can't be repeated:
