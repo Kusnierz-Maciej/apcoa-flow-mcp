@@ -10,7 +10,7 @@ namespace ApcoaFlowApiClient.Tests;
 /// <summary>
 /// Live contract tests: each pins one APCOA behaviour the server's code relies on (see the "Contracts guarded
 /// by live tests" table in docs/API-NOTES.md). If one fails, APCOA changed — re-probe with the sandbox
-/// (<c>login-probe</c>) and adapt the code, not just the test.
+/// (<c>login-probe</c>, <c>probe-silent-successes</c>) and adapt the code, not just the test.
 /// Wrong-password logins count towards APCOA's lockout (5 attempts per 2 minutes): this class makes one.
 /// </summary>
 [Category("LiveApi")]
@@ -74,5 +74,19 @@ public class LiveApiContractTests
 
         await Assert.That((int)response.StatusCode).IsEqualTo(419);
         await Assert.That(await response.Content.ReadAsStringAsync()).Contains("Invalid or Expired Token");
+    }
+
+    // ─── Silent successes (end_session) ─────────────────────────────────────────────────────────────
+
+    [Test]
+    public async Task StopSession_UnknownId_Is422_SessionNotFound_NotA200()
+    {
+        // end_session relies on this to report "no such active session" instead of "ended". The same 422 is
+        // returned when stopping an already-ended session (probed 2026-11-27 on parking 616319).
+        var ex = await Assert.ThrowsAsync<ApiException>(() => ApiClientFactory.Api.StopParkingSessionAsync(
+            new StopParkingSessionRequest { ParkingSessionId = 2_000_000_000, SessionCheckOutTime = DateTimeOffset.UtcNow }));
+
+        await Assert.That(ex!.StatusCode).IsEqualTo(HttpStatusCode.UnprocessableEntity);
+        await Assert.That(ex.Content!).Contains("PARKING_SESSION_NOT_FOUND");
     }
 }

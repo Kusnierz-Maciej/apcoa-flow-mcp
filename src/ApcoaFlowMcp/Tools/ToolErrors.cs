@@ -50,7 +50,7 @@ internal static class ToolErrors
 
         for (var e = ex; e is not null; e = e.InnerException)
             if (e is ApiException api)
-                return FromStatus(api.StatusCode);
+                return FromBody(api) ?? FromStatus(api.StatusCode);
 
         for (var e = ex; e is not null; e = e.InnerException)
             if (e is HttpRequestException)
@@ -59,6 +59,16 @@ internal static class ToolErrors
 
         return null;
     }
+
+    /// <summary>Known APCOA error codes in the body take precedence over the bare status.</summary>
+    private static Mapped? FromBody(ApiException api) =>
+        // Stop of an unknown or already-ended session: 422 {"message":"PARKING_SESSION_NOT_FOUND","statusCode":5001}
+        // (probed 2026-11-27; pinned by LiveApiContractTests).
+        api.Content?.Contains("PARKING_SESSION_NOT_FOUND", StringComparison.Ordinal) == true
+            ? new("session_not_found",
+                "APCOA has no active parking session with that id — it may already have ended, or the id is wrong. " +
+                "Call get_active_sessions for the running session's id.")
+            : null;
 
     private static Mapped FromStatus(HttpStatusCode status)
     {
