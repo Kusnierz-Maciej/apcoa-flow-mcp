@@ -2,6 +2,7 @@ using ApcoaFlowApiClient;
 using ApcoaFlowApiClient.Auth;
 using ApcoaFlowApiClient.Http;
 using ApcoaFlowMcp.Apcoa;
+using ApcoaFlowMcp.Prompts;
 using ApcoaFlowMcp.Tools;
 using Microsoft.Extensions.Options;
 
@@ -42,6 +43,7 @@ public static class StdioHost
             })
             .WithStdioServerTransport()
             .WithApcoaFlowTools()
+            .WithApcoaFlowPrompts(builder.Configuration)
                     .WithRequestFilters(filters => filters.AddCallToolFilter(ClientContextFilter.Create));
 
         var host = builder.Build();

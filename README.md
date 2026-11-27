@@ -31,7 +31,19 @@ makes the client's permission prompt show *which* parking. Paid sessions are onl
 **default** payment method, and only when that's a saved card (a known limitation: no 3-D Secure, Apple Pay or
 payment pages).
 
-Coming next: prompts.
+**Prompts** — shortcuts you pick yourself (slash commands in Claude Code, the "+" menu in claude.ai); they never run
+on their own. The `plate` argument autocompletes from your vehicles and `parking` from the parkings of your recent
+sessions:
+
+| Prompt | Does |
+|---|---|
+| `park_free_here` | Free session at the parking you're at (confirms first; never starts a paid one) |
+| `park_free_at` | Free session at a parking you name, e.g. one you used before (confirms first; never paid) |
+| `end_parking` | End the running session after confirming, and report the cost |
+| `parking_costs` | What parking cost this month (or another period), from the session history |
+
+They are defaults: if you have your own instructions or skills for APCOA parking, those should win (the prompt text
+asks the model to prefer them — a hint, not enforced). Turn prompts off with `Prompts__Enabled=false`.
 
 Cost, duration and distance are user-facing in PLN, minutes and metres respectively.
 
@@ -277,6 +289,7 @@ Set in the compose file (or `.env` for secrets) using the `Section__Key` convent
 | `ApcoaFlow__MaxSessionCostPln` | `100` | Most a single start or extension may cost; `start_expensive_session` bypasses it. |
 | `ApcoaFlow__CurrentLocationRadiusMeters` | `300` | Default search radius for the current-location tools. |
 | `ApcoaFlow__Email` / `ApcoaFlow__Password` | — | stdio mode only (required there). |
+| `Prompts__Enabled` | `true` | `false` removes the MCP prompts (and their completions). |
 | `RateLimit__TokenLimit` / `RateLimit__ReplenishmentPeriod` | `10` / `00:00:01` | Client-side limit on APCOA calls: a burst, then one call per period (extra calls wait). Loosen at your own risk. |
 | `Telemetry__Enabled` / `Telemetry__OtlpEndpoint` | `false` / `http://localhost:4317` | OpenTelemetry export of traces + logs — see [`docs/OPENTELEMETRY.md`](docs/OPENTELEMETRY.md). |
 | `Logging__LogLevel__Default` | `Information` | App logs: one line per tool call, sign-in, APCOA login and token refresh. |
@@ -291,6 +304,11 @@ Set in the compose file (or `.env` for secrets) using the `Section__Key` convent
   more.
 - **ApcoaFlow__CurrentLocationRadiusMeters** — default search radius for the current-location tools (a tool may
   override it per call).
+
+## Prompts
+
+- **Prompts__Enabled** — `true` (default) advertises the MCP prompts above and their argument completions;
+  `false` removes them.
 
 ## Rate limit
 

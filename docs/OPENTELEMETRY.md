@@ -94,8 +94,12 @@ Each trace is built from four span sources:
 
 | Tag | Set by |
 |---|---|
-| `results.count` | every read tool (e.g. vehicles found) |
-| `license_plates` | `get_vehicles` (first 20) |
+| `results.count` | every read tool: parkings, vehicles, sessions found |
+| `license_plates` / `parking.ids` / `session.ids` | `get_vehicles` / `find_parkings` / `get_active_sessions` + `get_session_history` (first 20) |
+| `license_plate`, `parking.id`, `parking.name` | `get_price`, `get_parking`, the start tools |
+| `duration_min`, `cost_pln`, `confirmed_cost_pln` | `get_price`, the start tools, `extend_session`; `end_session` (`cost_pln`, final) |
+| `session.id` | the start tools (started), `extend_session`, `end_session` |
+| `radius_m`, `distance_m` | `start_*_here` |
 | `client.name`, `client.version` | every tool call: the calling MCP client (from `_meta` `io.modelcontextprotocol/clientInfo`, else the initialize handshake) |
 | `client.trace_context` | every tool call: `meta` (client sent `traceparent` in `params._meta`), `http` (HTTP `traceparent` header) or `none` |
 | `client.meta_keys` | every tool call: the `_meta` key **names** the client sent (never values) |
@@ -108,10 +112,8 @@ passwords, tokens or payloads are recorded. Plates and the account email are per
 
 | `apcoa.outcome` | Error? |
 |---|---|
-| `ok` (read tools) | no |
-| `credentials_rejected` | yes |
-
-More outcomes (started, quote, refusals…) are added with the session tools.
+| `ok` (read tools), `started`, `extended`, `stopped`, `quote` (paid, awaiting the user's confirmation), `not_free` (free-only tool at a paid parking) | no |
+| `plate_not_registered`, `session_already_active`, `no_payment_method`, `default_not_a_card`, `cost_cap_exceeded`, `cost_mismatch`, `exceeds_max_duration`, `bad_duration`, `payment_action_required`, `session_not_found`, `not_extendable`, `not_stoppable`, `no_parking_nearby`, `ambiguous_location`, `missing_input`, `credentials_rejected` | yes |
 
 API failures that end a tool with an error (`ToolErrors` in `Tools/ToolErrors.cs`) also mark the span
 **Error** with one of `credentials_rejected`, `session_not_found`, `session_refused`, `not_found`, `forbidden`,

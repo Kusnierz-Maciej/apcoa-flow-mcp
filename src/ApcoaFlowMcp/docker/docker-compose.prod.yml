@@ -13,6 +13,8 @@ services:
       # Defaults shown; uncomment to change.
       #- ApcoaFlow__MaxSessionCostPln=100
       #- ApcoaFlow__CurrentLocationRadiusMeters=300
+      # MCP prompts (user-picked shortcuts like "Park here for free"); false = advertise none.
+      #- Prompts__Enabled=true
       # Client-side rate limit on APCOA calls (login included): a burst, then one call per period.
       #- RateLimit__TokenLimit=10
       #- RateLimit__ReplenishmentPeriod=00:00:01
