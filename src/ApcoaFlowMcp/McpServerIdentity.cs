@@ -7,7 +7,7 @@ namespace ApcoaFlowMcp;
 /// The server's MCP <c>serverInfo</c>: name, version, display title and icons. Icons are inlined as
 /// <c>data:</c> URIs (embedded from <c>wwwroot</c>) so clients can show them without knowing the
 /// server's public URL — it sits behind a proxy and works the same in stdio mode. The artwork is the
-/// APCOA mark from apcoa.pl's favicon set.
+/// official APCOA Flow app icon (App Store id1358202825), as a full-bleed square — clients round the corners.
 /// </summary>
 internal static class McpServerIdentity
 {
