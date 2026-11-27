@@ -323,11 +323,9 @@ public class WriteToolTests
     {
         var api = ForStarts(_ => 0m);
         var end = Now.AddMinutes(30);
-        api.GetSessionsAsync(Arg.Any<CancellationToken>()).Returns(
-        [
-            new Session { Id = "s1", StartDate = Now, EndDate = end, SessionCanBeExtended = true, Space = new SessionSpace { Id = ParkingId, Name = ParkingName },
-                Vehicle = new SessionVehicle { LicensePlate = "ABC12345" } },
-        ]);
+        Session S(DateTimeOffset until) => new() { Id = "s1", StartDate = Now, EndDate = until, SessionCanBeExtended = true,
+            Space = new SessionSpace { Id = ParkingId, Name = ParkingName }, Vehicle = new SessionVehicle { LicensePlate = "ABC12345" } };
+        api.GetSessionsAsync(Arg.Any<CancellationToken>()).Returns([S(end)], [S(end.AddMinutes(30))]);
         api.GetUpdatedPriceAsync("s1", 1800, Arg.Any<CancellationToken>())
             .Returns(new PriceQuote { TotalPrice = "PLN 0.00", EndDate = end.AddMinutes(30) });
 
@@ -370,7 +368,43 @@ public class WriteToolTests
         var text = await FakeApi.Tools(api).ExtendSessionAsync("s1", ParkingName, 30);
 
         await Assert.That(text).Contains("Don't extend again");
+        await Assert.That(text).Contains("isn't showing yet");
         await api.Received(1).UpdateParkingDurationAsync(Arg.Any<UpdateParkingDurationRequest>(), Arg.Any<CancellationToken>());
+    }
+
+    [Test]
+    public async Task Extend_accepted_but_the_new_end_never_shows_says_dont_extend_again()
+    {
+        var api = ForStarts(_ => 0m);
+        var session = new Session { Id = "s1", StartDate = Now, EndDate = Now.AddMinutes(30), SessionCanBeExtended = true,
+            Space = new SessionSpace { Id = ParkingId, Name = ParkingName } };
+        api.GetSessionsAsync(Arg.Any<CancellationToken>()).Returns([session]);
+        api.GetUpdatedPriceAsync("s1", 1800, Arg.Any<CancellationToken>()).Returns(new PriceQuote { TotalPrice = "PLN 0.00", EndDate = Now.AddMinutes(60) });
+        api.UpdateParkingDurationAsync(Arg.Any<UpdateParkingDurationRequest>(), Arg.Any<CancellationToken>())
+            .Returns(ExtendAnswer(new UpdateParkingDurationResponse { Status = "pending", PendingId = "p1" }));
+
+        var text = await FakeApi.Tools(api).ExtendSessionAsync("s1", ParkingName, 30);
+
+        await Assert.That(text).Contains("accepted extending the session");
+        await Assert.That(text).Contains("Don't extend again");
+    }
+
+    [Test]
+    public async Task Extend_with_a_failure_reason_says_it_wasnt_extended()
+    {
+        var api = ForStarts(_ => 0m);
+        api.GetSessionsAsync(Arg.Any<CancellationToken>()).Returns(
+        [
+            new Session { Id = "s1", StartDate = Now, EndDate = Now.AddMinutes(30), SessionCanBeExtended = true, Space = new SessionSpace { Id = ParkingId, Name = ParkingName } },
+        ]);
+        api.GetUpdatedPriceAsync("s1", 1800, Arg.Any<CancellationToken>()).Returns(new PriceQuote { TotalPrice = "PLN 0.00", EndDate = Now.AddMinutes(60) });
+        api.UpdateParkingDurationAsync(Arg.Any<UpdateParkingDurationRequest>(), Arg.Any<CancellationToken>())
+            .Returns(ExtendAnswer(new UpdateParkingDurationResponse { Status = "failed", FailureReason = "card declined" }));
+
+        var text = await FakeApi.Tools(api).ExtendSessionAsync("s1", ParkingName, 30);
+
+        await Assert.That(text).Contains("didn't extend the session");
+        await Assert.That(text).Contains("card declined");
     }
 
     [Test]

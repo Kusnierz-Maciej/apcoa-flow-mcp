@@ -135,7 +135,20 @@ public sealed class PendingStartStatus
                                                 s.Contains("reject", StringComparison.OrdinalIgnoreCase));
 }
 
-/// <summary><c>POST /api/v1/sessions/updateParkingDuration</c> body → 200 with an empty body; same session id.</summary>
+/// <summary>
+/// <c>updateParkingDuration</c> answer when it has a body (the app reads these fields; a free extension's body was
+/// empty, 2026-11-27). Values of <see cref="Status"/> not seen yet.
+/// </summary>
+public sealed class UpdateParkingDurationResponse
+{
+    public string? Status { get; set; }
+    public string? SessionId { get; set; }
+    public string? PendingId { get; set; }
+    public string? FailureReason { get; set; }
+    public string? ClientSecret { get; set; }
+}
+
+/// <summary><c>POST /api/v1/sessions/updateParkingDuration</c> body; the same session continues with the new end.</summary>
 public sealed class UpdateParkingDurationRequest
 {
     public string SessionId { get; set; } = string.Empty;

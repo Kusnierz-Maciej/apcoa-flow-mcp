@@ -37,18 +37,19 @@ public sealed class Sessions(IApcoaFlowApi api, Pricing pricing, TimeProvider ti
     public async Task<SessionResult> StartAsync(string parkingId, string licensePlate, int? durationMinutes,
         decimal? confirmedCostPln, StartMode mode, decimal maxCostPln, CancellationToken ct)
     {
-        var vehicle = Plates.Find(await api.GetVehiclesAsync(ct), licensePlate);
+        var vehicle = Plates.Find(await Phase("apcoa.vehicles", () => api.GetVehiclesAsync(ct)), licensePlate);
         if (vehicle is null)
             return Refused("plate_not_registered", $"\"{licensePlate}\" isn't one of the account's vehicles. Call get_vehicles for the plates.");
         ApcoaTelemetry.Tag(ApcoaTelemetry.Tags.LicensePlate, vehicle.LicensePlate);
 
-        var running = (await api.GetSessionsAsync(ct)).FirstOrDefault(s => Plates.Normalize(s.Vehicle?.LicensePlate) == Plates.Normalize(vehicle.LicensePlate));
+        var running = (await Phase("apcoa.running_sessions", () => api.GetSessionsAsync(ct)))
+            .FirstOrDefault(s => Plates.Normalize(s.Vehicle?.LicensePlate) == Plates.Normalize(vehicle.LicensePlate));
         if (running is not null)
             return Refused("session_already_active",
                 $"{vehicle.LicensePlate} already has a running session: {Describe(running)}. End it with end_session (or " +
                 "extend it with extend_session) before starting another one.", running.Id);
 
-        var parking = await api.GetSpaceAsync(parkingId.Trim(), ct);
+        var parking = await Phase("apcoa.parking", () => api.GetSpaceAsync(parkingId.Trim(), ct));
         ApcoaTelemetry.Tag(ApcoaTelemetry.Tags.ParkingId, parking.Id);
         ApcoaTelemetry.Tag(ApcoaTelemetry.Tags.ParkingName, parking.Name);
         if (parking.CtaButtonType is not null && parking.CtaButtonType != "startParking")
@@ -57,7 +58,7 @@ public sealed class Sessions(IApcoaFlowApi api, Pricing pricing, TimeProvider ti
                   "when the car enters and leaves (see get_parking_details for its rules and free time)."
                 : $"Sessions can't be started at {parking.Name} (not in the APCOA Flow app either).");
 
-        var card = await DefaultMethodAsync(parking.Id, ct);
+        var card = await Phase("apcoa.payment_method", () => DefaultMethodAsync(parking.Id, ct));
         if (card.Refusal is { } noMethod)
             return noMethod;
 
@@ -66,7 +67,7 @@ public sealed class Sessions(IApcoaFlowApi api, Pricing pricing, TimeProvider ti
         var duration = durationMinutes;
         Pricing.FreeWindow? window = null;
         if (duration is null || mode == StartMode.FreeOnly)
-            window = await pricing.FreeWindowAsync(parking.Id, vehicle.Id, parking.DefaultLengthOfStayInMinutes, parking.MaxDuration, ct);
+            window = await Phase("apcoa.free_window", () => pricing.FreeWindowAsync(parking.Id, vehicle.Id, parking.DefaultLengthOfStayInMinutes, parking.MaxDuration, ct));
         duration ??= window is { Minutes: > 0 } free ? free.Minutes : parking.DefaultLengthOfStayInMinutes ?? DefaultDurationMinutes;
         if (parking.MaxDuration is > 0 && duration > parking.MaxDuration)
             return Refused("exceeds_max_duration", $"{parking.Name} allows stays of up to {Text.Duration(parking.MaxDuration.Value)}.");
@@ -74,7 +75,7 @@ public sealed class Sessions(IApcoaFlowApi api, Pricing pricing, TimeProvider ti
 
         if (mode == StartMode.FreeOnly && window is { Minutes: 0 })
         {
-            var price = (await pricing.QuoteAsync(parking.Id, vehicle.Id, duration.Value, ct)).Total;
+            var price = (await Phase("apcoa.quote", () => pricing.QuoteAsync(parking.Id, vehicle.Id, duration.Value, ct))).Total;
             return NotFree($"{parking.Name} isn't free for {vehicle.LicensePlate} right now: {Text.Duration(duration.Value)} costs {price}. " +
                            "Nothing was started; use start_session to park there for a fee.", price.Amount);
         }
@@ -83,7 +84,7 @@ public sealed class Sessions(IApcoaFlowApi api, Pricing pricing, TimeProvider ti
                            $"so {Text.Duration(duration.Value)} would cost money. Nothing was started; start with a shorter duration " +
                            "(or leave it out to use the whole free time).", null);
 
-        var quote = await pricing.QuoteAsync(parking.Id, vehicle.Id, duration.Value, ct);
+        var quote = await Phase("apcoa.quote", () => pricing.QuoteAsync(parking.Id, vehicle.Id, duration.Value, ct));
         var cost = quote.Total;
         ApcoaTelemetry.Tag(ApcoaTelemetry.Tags.CostPln, (double)cost.Amount);
         if (!cost.IsZero)
@@ -112,11 +113,11 @@ public sealed class Sessions(IApcoaFlowApi api, Pricing pricing, TimeProvider ti
         }
 
         var start = Minute(time.GetUtcNow());
-        var started = await api.StartParkingAsync(new StartParkingRequest
+        var started = await Phase("apcoa.start", () => api.StartParkingAsync(new StartParkingRequest
         {
             SpaceId = parking.Id, LicensePlateId = vehicle.Id, PaymentMethodId = card.Method!.Id,
             StartDate = start, EndDate = start.AddMinutes(duration.Value),
-        }, Guid.NewGuid().ToString(), ct);
+        }, Guid.NewGuid().ToString(), ct));
 
         var sessionId = started.Id;
         string? failure = null;
@@ -127,14 +128,14 @@ public sealed class Sessions(IApcoaFlowApi api, Pricing pricing, TimeProvider ti
                 failure = "payment_action_required";
             else if (started.IsPending)
             {
-                var pending = await WaitForPendingAsync(started.PendingId!, ct);
+                var pending = await Phase("apcoa.pending", () => WaitForPendingAsync(started.PendingId!, ct));
                 if (pending?.IsCompleted == true) sessionId = pending.SessionId;
                 else if (pending?.IsFailed == true) failure = $"failed: {pending.FailureReason ?? pending.Status}";
                 else failure = "still_pending";
             }
 
             // Whatever the answer said, the running list is the truth: never report "not started" while one runs.
-            runningNow = (await api.GetSessionsAsync(ct)).FirstOrDefault(s =>
+            runningNow = (await Phase("apcoa.readback", () => api.GetSessionsAsync(ct))).FirstOrDefault(s =>
                 (sessionId is not null && s.Id == sessionId) ||
                 (Plates.Normalize(s.Vehicle?.LicensePlate) == Plates.Normalize(vehicle.LicensePlate) && s.Space?.Id == parking.Id));
         }
@@ -151,7 +152,7 @@ public sealed class Sessions(IApcoaFlowApi api, Pricing pricing, TimeProvider ti
         {
             logger.LogWarning("start at {Parking} needs an interactive payment step; ending anything that started.", parking.Id);
             if (runningNow is not null)
-                await api.StopParkingAsync(runningNow.Id, ct);
+                await Phase("apcoa.stop", () => api.StopParkingAsync(runningNow.Id, ct));
             return Refused("payment_action_required",
                 $"The card payment at {parking.Name} needs a confirmation step (e.g. 3-D Secure) that this server can't do. " +
                 (runningNow is null ? "Nothing was started." : $"The session that began ({runningNow.Id}) was ended at once.") +
@@ -192,17 +193,17 @@ public sealed class Sessions(IApcoaFlowApi api, Pricing pricing, TimeProvider ti
         ApcoaTelemetry.Tag(ApcoaTelemetry.Tags.SessionId, sessionId);
         if (minutes < 1)
             return Refused("bad_duration", "Extend by at least 1 minute.");
-        var session = (await api.GetSessionsAsync(ct)).FirstOrDefault(s => s.Id == sessionId.Trim());
+        var session = (await Phase("apcoa.running_sessions", () => api.GetSessionsAsync(ct))).FirstOrDefault(s => s.Id == sessionId.Trim());
         if (session is null)
             return Refused("session_not_found", "No running session has that id. Call get_active_sessions for the current ones.");
         if (!session.SessionCanBeExtended)
             return Refused("not_extendable", $"{Describe(session)} can't be extended.");
 
-        var card = await DefaultMethodAsync(session.Space?.Id, ct);
+        var card = await Phase("apcoa.payment_method", () => DefaultMethodAsync(session.Space?.Id, ct));
         if (card.Refusal is { } noMethod)
             return noMethod;
 
-        var quote = await api.GetUpdatedPriceAsync(session.Id, minutes * 60, ct);
+        var quote = await Phase("apcoa.quote", () => api.GetUpdatedPriceAsync(session.Id, minutes * 60, ct));
         var cost = quote.Total;
         ApcoaTelemetry.Tag(ApcoaTelemetry.Tags.CostPln, (double)cost.Amount);
         ApcoaTelemetry.Tag(ApcoaTelemetry.Tags.DurationMinutes, minutes);
@@ -229,35 +230,66 @@ public sealed class Sessions(IApcoaFlowApi api, Pricing pricing, TimeProvider ti
                     $"{confirmedCostPln.Value.ToString("0.00", CultureInfo.InvariantCulture)} PLN). Nothing was changed.");
         }
 
-        await api.UpdateParkingDurationAsync(new UpdateParkingDurationRequest
+        var answer = await Phase("apcoa.extend", () => api.UpdateParkingDurationAsync(new UpdateParkingDurationRequest
         {
             SessionId = session.Id, NewEnd = newEnd, PaymentMethodId = card.Method!.Id,
-        }, ct);
-        Session updated;
-        try { updated = (await api.GetSessionsAsync(ct)).FirstOrDefault(s => s.Id == session.Id) ?? session; }
+        }, ct));
+        if (!answer.IsSuccessStatusCode)
+            throw (Exception?)answer.Error ?? new HttpRequestException($"updateParkingDuration: HTTP {(int?)answer.StatusCode}");
+        var body = answer.Content; // null for an empty body (a free extension, 2026-11-27)
+        if (body is not null)
+            logger.LogInformation("extend {Session} answered status {Status}, pending {Pending}, failure {Failure}",
+                session.Id, body.Status, body.PendingId, body.FailureReason);
+        var paid = cost.IsZero ? "free" : cost.ToString();
+        if (!string.IsNullOrEmpty(body?.ClientSecret))
+            return Refused("payment_action_required",
+                $"The card payment for extending the session at {session.Space?.Name} needs a confirmation step (e.g. 3-D " +
+                "Secure) that this server can't do. Check get_active_sessions: the session keeps its old end unless it shows otherwise.");
+        if (!string.IsNullOrEmpty(body?.FailureReason))
+            return Refused("extend_failed", $"APCOA didn't extend the session at {session.Space?.Name} ({body.FailureReason}).");
+
+        // Accepted (possibly processed asynchronously, like paid starts): report it only once the new end shows.
+        Session? updated = null;
+        try
+        {
+            updated = await Phase("apcoa.readback", () => WaitForEndAsync(session.Id, newEnd, ct));
+        }
         catch (Exception ex) when (ex is not OperationCanceledException)
         {
-            // Extended already: don't let a failed read-back invite a second (charged) extension.
             logger.LogWarning(ex, "extended session {Session} but couldn't re-read it", session.Id);
-            return new SessionResult($"Extended the session at {session.Space?.Name} until about {Text.LocalTime(newEnd, time)} " +
-                $"({(cost.IsZero ? "free" : cost.ToString())}). Don't extend again: check get_active_sessions for the new end.",
-                "extended", SessionId: session.Id, CostPln: cost.Amount, DurationMinutes: minutes);
         }
-        return new SessionResult($"Extended: {Describe(updated)} ({(cost.IsZero ? "free" : cost.ToString())}).", "extended",
+        if (updated is null)
+            return Refused("extend_unconfirmed",
+                $"APCOA accepted extending the session at {session.Space?.Name} until {Text.LocalTime(newEnd, time)} ({paid}), but " +
+                "the new end isn't showing yet. Don't extend again: check get_active_sessions in a moment.", session.Id);
+        return new SessionResult($"Extended: {Describe(updated)} ({paid}).", "extended",
             SessionId: session.Id, CostPln: cost.Amount, DurationMinutes: minutes);
+    }
+
+    /// <summary>The running session once its end has reached <paramref name="newEnd"/> (a minute's slack); null after ~20 s.</summary>
+    private async Task<Session?> WaitForEndAsync(string sessionId, DateTimeOffset newEnd, CancellationToken ct)
+    {
+        for (var attempt = 0; attempt < 10; attempt++)
+        {
+            if (attempt > 0) await Task.Delay(TimeSpan.FromSeconds(2), time, ct);
+            var current = (await api.GetSessionsAsync(ct)).FirstOrDefault(s => s.Id == sessionId);
+            if (current?.EndDate is { } end && end >= newEnd.AddMinutes(-1))
+                return current;
+        }
+        return null;
     }
 
     public async Task<SessionResult> EndAsync(string sessionId, CancellationToken ct)
     {
         var id = sessionId.Trim();
         ApcoaTelemetry.Tag(ApcoaTelemetry.Tags.SessionId, id);
-        var session = (await api.GetSessionsAsync(ct)).FirstOrDefault(s => s.Id == id);
+        var session = (await Phase("apcoa.running_sessions", () => api.GetSessionsAsync(ct))).FirstOrDefault(s => s.Id == id);
         if (session is null)
             return Refused("session_not_found", "No running session has that id (it may have ended already). Call get_active_sessions for the current ones.");
         if (!session.SessionCanBeStopped)
             return Refused("not_stoppable", $"{Describe(session)} can't be stopped early; it ends by itself at its end time.");
 
-        await api.StopParkingAsync(id, ct);
+        await Phase("apcoa.stop", () => api.StopParkingAsync(id, ct));
 
         // The bill can take a moment (post-pay sessions are charged now): wait until history has it settled.
         Money? cost = null;
@@ -266,7 +298,7 @@ public sealed class Sessions(IApcoaFlowApi api, Pricing pricing, TimeProvider ti
             if (attempt > 0) await Task.Delay(TimeSpan.FromSeconds(2), time, ct);
             try
             {
-                var details = await api.GetSessionsHistoryDetailsAsync(id, ct);
+                var details = await Phase("apcoa.bill", () => api.GetSessionsHistoryDetailsAsync(id, ct));
                 if (!details.IsSessionActive && Money.TryParse(details.TotalPrice, out var billed))
                     cost = billed;
             }
@@ -320,6 +352,22 @@ public sealed class Sessions(IApcoaFlowApi api, Pricing pricing, TimeProvider ti
     {
         var end = s.EndDate is { } e ? $" until {Text.LocalTime(e, time)}" : "";
         return $"[{s.Id}] {s.Space?.Name ?? "unknown parking"} - {s.Vehicle?.LicensePlate}, from {Text.LocalTime(s.StartDate, time)}{end}";
+    }
+
+    /// <summary>
+    /// One API step as a child span of the tool span (so a trace shows which call took the time). The span closes before
+    /// the result is used, so tool-level tags set afterwards land on the tool span, not on the phase.
+    /// </summary>
+    private static async Task<T> Phase<T>(string name, Func<Task<T>> step)
+    {
+        using var _ = ApcoaTelemetry.Phase(name);
+        return await step();
+    }
+
+    private static async Task Phase(string name, Func<Task> step)
+    {
+        using var _ = ApcoaTelemetry.Phase(name);
+        await step();
     }
 
     private static DateTimeOffset Minute(DateTimeOffset t) => new(t.Year, t.Month, t.Day, t.Hour, t.Minute, 0, TimeSpan.Zero);

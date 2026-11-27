@@ -65,10 +65,12 @@ public class SessionContractTests
         if (extension.Total.IsZero)
         {
             await Assert.That(extension.EndDate).IsNotNull().Because("updatedPrice returns the new end");
-            await api.UpdateParkingDurationAsync(new UpdateParkingDurationRequest
+            var answer = await api.UpdateParkingDurationAsync(new UpdateParkingDurationRequest
             {
                 SessionId = started.Id!, NewEnd = extension.EndDate!.Value, PaymentMethodId = card.Id,
             });
+            await Assert.That(answer.IsSuccessStatusCode).IsTrue();
+            await Assert.That(answer.Content?.FailureReason).IsNull();
             var extended = (await api.GetSessionsAsync()).Single(s => s.Id == started.Id);
             await Assert.That(extended.EndDate!.Value).IsGreaterThan(running.EndDate!.Value).Because("the same session continues with the new end");
         }
@@ -79,12 +81,12 @@ public class SessionContractTests
         await api.StopParkingAsync(started.Id!);
 
         // Extending a stopped session: 400 ParkingSessionInvalidArgument.
-        var lateExtend = await Assert.That(async () => await api.UpdateParkingDurationAsync(new UpdateParkingDurationRequest
+        var lateExtend = await api.UpdateParkingDurationAsync(new UpdateParkingDurationRequest
         {
             SessionId = started.Id!, NewEnd = DateTimeOffset.UtcNow.AddMinutes(Minutes), PaymentMethodId = card.Id,
-        })).Throws<ApiException>();
-        await Assert.That(lateExtend!.StatusCode).IsEqualTo(HttpStatusCode.BadRequest);
-        await Assert.That(ApcoaFlowApiError.TryRead(lateExtend)?.Code).IsEqualTo(ApcoaFlowApiError.Codes.ParkingSessionInvalidArgument);
+        });
+        await Assert.That(lateExtend.StatusCode).IsEqualTo(HttpStatusCode.BadRequest);
+        await Assert.That(ApcoaFlowApiError.TryRead((ApiException)lateExtend.Error!)?.Code).IsEqualTo(ApcoaFlowApiError.Codes.ParkingSessionInvalidArgument);
 
         // History: the session, billed at PLN 0.00 (may take a moment to settle).
         SessionsHistoryDetails? details = null;

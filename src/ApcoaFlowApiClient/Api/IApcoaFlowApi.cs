@@ -78,9 +78,15 @@ public interface IApcoaFlowApi
     [Get("/api/v1/sessions/pending/{pendingId}")]
     Task<PendingStartStatus> GetPendingStartAsync(string pendingId, CancellationToken ct = default);
 
-    /// <summary>Extend → 200, empty body. Error: <c>400 ParkingSessionInvalidArgument</c> on a stopped session.</summary>
+    /// <summary>
+    /// Extend. A free extension answered 200 with an <b>empty body</b> (2026-11-27); the app reads
+    /// <c>{status, sessionId, failureReason}</c> from it, so a paid one may answer with a body (possibly pending).
+    /// Returned as an <see cref="IApiResponse{T}"/> so an empty body isn't an error: check
+    /// <see cref="IApiResponse.IsSuccessStatusCode"/> and read <c>Content</c> (null when empty).
+    /// Error: <c>400 ParkingSessionInvalidArgument</c> on a stopped session.
+    /// </summary>
     [Post("/api/v1/sessions/updateParkingDuration")]
-    Task UpdateParkingDurationAsync([Body] UpdateParkingDurationRequest request, CancellationToken ct = default);
+    Task<IApiResponse<UpdateParkingDurationResponse>> UpdateParkingDurationAsync([Body] UpdateParkingDurationRequest request, CancellationToken ct = default);
 
     /// <summary>
     /// Stop → 204. <c>404 SessionNotFound</c> for an unknown id; an already stopped session is 204 again (silent).

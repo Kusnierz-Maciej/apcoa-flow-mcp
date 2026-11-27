@@ -2,6 +2,7 @@ using System.Collections.Concurrent;
 using System.Diagnostics;
 using ApcoaFlowApiClient;
 using ApcoaFlowMcp.Tools;
+using NSubstitute;
 using Microsoft.AspNetCore.Http;
 
 namespace ApcoaFlowMcp.Tests;
@@ -40,6 +41,73 @@ public class TelemetryTests
         await Assert.That((string[])span.GetTagItem(ApcoaTelemetry.Tags.LicensePlates)!).IsEquivalentTo(new[] { FakeApi.LicensePlate });
         await Assert.That(span.GetTagItem(ApcoaTelemetry.Tags.Outcome)).IsEqualTo("ok");
         await Assert.That(span.Status).IsEqualTo(ActivityStatusCode.Unset);
+    }
+
+    /// <summary>Names of the child spans recorded directly under <paramref name="parent"/>, in start order.</summary>
+    private static List<string> Phases(Activity parent) =>
+        Stopped.Where(a => a.ParentSpanId == parent.SpanId && a.TraceId == parent.TraceId)
+            .OrderBy(a => a.StartTimeUtc).Select(a => a.OperationName).ToList();
+
+    [Test]
+    public async Task FreeStart_records_its_phases_and_puts_the_business_tags_on_the_tool_span()
+    {
+        var api = FakeApi.ForStarts(_ => 0m);
+        using var span = TestSource.StartActivity("tools/call start_free_session")!;
+
+        await FakeApi.Tools(api).StartFreeSessionAsync(FakeApi.ParkingId, FakeApi.ParkingName, "ABC12345", 30);
+        span.Stop();
+
+        await Assert.That(Phases(span)).IsEquivalentTo(new[]
+        {
+            "apcoa.vehicles", "apcoa.running_sessions", "apcoa.parking", "apcoa.payment_method", "apcoa.free_window",
+            "apcoa.quote", "apcoa.start", "apcoa.readback",
+        }, TUnit.Assertions.Enums.CollectionOrdering.Matching);
+        await Assert.That(span.GetTagItem(ApcoaTelemetry.Tags.Outcome)).IsEqualTo("started");
+        await Assert.That(span.GetTagItem(ApcoaTelemetry.Tags.ParkingId)).IsEqualTo(FakeApi.ParkingId);
+        await Assert.That(span.GetTagItem(ApcoaTelemetry.Tags.LicensePlate)).IsEqualTo("ABC12345");
+        await Assert.That(span.GetTagItem(ApcoaTelemetry.Tags.SessionId)).IsEqualTo("new-session");
+        await Assert.That(span.GetTagItem(ApcoaTelemetry.Tags.CostPln)).IsEqualTo(0.0);
+        await Assert.That(span.Status).IsEqualTo(ActivityStatusCode.Unset);
+    }
+
+    [Test]
+    public async Task PaidFirstCall_is_a_quote_not_an_error()
+    {
+        using var span = TestSource.StartActivity("tools/call start_session")!;
+
+        await FakeApi.Tools(FakeApi.ForStarts(_ => 5m)).StartSessionAsync(FakeApi.ParkingId, FakeApi.ParkingName, "ABC12345", 60);
+
+        await Assert.That(span.GetTagItem(ApcoaTelemetry.Tags.Outcome)).IsEqualTo("quote");
+        await Assert.That(span.GetTagItem(ApcoaTelemetry.Tags.CostPln)).IsEqualTo(5.0);
+        await Assert.That(span.Status).IsEqualTo(ActivityStatusCode.Unset);
+    }
+
+    [Test]
+    public async Task A_refusal_marks_the_tool_span_as_an_error()
+    {
+        using var span = TestSource.StartActivity("tools/call start_session")!;
+
+        await FakeApi.Tools(FakeApi.ForStarts(_ => 150m)).StartSessionAsync(FakeApi.ParkingId, FakeApi.ParkingName, "ABC12345", 60, confirmedCostPln: 150m);
+
+        await Assert.That(span.GetTagItem(ApcoaTelemetry.Tags.Outcome)).IsEqualTo("cost_cap_exceeded");
+        await Assert.That(span.Status).IsEqualTo(ActivityStatusCode.Error);
+    }
+
+    [Test]
+    public async Task End_records_stop_then_bill()
+    {
+        var api = FakeApi.ForStarts(_ => 0m);
+        api.GetSessionsAsync(Arg.Any<CancellationToken>()).Returns([FakeApi.StartedSession("s1")]);
+        api.GetSessionsHistoryDetailsAsync("s1", Arg.Any<CancellationToken>())
+            .Returns(new ApcoaFlowApiClient.Models.SessionsHistoryDetails { Id = "s1", TotalPrice = "PLN 0.00" });
+        using var span = TestSource.StartActivity("tools/call end_session")!;
+
+        await FakeApi.Tools(api).EndSessionAsync("s1", FakeApi.ParkingName);
+        span.Stop();
+
+        await Assert.That(Phases(span)).IsEquivalentTo(new[] { "apcoa.running_sessions", "apcoa.stop", "apcoa.bill" },
+            TUnit.Assertions.Enums.CollectionOrdering.Matching);
+        await Assert.That(span.GetTagItem(ApcoaTelemetry.Tags.Outcome)).IsEqualTo("stopped");
     }
 
     [Test]

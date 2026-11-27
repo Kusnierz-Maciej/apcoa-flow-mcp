@@ -88,7 +88,7 @@ Each trace is built from four span sources:
 | ASP.NET Core instrumentation | incoming request (root) — tagged `user.email`; unhandled exceptions recorded. Static icons and `/.well-known/*` are not traced. `/mcp` requests are named after their MCP message, e.g. `POST /mcp [tools/call get_vehicles]`, `POST /mcp [tools/list]`, `POST /mcp [notifications/initialized]` — from the `Mcp-Method` / `Mcp-Name` headers when the client sends them (2026-07-28 Streamable HTTP), else from the parsed JSON-RPC message (`McpSpanNames`; an OTel processor re-applies the name after the instrumentation resets it to `{method} {route}`). The SSE `GET` and session `DELETE` keep `GET /mcp/` / `DELETE /mcp/`. |
 | `Experimental.ModelContextProtocol` (MCP SDK) | one per JSON-RPC request, e.g. `tools/call get_vehicles` — tagged `gen_ai.tool.name`, `mcp.method.name`, `mcp.session.id`; tool exceptions set `error.type` |
 | `System.Net.Http` (.NET built-in) | each outbound APCOA call (API and sign-in server), **with query string** (redaction disabled) |
-| `ApcoaFlow` (app) | `apcoa.login` (password grant, only when there's no usable token) and `apcoa.token_refresh`, each tagged `apcoa.outcome`; `apcoa.login` also `user.email`. Phase spans for the multi-step tools are added with those tools. |
+| `ApcoaFlow` (app) | `apcoa.login` (password grant, only when there's no usable token) and `apcoa.token_refresh`, each tagged `apcoa.outcome`; `apcoa.login` also `user.email`. **Phase spans** inside the session tools, one per API step, so a trace shows which call took the time: `apcoa.vehicles`, `apcoa.running_sessions`, `apcoa.parking`, `apcoa.payment_method`, `apcoa.free_window`, `apcoa.quote`, `apcoa.start`, `apcoa.pending` (a paid pre-pay start processed asynchronously), `apcoa.extend`, `apcoa.readback` (confirming a start or an extension), `apcoa.stop`, `apcoa.bill`. Business tags stay on the tool span. |
 
 **Business tags** on the tool span (`apcoa.*`):
 
@@ -113,7 +113,7 @@ passwords, tokens or payloads are recorded. Plates and the account email are per
 | `apcoa.outcome` | Error? |
 |---|---|
 | `ok` (read tools), `started`, `extended`, `stopped`, `quote` (paid, awaiting the user's confirmation), `not_free` (free-only tool at a paid parking) | no |
-| `start_unconfirmed`, `not_startable`, `plate_not_registered`, `session_already_active`, `no_payment_method`, `default_not_a_card`, `cost_cap_exceeded`, `cost_mismatch`, `exceeds_max_duration`, `bad_duration`, `payment_action_required`, `session_not_found`, `not_extendable`, `not_stoppable`, `no_parking_nearby`, `ambiguous_location`, `missing_input`, `credentials_rejected` | yes |
+| `start_unconfirmed`, `extend_unconfirmed`, `extend_failed`, `not_startable`, `plate_not_registered`, `session_already_active`, `no_payment_method`, `default_not_a_card`, `cost_cap_exceeded`, `cost_mismatch`, `exceeds_max_duration`, `bad_duration`, `payment_action_required`, `session_not_found`, `not_extendable`, `not_stoppable`, `no_parking_nearby`, `ambiguous_location`, `missing_input`, `credentials_rejected` | yes |
 
 API failures that end a tool with an error (`ToolErrors` in `Tools/ToolErrors.cs`) also mark the span
 **Error** with one of `credentials_rejected`, `session_not_found`, `session_refused`, `unreadable_price`, `not_found`, `forbidden`,

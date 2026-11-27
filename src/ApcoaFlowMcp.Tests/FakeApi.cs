@@ -5,6 +5,7 @@ using ApcoaFlowMcp.Tools;
 using Microsoft.Extensions.Logging.Abstractions;
 using Microsoft.Extensions.Options;
 using NSubstitute;
+using Refit;
 
 namespace ApcoaFlowMcp.Tests;
 
@@ -67,6 +68,8 @@ internal static class FakeApi
         Quotes(api, price, prepaymentMode);
         api.StartParkingAsync(Arg.Any<StartParkingRequest>(), Arg.Any<string>(), Arg.Any<CancellationToken>())
             .Returns(new StartParkingResponse { Id = "new-session" });
+        api.UpdateParkingDurationAsync(Arg.Any<UpdateParkingDurationRequest>(), Arg.Any<CancellationToken>())
+            .Returns(ExtendAnswer(null));
         return api;
     }
 
@@ -76,8 +79,30 @@ internal static class FakeApi
         Space = new SessionSpace { Id = ParkingId, Name = ParkingName }, Vehicle = new SessionVehicle { Id = VehicleId, LicensePlate = LicensePlate },
     };
 
+    /// <summary>An <c>updateParkingDuration</c> answer: 200 with <paramref name="body"/> (null = the empty body free extensions get).</summary>
+    public static IApiResponse<UpdateParkingDurationResponse> ExtendAnswer(UpdateParkingDurationResponse? body) =>
+        new ApiResponse<UpdateParkingDurationResponse>(new HttpResponseMessage(System.Net.HttpStatusCode.OK)
+        {
+            RequestMessage = new HttpRequestMessage(HttpMethod.Post, "https://example.invalid/api/v1/sessions/updateParkingDuration"),
+        }, body, new RefitSettings());
+
+    /// <summary>A fixed clock whose delays (polling waits) fire at once, so tests don't sleep.</summary>
     public sealed class FixedTime(DateTimeOffset now) : TimeProvider
     {
         public override DateTimeOffset GetUtcNow() => now;
+
+        public override ITimer CreateTimer(TimerCallback callback, object? state, TimeSpan dueTime, TimeSpan period)
+        {
+            if (dueTime != Timeout.InfiniteTimeSpan)
+                ThreadPool.QueueUserWorkItem(_ => callback(state));
+            return new NoTimer();
+        }
+
+        private sealed class NoTimer : ITimer
+        {
+            public bool Change(TimeSpan dueTime, TimeSpan period) => true;
+            public void Dispose() { }
+            public ValueTask DisposeAsync() => ValueTask.CompletedTask;
+        }
     }
 }
