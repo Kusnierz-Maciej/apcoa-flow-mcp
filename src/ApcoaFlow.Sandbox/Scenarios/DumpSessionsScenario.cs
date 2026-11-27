@@ -12,7 +12,10 @@ namespace ApcoaFlow.Sandbox.Scenarios;
 /// WHY: the first, always-safe scenario — it proves the dump pipeline end-to-end and gives a quick
 /// snapshot of the account (plates, payment methods, recent session history and their charges).
 ///
-/// FOUND / USE IT FOR: confirming whether a recent start actually charged (COMPLETED amount), whether
+/// FOUND (2026-11-25): the dump pipeline works end-to-end; session list shapes are recorded in
+/// docs/API-NOTES.md.
+///
+/// USE IT FOR: confirming whether a recent start actually charged (COMPLETED amount), whether
 /// anything is stuck ACTIVE, and as the template to copy when writing a new read-only probe.
 /// </summary>
 public sealed class DumpSessionsScenario : IScenario

@@ -22,13 +22,21 @@ Each run writes `src/ApcoaFlow.Sandbox/out/<UTC-timestamp>/` containing one
 files there to analyse the issue.
 
 - Add a new probe by implementing `IScenario` (in `Scenarios/`) and registering it
-  in `ScenarioRegistry`. Existing scenarios each carry a WHAT/WHY/FOUND doc header:
-  `dump-sessions` (read-only account snapshot), `investigate-carrefour` (read-only:
-  lots, coupon, tariff breakdowns), `dump-tariff` (read-only: raw `/tariff` grid),
-  `capture-carrefour-paid-start` (**BILLABLE** — real paid start+stop).
-- The dump handler is attached as the innermost pipeline handler via the optional
-  `configureClient` hook on `AddApcoaFlowApiClient`, so it captures each physical
-  send — including the auth handler's 419/401 retry re-send.
+  in `ScenarioRegistry`. Each scenario carries a WHAT/WHY/FOUND doc header; write
+  findings as **dated** lines (`FOUND (2026-11-27): …`) so it's clear when the API
+  last behaved that way. Read-only: `dump-sessions` (account snapshot),
+  `investigate-carrefour`, `investigate-aldi` (lots, coupon, tariff breakdowns),
+  `dump-tariff` (raw `/tariff` grid). `login-probe` touches no data but makes one
+  wrong-password login (APCOA locks after 5 per 2 minutes — run sparingly).
+  `probe-silent-successes` and `start-free-aldi` write, but can't charge (free-only
+  starts, ended immediately; the former only on 616319).
+  `capture-carrefour-paid-start` is **BILLABLE** — real paid start+stop.
+- The dump handler is attached as the innermost handler on both the API and the
+  login clients via the optional `configureClient` hook on `AddApcoaFlowApiClient`,
+  so it captures each physical send — including the login itself and the auth
+  handler's 419/401 retry re-send.
+- Credentials: user-secrets id `apcoa-flow-api-tests` (shared with the live tests)
+  or `ApcoaFlow__Email` / `ApcoaFlow__Password` env vars.
 - Dumps contain **live tokens**; `out/` is gitignored and must never be committed.
 
 ### Safety — sessions are billable
@@ -60,7 +68,6 @@ the latest release.
   (usually in `LiveApiContractTests`), and add a row to "Contracts guarded by live tests" in
   `docs/API-NOTES.md`. A behaviour that can't be tested safely (needs a paid start or a one-use coupon)
   goes under "Trusted, not tested" there, with the date and how it was observed.
-
 - **Live tests never run in parallel**: every live test class carries `[NotInParallel(LiveApi.Serial)]`
   (one real account, one rate limit, a 403 lockout if hammered, one active session per account).
 - Every live test class also has `[Before(HookType.Class)]` → `LiveApi.SweepOnceAtStartAsync()` (ends any

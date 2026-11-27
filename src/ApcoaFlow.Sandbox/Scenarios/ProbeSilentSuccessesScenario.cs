@@ -16,7 +16,10 @@ namespace ApcoaFlow.Sandbox.Scenarios;
 /// WHY: an unofficial API may answer 200 for ids it doesn't know (listonic did), which would make
 /// end_session report "ended" for a session that never existed. The tool must say what really happened.
 ///
-/// FOUND: see the dated notes in docs/API-NOTES.md ("Stopping a session").
+/// FOUND (2026-11-27): no silent success — stopping an unknown id or an already-ended session → HTTP 422
+/// {"message":"PARKING_SESSION_NOT_FOUND","statusCode":5001}; session ids are 32-bit ints (a larger id is a 400
+/// JSON parse error). The free start on 616319 also exposed that start_free_session refused 0.00 PLN base
+/// tariffs without a promo (fixed). Pinned by LiveApiContractTests.
 /// </summary>
 public sealed class ProbeSilentSuccessesScenario : IScenario
 {

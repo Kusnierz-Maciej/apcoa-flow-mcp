@@ -15,7 +15,10 @@ namespace ApcoaFlow.Sandbox.Scenarios;
 /// sign-in form and the auth handler's re-login trigger (401/419) all rely on exactly which status code and
 /// body APCOA returns. Live contract tests pin the result.
 ///
-/// FOUND: see the dated notes in docs/API-NOTES.md ("Login and token rejection").
+/// FOUND (2026-11-27): wrong password and unknown email both → HTTP 200 with failedLogin=true, no authToken,
+/// failedLoginResponse {"maxLoginAttemptsAllowed":5,"timeGapInLoginInMinutes":2,…} (lockout: 5 attempts per
+/// 2 minutes); a valid login → authToken with ttl 90 days; an invalid bearer on GET consumer → HTTP 419
+/// {"message":"Invalid or Expired Token"}. Pinned by LiveApiContractTests; see docs/API-NOTES.md "Auth".
 /// Run sparingly — repeated failed logins could trip account protection.
 /// </summary>
 public sealed class LoginProbeScenario : IScenario
