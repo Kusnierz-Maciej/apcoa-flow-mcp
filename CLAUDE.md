@@ -48,7 +48,7 @@ files there to analyse the issue.
   login clients via the optional `configureClient` hook on `AddApcoaFlowApiClient`,
   so it captures each physical send — including the login itself and the auth
   handler's 419/401 retry re-send.
-- Credentials: user-secrets id `apcoa-flow-api-tests` (shared with the live tests)
+- Credentials: user-secrets id `apcoa-flow-api-tests-nucleus` (shared with the live tests)
   or `ApcoaFlow__Email` / `ApcoaFlow__Password` env vars.
 - Dumps contain **live tokens**; `out/` is gitignored and must never be committed.
 
@@ -74,7 +74,7 @@ dotnet run --project src/ApcoaFlowMcp   # launch profile: http://localhost:5200
 ```
 
 Authenticate with the header path; build the Basic value from the live tests' user-secrets
-(`ApcoaFlow:Email` / `ApcoaFlow:Password`, id `apcoa-flow-api-tests`) without printing it:
+(`ApcoaFlow:Email` / `ApcoaFlow:Password`, id `apcoa-flow-api-tests-nucleus`) without printing it:
 
 ```sh
 LB=$(dotnet user-secrets list --project src/ApcoaFlowApiClient.Tests | python3 -c 'import sys,base64
@@ -101,7 +101,7 @@ I --method prompts/get --prompt-name park_free_at --prompt-args parking=Carrefou
   `Accept: application/json, text/event-stream`), e.g. params
   `{"ref":{"type":"ref/prompt","name":"park_free_at"},"argument":{"name":"plate","value":"S"}}`.
 - stdio (`--method` must come **before** the server command; in Development the server reads its own
-  user-secrets, id `apcoa-flow-mcp`; otherwise pass `-e ApcoaFlow__Email=… -e ApcoaFlow__Password=…`):
+  user-secrets, id `apcoa-flow-mcp-nucleus`; otherwise pass `-e ApcoaFlow__Email=… -e ApcoaFlow__Password=…`):
   `npx -y @modelcontextprotocol/inspector --cli --method tools/list -e DOTNET_ENVIRONMENT=Development dotnet run --project src/ApcoaFlowMcp -- --stdio 2>/dev/null`
 - **Safety:** same as the sandbox — read tools freely; `start_*` / `end_session` only on parking **616319**,
   and never `start_session` / `start_expensive_session` anywhere else (billable).
@@ -121,7 +121,7 @@ When adding or changing any setting:
 ## Live API tests = the API contract
 
 The live tests (`[Category("LiveApi")]` in `src/ApcoaFlowApiClient.Tests`) run against the real, unofficial
-APCOA Flow API with the test account (user-secrets id `apcoa-flow-api-tests`); CI runs them nightly against
+APCOA Flow API with the test account (user-secrets id `apcoa-flow-api-tests-nucleus`); CI runs them nightly against
 the latest release.
 
 - **Every API behaviour the code relies on needs a live test** — status codes (419 vs 401, 424, 422,

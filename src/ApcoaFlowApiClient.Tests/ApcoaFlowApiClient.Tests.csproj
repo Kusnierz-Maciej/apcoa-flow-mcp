@@ -7,7 +7,7 @@
         <OutputType>Exe</OutputType>
         <IsPackable>false</IsPackable>
         <TestingPlatformDotnetTestSupport>true</TestingPlatformDotnetTestSupport>
-        <UserSecretsId>apcoa-flow-api-tests</UserSecretsId>
+        <UserSecretsId>apcoa-flow-api-tests-nucleus</UserSecretsId>
     </PropertyGroup>
 
     <ItemGroup>

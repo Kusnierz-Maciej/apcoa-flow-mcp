@@ -10,7 +10,7 @@
         <AssemblyName>ApcoaFlow.Sandbox</AssemblyName>
         <!-- Reuse the shared user-secrets store so ApcoaFlow:Email / ApcoaFlow:Password
              are the same creds the test projects already use. -->
-        <UserSecretsId>apcoa-flow-api-tests</UserSecretsId>
+        <UserSecretsId>apcoa-flow-api-tests-nucleus</UserSecretsId>
     </PropertyGroup>
 
     <ItemGroup>
