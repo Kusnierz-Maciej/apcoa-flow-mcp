@@ -272,7 +272,7 @@ Set in the compose file (or `.env` for secrets) using the `Section__Key` convent
 | `Security__AllowedApiKeys__N` | — | MCP API keys (secret). At least one while keys are required. |
 | `Security__TokenSecret` | — | Required (secret). ≥ 32 chars, stable; secures OAuth tokens. |
 | `Security__RequireMcpApiKey` | `true` | `false` drops the API-key gate (APCOA email + password still required). |
-| `OAuth__AuthorizationCodeLifetime` / `__AccessTokenLifetime` / `__RefreshTokenLifetime` | `00:01:00` / `01:00:00` / `365.00:00:00` | Token lifetimes; the refresh lifetime is how long a client may stay idle before signing in again. |
+| `OAuth__AuthorizationCodeLifetime` / `__AccessTokenLifetime` / `__RefreshTokenLifetime` | `00:01:00` / `01:00:00` / `365.00:00:00` | Code: how long the client has to swap the one-time code it gets after a successful sign-in for tokens (done automatically within a second; the sign-in form itself has no time limit). Access: lifetime of the token sent on every call (renewed silently). Refresh: how long a client may stay idle before signing in again. |
 | `ApcoaFlow__MaxSessionCostPln` | `100` | Most a single `start_session` may cost; `start_expensive_session` bypasses it. |
 | `ApcoaFlow__CurrentLocationRadiusMeters` | `300` | Default radius for the `*_current_location` tools. |
 | `ApcoaFlow__Email` / `ApcoaFlow__Password` | — | stdio mode only (required there). |
@@ -282,7 +282,11 @@ Set in the compose file (or `.env` for secrets) using the `Section__Key` convent
 | `ParkingData__SoftRefreshAge` / `__HardRefreshAge` / `__BackgroundRefreshInterval` | `12:00:00` / `48:00:00` / `24:00:00` | Parking dataset freshness. |
 | `ParkingData__GeohashPrecision` / `ParkingData__CompanyId` | `6` / `9` | Spatial bucket size; APCOA tenant for the dataset key. |
 | `Telemetry__Enabled` / `Telemetry__OtlpEndpoint` | `false` / `http://localhost:4317` | OpenTelemetry export of traces + logs — see [`docs/OPENTELEMETRY.md`](docs/OPENTELEMETRY.md). |
-| `Logging__…` | Information, single-line console | Standard ASP.NET Core logging settings. |
+| `Logging__LogLevel__Default` | `Information` | App logs: one line per tool call, sign-in, login, parking index refresh. |
+| `Logging__LogLevel__Microsoft.AspNetCore` / `…Microsoft.AspNetCore.Hosting.Diagnostics` | `Warning` / `Information` | Framework noise (routing, result writing) off; one start + one finished line (status, duration) per HTTP request kept. |
+| `Logging__LogLevel__System.Net.Http.HttpClient` | `Information` | Each outbound APCOA / S3 call with status and duration (4 lines per call; query strings are shown as `?*`). Set `Warning` to quiet it. |
+| `Logging__LogLevel__ModelContextProtocol` | `Information` | Each MCP method handled (timing, client name) and every tool result (`IsError`). |
+| `Logging__Console__…` | `simple`, single-line, scopes on | Console format; the Synology compose sets it explicitly for `docker logs`. |
 
 ## Parking data
 
