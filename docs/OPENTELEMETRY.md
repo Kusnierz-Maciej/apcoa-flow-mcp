@@ -53,6 +53,22 @@ Telemetry is off by default. To enable, set env vars in `docker-compose.prod.yml
 This sends logs and traces to the Alloy container in the logging stack, which forwards
 logs to Loki and traces to Tempo.
 
+The container must be able to resolve the collector's name: when Alloy runs in its own compose project, join that
+project's shared network. `docker-compose.synology.yml` has this ready, commented out — uncomment both blocks:
+
+```yaml
+    networks:
+      - default
+      - observability          # created by the observability stack
+...
+networks:
+  observability:
+    external: true
+```
+
+With OTLP export on, don't also ship the container's stdout to Loki (e.g. a `logging=enabled` label for a
+Docker log scraper) — the same log lines would arrive twice.
+
 Each trace is built from four span sources:
 
 | Source | Spans |
