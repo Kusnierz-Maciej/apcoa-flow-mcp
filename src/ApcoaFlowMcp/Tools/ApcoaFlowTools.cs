@@ -35,9 +35,10 @@ public sealed class ApcoaFlowTools(
         => ToolErrors.GuardAsync("find_parking", logger, async () =>
     {
         using var _ = logger.BeginScope("{Tool}", "find_parking");
-        logger.LogInformation("lat={Lat}, lon={Lon}, radius={Radius} m, filter={Filter}.",
-            latitude, longitude, radiusMeters, nameContains ?? "(none)");
         var results = await parkingData.FindNearbyAsync(latitude, longitude, radiusMeters / 1000.0, nameContains, ct);
+        logger.LogInformation("find_parking: {Count} parking(s) within {Radius} m of {Lat},{Lon}, filter {Filter}; nearest [{Ids}]",
+            results.Count, radiusMeters, latitude, longitude, nameContains ?? "(none)",
+            string.Join(", ", results.Take(5).Select(r => r.Parking.Id)));
         ApcoaTelemetry.Tag(ApcoaTelemetry.Tags.RadiusMeters, radiusMeters);
         ApcoaTelemetry.Tag(ApcoaTelemetry.Tags.NameFilter, nameContains);
         ApcoaTelemetry.Tag(ApcoaTelemetry.Tags.ResultsCount, results.Count);
@@ -62,8 +63,9 @@ public sealed class ApcoaFlowTools(
         => ToolErrors.GuardAsync("get_registered_cars", logger, async () =>
     {
         using var _ = logger.BeginScope("{Tool}", "get_registered_cars");
-        logger.LogInformation("Fetching registered cars.");
         var cars = await sessions.GetVehiclesAsync(ct);
+        logger.LogInformation("get_registered_cars: {Count} car(s) [{Plates}]",
+            cars.Count, string.Join(", ", cars.Select(c => c.VehicleNumber)));
         ApcoaTelemetry.Tag(ApcoaTelemetry.Tags.ResultsCount, cars.Count);
         ApcoaTelemetry.Tag(ApcoaTelemetry.Tags.Plates, ApcoaTelemetry.Capped(cars.Select(c => c.VehicleNumber)));
         ApcoaTelemetry.Outcome("ok");
@@ -86,8 +88,9 @@ public sealed class ApcoaFlowTools(
         => ToolErrors.GuardAsync("get_active_sessions", logger, async () =>
     {
         using var _ = logger.BeginScope("{Tool}", "get_active_sessions");
-        logger.LogInformation("Fetching active sessions.");
         var active = await sessions.GetActiveAsync(ct);
+        logger.LogInformation("get_active_sessions: {Count} active [{Sessions}]",
+            active.Count, string.Join(", ", active.Select(a => $"{a.Id} {a.ParkingName}")));
         TagSessions(active);
         if (active.Count == 0)
             return "No active parking session.";
@@ -100,8 +103,9 @@ public sealed class ApcoaFlowTools(
         => ToolErrors.GuardAsync("get_session_history", logger, async () =>
     {
         using var _ = logger.BeginScope("{Tool}", "get_session_history");
-        logger.LogInformation("Fetching session history.");
         var history = await sessions.GetHistoryAsync(ct);
+        logger.LogInformation("get_session_history: {Count} session(s), {Total:0.00} PLN in total",
+            history.Count, history.Sum(h => h.Amount));
         TagSessions(history);
         if (history.Count == 0)
             return "No past parking sessions.";
@@ -127,11 +131,10 @@ public sealed class ApcoaFlowTools(
         => ToolErrors.GuardAsync("start_session", logger, async () =>
     {
         using var _ = logger.BeginScope("{Tool}", "start_session");
-        logger.LogInformation("parking={ParkingId}, plate={Plate}, duration={Duration} min, confirmedCost={Cost} PLN.",
-            parkingId, licensePlate, durationMinutes, confirmedCostPln);
         var result = await sessions.StartAsync(
             parkingId, licensePlate, durationMinutes, ApcoaFlowSessionService.StartMode.Normal,
             confirmedCostPln, _options.MaxSessionCostPln, bypassCap: false, ct);
+        LogStart("start_session", parkingName, licensePlate, confirmedCostPln, result);
         return FormatStart(result);
     });
 
@@ -149,9 +152,11 @@ public sealed class ApcoaFlowTools(
         CancellationToken ct = default)
         => ToolErrors.GuardAsync("start_free_session", logger, async () =>
     {
+        using var _ = logger.BeginScope("{Tool}", "start_free_session");
         var result = await sessions.StartAsync(
             parkingId, licensePlate, durationMinutes, ApcoaFlowSessionService.StartMode.OnlyFree,
             confirmedCostPln: null, _options.MaxSessionCostPln, bypassCap: false, ct);
+        LogStart("start_free_session", parkingName, licensePlate, null, result);
         return FormatStart(result);
     });
 
@@ -173,10 +178,12 @@ public sealed class ApcoaFlowTools(
         CancellationToken ct = default)
         => ToolErrors.GuardAsync("start_session_current_location", logger, async () =>
     {
+        using var _ = logger.BeginScope("{Tool}", "start_session_current_location");
         var result = await sessions.StartAtLocationAsync(
             latitude, longitude, licensePlate, durationMinutes, ApcoaFlowSessionService.StartMode.Normal,
             confirmedCostPln, _options.MaxSessionCostPln, bypassCap: false,
             radiusMeters ?? _options.CurrentLocationRadiusMeters, ct);
+        LogStart("start_session_current_location", null, licensePlate, confirmedCostPln, result);
         return FormatStart(result);
     });
 
@@ -196,10 +203,12 @@ public sealed class ApcoaFlowTools(
         CancellationToken ct = default)
         => ToolErrors.GuardAsync("start_free_session_current_location", logger, async () =>
     {
+        using var _ = logger.BeginScope("{Tool}", "start_free_session_current_location");
         var result = await sessions.StartAtLocationAsync(
             latitude, longitude, licensePlate, durationMinutes, ApcoaFlowSessionService.StartMode.OnlyFree,
             confirmedCostPln: null, _options.MaxSessionCostPln, bypassCap: false,
             radiusMeters ?? _options.CurrentLocationRadiusMeters, ct);
+        LogStart("start_free_session_current_location", null, licensePlate, null, result);
         return FormatStart(result);
     });
 
@@ -214,10 +223,12 @@ public sealed class ApcoaFlowTools(
         CancellationToken ct = default)
         => ToolErrors.GuardAsync("start_expensive_session", logger, async () =>
     {
+        using var _ = logger.BeginScope("{Tool}", "start_expensive_session");
         var result = await sessions.StartAsync(
             parkingId, licensePlate, durationMinutes,
             ApcoaFlowSessionService.StartMode.Normal,
             confirmedCostPln, _options.MaxSessionCostPln, bypassCap: true, ct);
+        LogStart("start_expensive_session", parkingName, licensePlate, confirmedCostPln, result);
         return FormatStart(result);
     });
 
@@ -230,14 +241,28 @@ public sealed class ApcoaFlowTools(
         => ToolErrors.GuardAsync("end_session", logger, async () =>
     {
         using var _ = logger.BeginScope("{Tool}", "end_session");
-        logger.LogInformation("session={SessionId}.", sessionId);
         var ended = await sessions.StopAsync(sessionId, ct);
+        logger.LogInformation("end_session [{SessionId}] {ParkingName}: stopped, final cost {Cost} {Currency}",
+            sessionId, ended?.ParkingName ?? parkingName, ended?.Amount, ended?.CurrencyCode ?? "(no completed record)");
         if (ended is null)
             return $"Session {sessionId} was ended (no completed record returned to confirm cost).";
         return $"Ended session {sessionId}: {ended.Amount:0.00} {ended.CurrencyCode} at {ended.ParkingName}.";
     });
 
     // -------------------------------------------------------------------------
+
+    /// <summary>
+    /// The one structured line per start call: what was asked (parking name as the model named it, plate,
+    /// confirmed cost) and what happened (outcome, resolved parking, duration, cost, session id).
+    /// </summary>
+    private void LogStart(string tool, string? requestedParking, string plate, decimal? confirmedCostPln,
+        ApcoaFlowSessionService.StartResult r) =>
+        logger.LogInformation(
+            "{Tool} [{ParkingId}] {ParkingName}: {Outcome}; plate {Plate}, {Minutes} min, {Cost:0.00} PLN " +
+            "(confirmed {Confirmed}), session {SessionId}, promotion {Promotion}, distance {Distance} m, requested as {Requested}",
+            tool, r.ParkingId, r.ParkingName, r.Outcome, plate, r.DurationMinutes, r.CostPln,
+            confirmedCostPln?.ToString("0.00") ?? "-", r.Session?.SessionId.ToString() ?? "-", r.PromotionName ?? "-",
+            r.DistanceMeters?.ToString() ?? "-", requestedParking ?? "(current location)");
 
     private static string FormatStart(ApcoaFlowSessionService.StartResult r)
     {

@@ -36,6 +36,12 @@ public sealed class ApcoaFlowSessionService(
         string Message,
         StartSessionResponse? Session)
     {
+        /// <summary>
+        /// What happened, the same value as the <c>apcoa.outcome</c> span tag (<c>started</c>, <c>quote</c>,
+        /// <c>not_free</c>, <c>cost_cap_exceeded</c>, …) — available for logs even when telemetry is off.
+        /// </summary>
+        public string Outcome { get; init; } = "unknown";
+
         /// <summary>The parking the session targets (set once resolved).</summary>
         public int ParkingId { get; init; }
         public string? ParkingName { get; init; }
@@ -296,14 +302,14 @@ public sealed class ApcoaFlowSessionService(
             // Build the price ladder once, so every paid branch can show the options.
             var ladder = await BuildPriceLadderAsync(tariffId, lotId, checkIn, vehicle.VehicleNumber, consumer.Id, maxLot, ct);
 
-            StartResult PaidQuote(string message) =>
+            StartResult PaidQuote(string message, string outcome) =>
                 Tag(new StartResult(false, costPln, minutes, promo?.Name, promo?.FreeMinutes, message, null))
-                    with { PriceLadder = ladder, CancelRefundNote = cancelNote };
+                    with { PriceLadder = ladder, CancelRefundNote = cancelNote, Outcome = outcome };
 
             if (!bypassCap && costPln > maxCostPln)
             {
                 ApcoaTelemetry.Fail("cost_cap_exceeded", $"{costPln:0.00} PLN > cap {maxCostPln:0.00} PLN");
-                return PaidQuote($"Cost {costPln:0.00} PLN for {minutes} min exceeds the limit of {maxCostPln:0.00} PLN. Use start_expensive_session to override.{freeNote}{FormatLadderSuffix(ladder)}");
+                return PaidQuote($"Cost {costPln:0.00} PLN for {minutes} min exceeds the limit of {maxCostPln:0.00} PLN. Use start_expensive_session to override.{freeNote}{FormatLadderSuffix(ladder)}", "cost_cap_exceeded");
             }
 
             if (confirmedCostPln is null)
@@ -315,7 +321,7 @@ public sealed class ApcoaFlowSessionService(
                 var shortest = ladder.Count > 0 ? ladder[0] : new PriceTier(minutes, costPln);
                 return PaidQuote(
                     $"This is a PAID session. Shortest option: {shortest.Minutes} min = {shortest.Pln:0.00} PLN. " +
-                    $"Re-invoke with durationMinutes={shortest.Minutes} and confirmedCostPln={shortest.Pln:0.00} to start.{freeNote}{FormatLadderSuffix(ladder)}");
+                    $"Re-invoke with durationMinutes={shortest.Minutes} and confirmedCostPln={shortest.Pln:0.00} to start.{freeNote}{FormatLadderSuffix(ladder)}", "quote");
             }
 
             // The confirmed cost must match the live cost exactly — refuse if it differs either way
@@ -323,7 +329,7 @@ public sealed class ApcoaFlowSessionService(
             if (costPln != confirmedCostPln.Value)
             {
                 ApcoaTelemetry.Fail("cost_mismatch", $"live {costPln:0.00} PLN != confirmed {confirmedCostPln.Value:0.00} PLN");
-                return PaidQuote($"Live cost {costPln:0.00} PLN for {minutes} min does not match the confirmed {confirmedCostPln.Value:0.00} PLN; not starting. Re-confirm with the exact current cost.{freeNote}{FormatLadderSuffix(ladder)}");
+                return PaidQuote($"Live cost {costPln:0.00} PLN for {minutes} min does not match the confirmed {confirmedCostPln.Value:0.00} PLN; not starting. Re-confirm with the exact current cost.{freeNote}{FormatLadderSuffix(ladder)}", "cost_mismatch");
             }
         }
 
@@ -392,7 +398,8 @@ public sealed class ApcoaFlowSessionService(
                 sb.Append('.');
             }
 
-            return Tag(new StartResult(false, 0m, 0, null, null, sb.ToString(), null) { ExistingSession = primary });
+            return Tag(new StartResult(false, 0m, 0, null, null, sb.ToString(), null)
+                { ExistingSession = primary, Outcome = "session_already_active" });
         }
         catch (Refit.ApiException ex)
         {
@@ -417,7 +424,7 @@ public sealed class ApcoaFlowSessionService(
 
         return Tag(new StartResult(true, costPln, minutes, promo?.Name, promo?.FreeMinutes,
             $"Started a {kind} session for {minutes} min on parking {parkingId}.", response))
-            with { CancelRefundNote = cancelNote, PromotionReuseCooldown = promo?.ReuseCooldown };
+            with { CancelRefundNote = cancelNote, PromotionReuseCooldown = promo?.ReuseCooldown, Outcome = "started" };
     }
 
     /// <summary>Stops a session and returns the final (completed) session with its cost.</summary>
@@ -691,7 +698,7 @@ public sealed class ApcoaFlowSessionService(
             ApcoaTelemetry.Fail(outcome, message);
         else
             ApcoaTelemetry.Outcome(outcome);
-        return new(false, 0m, 0, null, null, message, null);
+        return new(false, 0m, 0, null, null, message, null) { Outcome = outcome };
     }
 
     private static string Normalize(string? s) => (s ?? string.Empty).Replace(" ", "").Trim();
