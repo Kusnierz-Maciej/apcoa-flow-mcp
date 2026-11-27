@@ -14,15 +14,18 @@ public class ApcoaFlowAuthHandler : DelegatingHandler
 
     private readonly IApcoaFlowCredentialProvider _credentials;
     private readonly ApcoaFlowTokenStore _tokens;
+    private readonly IHttpClientFactory _httpClientFactory;
     private readonly ILogger<ApcoaFlowAuthHandler>? _logger;
 
     public ApcoaFlowAuthHandler(
         IApcoaFlowCredentialProvider credentials,
         ApcoaFlowTokenStore tokens,
+        IHttpClientFactory httpClientFactory,
         ILogger<ApcoaFlowAuthHandler>? logger = null)
     {
         _credentials = credentials;
         _tokens = tokens;
+        _httpClientFactory = httpClientFactory;
         _logger = logger;
     }
 
@@ -98,7 +101,7 @@ public class ApcoaFlowAuthHandler : DelegatingHandler
         // Only runs on a token-cache miss, so the span marks when (and how often) we really log in.
         using var activity = ApcoaTelemetry.Source.StartActivity("apcoa.login");
         activity?.SetTag(ApcoaTelemetry.Tags.UserEmail, credentials.Email);
-        var outcome = await ApcoaFlowLogin.TryLoginAsync(credentials.Email, credentials.Password, _logger, cancellationToken);
+        var outcome = await ApcoaFlowLogin.TryLoginAsync(_httpClientFactory, credentials.Email, credentials.Password, _logger, cancellationToken);
         activity?.SetTag(ApcoaTelemetry.Tags.Outcome, outcome.Kind.ToString());
         if (outcome.Kind != LoginOutcomeKind.Ok)
             activity?.SetStatus(System.Diagnostics.ActivityStatusCode.Error, outcome.Kind.ToString());
