@@ -226,26 +226,26 @@ public sealed class Sessions(IApcoaFlowApi api, Pricing pricing, TimeProvider ti
 
         await api.StopParkingAsync(id, ct);
 
-        // The bill can take a moment; post-pay sessions are charged now.
-        SessionsHistoryDetails? billed = null;
-        for (var attempt = 0; attempt < 3 && billed is null; attempt++)
+        // The bill can take a moment (post-pay sessions are charged now): wait until history has it settled.
+        Money? cost = null;
+        for (var attempt = 0; attempt < 6 && cost is null; attempt++)
         {
             if (attempt > 0) await Task.Delay(TimeSpan.FromSeconds(2), time, ct);
             try
             {
                 var details = await api.GetSessionsHistoryDetailsAsync(id, ct);
-                if (!details.IsSessionActive) billed = details;
+                if (!details.IsSessionActive && Money.TryParse(details.TotalPrice, out var billed))
+                    cost = billed;
             }
             catch (ApiException ex) when (ex.StatusCode == System.Net.HttpStatusCode.NotFound) { }
         }
         var name = session.Space?.Name ?? "the parking";
-        if (billed is null)
+        if (cost is not { } final)
             return new SessionResult($"Ended the session at {name} ({session.Vehicle?.LicensePlate}). The final cost isn't available yet; check get_session_history in a minute.",
                 "stopped", SessionId: id);
-        var cost = Money.TryParse(billed.TotalPrice, out var m) ? m : default;
-        ApcoaTelemetry.Tag(ApcoaTelemetry.Tags.CostPln, (double)cost.Amount);
-        return new SessionResult($"Ended the session at {name} ({session.Vehicle?.LicensePlate}). Final cost: {cost}.", "stopped",
-            SessionId: id, CostPln: cost.Amount);
+        ApcoaTelemetry.Tag(ApcoaTelemetry.Tags.CostPln, (double)final.Amount);
+        return new SessionResult($"Ended the session at {name} ({session.Vehicle?.LicensePlate}). Final cost: {final}.", "stopped",
+            SessionId: id, CostPln: final.Amount);
     }
 
     /// <summary>The account's default payment method, if this server can pay with it.</summary>

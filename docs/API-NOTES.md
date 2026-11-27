@@ -127,8 +127,9 @@ Amounts are strings: `"PLN 5.00"` (currency, space, invariant decimal); large am
   empty body; the same session continues with the new end.
 - **Stop**: `POST /api/v1/sessions/stopParking/{id}` → **204**. Stopping it again is 204 too (silent); an unknown id
   is `404 SessionNotFound`.
-- A post-pay session stopped after 19 s was billed PLN 0.00 although the quote said PLN 1.00 (a short grace period,
-  not shown anywhere; length unknown).
+- Post-pay sessions stopped after 17–19 s were billed PLN 0.00 although quoted PLN 1.00 and 5.00 (two operators,
+  2026-11-27): a short grace period, shown nowhere; its length is unknown. Pre-pay sessions are charged at start
+  and **not refunded** on an early stop.
 
 ## History
 
@@ -190,5 +191,6 @@ Behaviours relied on without a live test, because testing them costs money or ca
 | A paid post-pay start with a saved card runs at once, no interactive step | 2026-11-27, Czarny Dunajec, stopped after 19 s |
 | A paid pre-pay start with a saved card is pending, then `completed`; the card is charged at start (PLN 1.00, visa, history `status: paid`, `state: billed`) | 2026-11-27, Markinvest Warszawa al. Wilanowska 363 |
 | A pre-pay session stopped early is **not** refunded (stopped after ~30 s, billed the full PLN 1.00) | 2026-11-27, same session |
-| A post-pay session stopped within seconds is billed PLN 0.00 | 2026-11-27, same session |
+| A post-pay session stopped within seconds is billed PLN 0.00 (a short grace, shown nowhere) | 2026-11-27: Czarny Dunajec (19 s, quoted PLN 1.00) and Katowice ul. Sobieskiego 23 (17 s, quoted PLN 5.00) |
+| Right after a post-pay stop, `sessionsHistory/{id}` can lack a parseable `totalPrice` for a moment; it then shows the real stop time and `state: billed` | 2026-11-27, Sobieskiego 23 |
 | Biedronka free time is once per 4 h per space, and shows in the quote | 2026-11-27, Biedronka Żyrardów |

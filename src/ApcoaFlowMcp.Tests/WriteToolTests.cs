@@ -224,6 +224,25 @@ public class WriteToolTests
     }
 
     [Test]
+    public async Task End_waits_for_a_settled_bill_before_reporting_the_cost()
+    {
+        var api = ForStarts(_ => 0m);
+        api.GetSessionsAsync(Arg.Any<CancellationToken>()).Returns(
+        [
+            new Session { Id = "s1", StartDate = Now, SessionCanBeStopped = true, Space = new SessionSpace { Name = ParkingName },
+                Vehicle = new SessionVehicle { LicensePlate = "ABC12345" } },
+        ]);
+        // Right after a post-pay stop the total isn't there yet (2026-11-27), then it is.
+        api.GetSessionsHistoryDetailsAsync("s1", Arg.Any<CancellationToken>()).Returns(
+            new SessionsHistoryDetails { Id = "s1", TotalPrice = null, IsSessionActive = false },
+            new SessionsHistoryDetails { Id = "s1", TotalPrice = "PLN 0.00", IsSessionActive = false, State = "billed" });
+
+        var text = await FakeApi.Tools(api).EndSessionAsync("s1", ParkingName);
+
+        await Assert.That(text).EndsWith("Final cost: 0.00 PLN.");
+    }
+
+    [Test]
     public async Task End_of_an_unknown_session_says_so_without_calling_stop()
     {
         var api = ForStarts(_ => 0m);
