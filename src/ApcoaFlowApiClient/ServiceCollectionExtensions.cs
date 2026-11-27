@@ -23,10 +23,22 @@ public static class ServiceCollectionExtensions
     /// closest to the socket — so a dump handler sees the fully-decorated request and fires once per
     /// physical send, including the auth handler's retry re-send and the login call itself.
     /// </param>
+    /// <param name="rateLimit">
+    /// Optional <c>RateLimit</c> configuration section (<see cref="ApcoaFlowRateLimitOptions"/>); defaults apply
+    /// when omitted. Values are validated at host start.
+    /// </param>
     public static IServiceCollection AddApcoaFlowApiClient(
         this IServiceCollection services,
-        Action<IHttpClientBuilder>? configureClient = null)
+        Action<IHttpClientBuilder>? configureClient = null,
+        IConfiguration? rateLimit = null)
     {
+        var rateLimitOptions = services.AddOptions<ApcoaFlowRateLimitOptions>();
+        if (rateLimit is not null)
+            rateLimitOptions.Bind(rateLimit);
+        rateLimitOptions.ValidateOnStart();
+        services.TryAddEnumerable(
+            ServiceDescriptor.Singleton<IValidateOptions<ApcoaFlowRateLimitOptions>, ApcoaFlowRateLimitOptionsValidator>());
+
         services.AddSingleton<ApcoaFlowTokenStore>();
         services.TryAddSingleton<ApcoaFlowRateLimiter>();
         services.AddTransient<ApcoaFlowAuthHandler>();

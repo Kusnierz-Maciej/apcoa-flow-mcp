@@ -17,7 +17,8 @@ public static class StdioHost
         builder.Logging.AddConsole(o => o.LogToStandardErrorThreshold = LogLevel.Trace);
 
         builder.Services.AddTransient<IApcoaFlowCredentialProvider, ConfigurationCredentialProvider>();
-        builder.Services.AddApcoaFlowApiClient();
+        builder.Services.AddApcoaFlowApiClient(
+        rateLimit: builder.Configuration.GetSection(ApcoaFlowRateLimitOptions.Section));
         builder.Services.AddApcoaParkingDataSource(builder.Configuration.GetSection("ParkingData"));
         builder.Services.AddOptions<ApcoaFlowToolsOptions>()
             .Bind(builder.Configuration.GetSection("ApcoaFlow"))

@@ -255,6 +255,15 @@ Freshness and indexing are tunable via `ParkingData__*` environment variables:
 - **ApcoaFlow__MaxSessionCostPln** — the most a single `start_session` may cost (PLN). A quote above this is refused; use `start_expensive_session` to bypass.
 - **ApcoaFlow__CurrentLocationRadiusMeters** — default search radius for `start_session_current_location` (the tool may override per call).
 
+## Rate limit
+
+Every call to APCOA (login included) goes through one client-side token bucket, so the server never
+hammers the backend and trips its 403 lockout. Calls over the limit wait rather than fail.
+
+- **RateLimit__TokenLimit** — burst size: calls allowed back to back (default `10`, 1–1000).
+- **RateLimit__ReplenishmentPeriod** — one more call is allowed per period once the burst is used
+  (default `00:00:01`, i.e. 1 call/s; must be > 0 and ≤ 1 minute). Loosen at your own risk.
+
 ## Running tests
 
 Tests use TUnit (run via Microsoft.Testing.Platform) and come in three kinds:

@@ -74,7 +74,8 @@ if (telemetry.Enabled)
 
 builder.Services.AddHttpContextAccessor();
 builder.Services.AddTransient<IApcoaFlowCredentialProvider, HttpContextCredentialProvider>();
-builder.Services.AddApcoaFlowApiClient();
+builder.Services.AddApcoaFlowApiClient(
+    rateLimit: builder.Configuration.GetSection(ApcoaFlowRateLimitOptions.Section));
 builder.Services.AddApcoaParkingDataSource(builder.Configuration.GetSection("ParkingData"));
 builder.Services.AddApcoaParkingRefreshService();
 builder.Services.AddOptions<ApcoaFlowToolsOptions>()
