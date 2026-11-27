@@ -67,8 +67,9 @@ public sealed class Sessions(IApcoaFlowApi api, Pricing pricing, TimeProvider ti
         var duration = durationMinutes;
         Pricing.FreeWindow? window = null;
         if (duration is null || mode == StartMode.FreeOnly)
-            window = await Phase("apcoa.free_window", () => pricing.FreeWindowAsync(parking.Id, vehicle.Id, parking.DefaultLengthOfStayInMinutes, parking.MaxDuration, ct));
-        duration ??= window is { Minutes: > 0 } free ? free.Minutes : parking.DefaultLengthOfStayInMinutes ?? DefaultDurationMinutes;
+            window = await Phase("apcoa.free_window", () => pricing.FreeWindowAsync(parking, vehicle.Id, ct));
+        // The whole known free window; when only "free now" is known (no length), the usual duration — the quote decides.
+        duration ??= window is { Minutes: > 1 } free ? free.Minutes : parking.DefaultLengthOfStayInMinutes ?? DefaultDurationMinutes;
         if (parking.MaxDuration is > 0 && duration > parking.MaxDuration)
             return Refused("exceeds_max_duration", $"{parking.Name} allows stays of up to {Text.Duration(parking.MaxDuration.Value)}.");
         ApcoaTelemetry.Tag(ApcoaTelemetry.Tags.DurationMinutes, duration);
@@ -105,7 +106,7 @@ public sealed class Sessions(IApcoaFlowApi api, Pricing pricing, TimeProvider ti
                 try
                 {
                     longest = await Phase("apcoa.same_price", () =>
-                        pricing.LongestAtSamePriceAsync(parking.Id, vehicle.Id, duration.Value, cost, parking.MaxDuration, ct));
+                        pricing.LongestAtSamePriceAsync(parking, vehicle.Id, duration.Value, cost, ct));
                 }
                 catch (Exception ex) when (ex is not OperationCanceledException)
                 {

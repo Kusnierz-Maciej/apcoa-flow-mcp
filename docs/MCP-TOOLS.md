@@ -139,12 +139,15 @@ otherwise the tool refuses before starting and says to set a saved card as the d
 starts and extensions work with any default method (its id is sent, as the app does; nothing is charged).
 
 **Free** means the dated quote for this vehicle is 0.00 — whatever the reason (a free tariff, a shop's free time, a
-one-time free period). The **free window** is the longest stay that still quotes 0.00 (the parking's preselected
-duration is tried first, else a short search of up to a day).
+one-time free period). The **free window** comes from what the parking says about itself, verified with quotes and
+never searched for: its preselected duration (shop parkings: their free window, e.g. Biedronka's 90 min — exact if a
+minute more costs money), else the longest mark its tariff table shows as free (1 h, 2 h, a day — "free for at least …").
+If neither tells, the stay is only known to be free right now; a free start without a duration then uses the parking's
+usual duration (or 60 min) and still starts only if that quote is 0.00.
 
 | Tool | Inputs | Does |
 |---|---|---|
-| `start_session` | `parkingId`, `parkingName`, `licensePlate`, `durationMinutes?`, `confirmedCostPln?` | Free → starts at once. Paid → the first call returns the price and starts nothing (and, when a longer stay costs the same — e.g. PLN 0.40 per started hour — says how long the same price lasts, checked with a few extra quotes and rounded to a 15-minute mark, so the user can choose; never stretched by itself); call again with the same `durationMinutes` and the exact `confirmedCostPln` after the user agrees. Refuses above `ApcoaFlow__MaxSessionCostPln` (default 100). Without a duration: the whole free window when free, else the parking's usual duration (60 min if it has none). |
+| `start_session` | `parkingId`, `parkingName`, `licensePlate`, `durationMinutes?`, `confirmedCostPln?` | Free → starts at once. Paid → the first call returns the price and starts nothing (and, when the parking's tariff table shows a longer stay at the same price — its marks are 1 h, 2 h and a day, e.g. PLN 0.40 per started hour — says how long the same price lasts, checked with one quote, so the user can choose; never stretched by itself); call again with the same `durationMinutes` and the exact `confirmedCostPln` after the user agrees. Refuses above `ApcoaFlow__MaxSessionCostPln` (default 100). Without a duration: the whole free window when free, else the parking's usual duration (60 min if it has none). |
 | `start_free_session` | `parkingId`, `parkingName`, `licensePlate`, `durationMinutes?` | Only if free for the whole stay; never charges. Without a duration: the whole free window. |
 | `start_expensive_session` | as `start_session` | `start_session` without the cost limit. |
 | `start_session_here` / `start_free_session_here` | `latitude`, `longitude`, `licensePlate`, `durationMinutes?`, (`confirmedCostPln?`), `radiusMeters?` | The same at the nearest parking within the radius (default `ApcoaFlow__CurrentLocationRadiusMeters`, 300 m), measured to its outline when it has one. If the position is inside exactly one outline, that one. If two parkings are within **30 m** of each other in distance (GPS can't tell them apart), nothing starts and both are listed. |

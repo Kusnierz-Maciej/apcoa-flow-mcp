@@ -222,27 +222,67 @@ public class ReadToolTests
         await Assert.That(text).Contains("Free for up to 1 h 30 min for this vehicle right now");
     }
 
-    [Test]
-    public async Task Free_window_without_a_hint_is_found_by_search()
+    internal static SpaceDetails Tariff(string id, decimal oneHour, decimal twoHours, decimal day, int? hint = null) => new()
     {
-        var api = FakeApi.Create();
-        FakeApi.Quotes(api, minutes => minutes <= 237 ? 0m : 3m);
+        Id = id, Name = id, DefaultLengthOfStayInMinutes = hint,
+        Prices =
+        [
+            new SpacePriceSection { SectionName = "Parking", Prices =
+            [
+                new PriceItem { Label = "Up to 1 hour", Price = FormattableString.Invariant($"PLN {oneHour:0.00}") },
+                new PriceItem { Label = "Up to 2 hours", Price = FormattableString.Invariant($"PLN {twoHours:0.00}") },
+                new PriceItem { Label = "Max day price", Price = FormattableString.Invariant($"PLN {day:0.00}") },
+            ] },
+            new SpacePriceSection { SectionName = "Parking fees", Prices = [new PriceItem { Label = "Prices include convenience fees", Price = "" }] },
+        ],
+    };
 
-        var window = await new Pricing(api, new FakeApi.FixedTime(FakeApi.Now)).FreeWindowAsync("p", FakeApi.VehicleId, null, null, default);
-
-        await Assert.That(window.Minutes).IsEqualTo(237);
-        await Assert.That(window.AtLeast).IsFalse();
+    [Test]
+    public async Task The_tariff_table_reads_as_price_marks()
+    {
+        var marks = TariffTable.Marks(Tariff("p", 0.40m, 0.80m, 5m));
+        await Assert.That(marks.Select(m => (m.Minutes, m.Price.Amount))).IsEquivalentTo(new[] { (60, 0.40m), (120, 0.80m), (1440, 5m) },
+            TUnit.Assertions.Enums.CollectionOrdering.Matching);
+        await Assert.That(TariffTable.LongestAtPrice(marks, 15, Money.Parse("PLN 0.40"))).IsEqualTo(60);
+        await Assert.That(TariffTable.LongestAtPrice(marks, 61, Money.Parse("PLN 0.80"))).IsEqualTo(120);
+        await Assert.That(TariffTable.LongestAtPrice(TariffTable.Marks(Tariff("p", 4m, 4m, 4m)), 30, Money.Parse("PLN 4.00"))).IsEqualTo(1440);
+        await Assert.That(TariffTable.LongestAtPrice(marks, 15, Money.Parse("PLN 0.30"))).IsNull();
     }
 
     [Test]
-    public async Task Free_window_is_at_least_a_day_when_a_day_is_free()
+    public async Task Free_window_without_a_hint_comes_from_the_table_verified_with_one_quote()
+    {
+        var api = FakeApi.Create();
+        FakeApi.Quotes(api, minutes => minutes <= 237 ? 0m : 3m); // the real window: 3 h 57 min
+
+        var window = await new Pricing(api, new FakeApi.FixedTime(FakeApi.Now)).FreeWindowAsync(Tariff("p", 0m, 0m, 3m), FakeApi.VehicleId, default);
+
+        await Assert.That(window).IsEqualTo(new Pricing.FreeWindow(120, AtLeast: true)); // a lower bound, no search
+        var quotes = api.ReceivedCalls().Count(c => c.GetMethodInfo().Name == nameof(IApcoaFlowApi.GetPriceAsync));
+        await Assert.That(quotes).IsLessThanOrEqualTo(3);
+    }
+
+    [Test]
+    public async Task Free_window_is_at_least_a_day_when_the_table_and_the_quote_say_so()
     {
         var api = FakeApi.Create();
         FakeApi.Quotes(api, _ => 0m);
 
-        var window = await new Pricing(api, new FakeApi.FixedTime(FakeApi.Now)).FreeWindowAsync("p", FakeApi.VehicleId, null, null, default);
+        var window = await new Pricing(api, new FakeApi.FixedTime(FakeApi.Now)).FreeWindowAsync(Tariff("p", 0m, 0m, 0m), FakeApi.VehicleId, default);
 
         await Assert.That(window).IsEqualTo(new Pricing.FreeWindow(24 * 60, AtLeast: true));
+    }
+
+    [Test]
+    public async Task Free_window_falls_back_to_a_shorter_mark_when_the_quote_disagrees()
+    {
+        // Ostrów on a Friday night: the table says free all day, but a day crosses Saturday's paid hours.
+        var api = FakeApi.Create();
+        FakeApi.Quotes(api, minutes => minutes <= 500 ? 0m : 5m);
+
+        var window = await new Pricing(api, new FakeApi.FixedTime(FakeApi.Now)).FreeWindowAsync(Tariff("p", 0m, 0m, 0m), FakeApi.VehicleId, default);
+
+        await Assert.That(window).IsEqualTo(new Pricing.FreeWindow(120, AtLeast: true));
     }
 
     [Test]

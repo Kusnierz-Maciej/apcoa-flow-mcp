@@ -271,11 +271,14 @@ public sealed class ApcoaFlowTools(
         var sb = new StringBuilder($"{parking.Name}, {vehicle.LicensePlate}, {Text.Duration(durationMinutes)} from now: {total}");
         sb.Append(quote.PrepaymentMode == "autoCharge" ? " (charged at start)" : " (charged at the end)");
         sb.AppendLine(".");
-        var window = await pricing.FreeWindowAsync(parking.Id, vehicle.Id, parking.DefaultLengthOfStayInMinutes, parking.MaxDuration, ct);
+        var window = await pricing.FreeWindowAsync(parking, vehicle.Id, ct);
         if (window.Minutes > 0)
-            sb.AppendLine(window.AtLeast
-                ? $"Free for at least {Text.Duration(window.Minutes)} for this vehicle right now."
-                : $"Free for up to {Text.Duration(window.Minutes)} for this vehicle right now; longer stays cost money.");
+            sb.AppendLine(window switch
+            {
+                { AtLeast: false } => $"Free for up to {Text.Duration(window.Minutes)} for this vehicle right now; longer stays cost money.",
+                { Minutes: > 1 } => $"Free for at least {Text.Duration(window.Minutes)} for this vehicle right now (it may be free for longer).",
+                _ => "Free right now for this vehicle; the parking doesn't say for how long (ask get_price for a specific length).",
+            });
         if (parking.MaxDuration is > 0 && durationMinutes > parking.MaxDuration)
             sb.AppendLine($"Note: the longest allowed stay here is {Text.Duration(parking.MaxDuration.Value)}.");
 
