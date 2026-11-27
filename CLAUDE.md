@@ -48,10 +48,18 @@ When adding or changing any setting:
 4. **`docker/docker-compose.prod.yml`** (clean, generic) and **`docker/docker-compose.synology.yml`** (prod + Synology ACL `user:` fix and a `simple` console logging block) — keep a commented reference block with default values so operators can see all knobs in one place. Uncomment to override.
 5. **Document in README** — every operator-facing setting should be described.
 
-## Live API tests
+## Live API tests = the API contract
 
 The live tests (`[Category("LiveApi")]` in `src/ApcoaFlowApiClient.Tests`) run against the real, unofficial
-APCOA Flow API with the test account (user-secrets id `apcoa-flow-api-tests`).
+APCOA Flow API with the test account (user-secrets id `apcoa-flow-api-tests`); CI runs them nightly against
+the latest release.
+
+- **Every API behaviour the code relies on needs a live test** — status codes (419 vs 401, 424, 422,
+  login rejected as 200 + `failedLogin`), payload shapes and encodings, and silent successes the tools work
+  around. When code starts depending on a new behaviour: verify it with the sandbox first, add the test
+  (usually in `LiveApiContractTests`), and add a row to "Contracts guarded by live tests" in
+  `docs/API-NOTES.md`. A behaviour that can't be tested safely (needs a paid start or a one-use coupon)
+  goes under "Trusted, not tested" there, with the date and how it was observed.
 
 - **Live tests never run in parallel**: every live test class carries `[NotInParallel(LiveApi.Serial)]`
   (one real account, one rate limit, a 403 lockout if hammered, one active session per account).
