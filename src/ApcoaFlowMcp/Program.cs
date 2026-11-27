@@ -54,6 +54,8 @@ if (telemetry.Enabled)
             .AddSource("System.Net.Http")
             // App spans: parking index load/build/refresh, APCOA login; business tags on tool spans.
             .AddSource(ApcoaTelemetry.SourceName)
+            // "POST /mcp [tools/call find_parking]" instead of "POST /mcp/" (see McpSpanNames); before the exporter.
+            .AddProcessor(new McpSpanNames.Processor())
             .AddOtlpExporter(o =>
             {
                 if (otlpEndpoint is not null) o.Endpoint = otlpEndpoint;
@@ -110,6 +112,7 @@ builder.Services
     })
     .WithHttpTransport()
     .WithApcoaFlowTools()
+    .WithMessageFilters(filters => filters.AddIncomingFilter(McpSpanNames.MessageFilter))
     .WithRequestFilters(filters => filters.AddCallToolFilter(ClientContextFilter.Create));
 
 var app = builder.Build();
@@ -143,6 +146,9 @@ app.UseWhen(
     ctx => ctx.Request.Path.StartsWithSegments("/mcp"),
     branch =>
     {
+        // Names the request span after its MCP message ("POST /mcp [tools/call find_parking]"); outermost, so the
+        // name is set when the request finishes.
+        branch.Use(McpSpanNames.Middleware);
         branch.UseMiddleware<ApiKeyMiddleware>();
         branch.UseMiddleware<UserScopeMiddleware>();
     });
