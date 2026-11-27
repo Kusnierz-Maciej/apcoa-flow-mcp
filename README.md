@@ -299,6 +299,9 @@ dotnet user-secrets --project src/ApcoaFlowApiClient.Tests set "ApcoaFlow:Email"
 dotnet user-secrets --project src/ApcoaFlowApiClient.Tests set "ApcoaFlow:Password" "yourpassword"
 ```
 
+The tests and the diagnostic sandbox (`src/ApcoaFlow.Sandbox`) share the user-secrets id
+`apcoa-flow-api-tests`; the server's own secrets live under `apcoa-flow-mcp`.
+
 Or pass them as environment variables (these override user-secrets — handy for CI or a one-off run):
 
 ```bash
