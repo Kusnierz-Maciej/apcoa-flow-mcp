@@ -92,6 +92,10 @@ builder.Services.AddOptions<SecurityOptions>()
     .ValidateOnStart();
 builder.Services.AddSingleton<IValidateOptions<SecurityOptions>, SecurityOptionsValidator>();
 builder.Services.AddSingleton<ApiKeyAllowlist>();
+builder.Services.AddOptions<OAuthOptions>()
+    .Bind(builder.Configuration.GetSection(OAuthOptions.Section))
+    .ValidateOnStart();
+builder.Services.AddSingleton<IValidateOptions<OAuthOptions>, OAuthOptionsValidator>();
 
 // Token encryption derives its key deterministically from Security:TokenSecret — nothing is
 // persisted to disk, so tokens survive restarts/replicas and the secret alone controls validity.

@@ -46,7 +46,11 @@ The three auth methods:
    against APCOA at login and then stored only inside an encrypted, client-held session token — never on
    the server. Requires `Security__TokenSecret` (min 32 chars) — the key that secures those tokens;
    keep it stable, and note that **changing it invalidates every issued token**. Removing a key from
-   `Security__AllowedApiKeys` and restarting likewise ends every session created with it.
+   `Security__AllowedApiKeys` and restarting likewise ends every session created with it. Sessions
+   refresh silently; token lifetimes are settings (defaults: code 1 minute, access token 1 hour,
+   refresh token 365 days — the refresh lifetime is how long a client may stay idle before signing in
+   again): `OAuth__AuthorizationCodeLifetime` (≤ 10 minutes), `OAuth__AccessTokenLifetime`,
+   `OAuth__RefreshTokenLifetime` (≥ the access lifetime).
 2. **`X-Api-Key` + `Authorization: Basic`** *(HTTP)* — for clients that support custom headers. The
    `X-Api-Key` must match a configured key; the `Basic` header carries `base64(email:password)`.
 3. **stdio config account** *(stdio only)* — no network, no gate; the single APCOA account is read from
