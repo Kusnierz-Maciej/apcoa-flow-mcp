@@ -47,3 +47,16 @@ When adding or changing any setting:
 3. **`appsettings.Production.json`** — only values that differ from the default; omit anything that matches.
 4. **`docker/docker-compose.prod.yml`** (clean, generic) and **`docker/docker-compose.synology.yml`** (prod + Synology ACL `user:` fix and a `simple` console logging block) — keep a commented reference block with default values so operators can see all knobs in one place. Uncomment to override.
 5. **Document in README** — every operator-facing setting should be described.
+
+## Live API tests
+
+The live tests (`[Category("LiveApi")]` in `src/ApcoaFlowApiClient.Tests`) run against the real, unofficial
+APCOA Flow API with the test account (user-secrets id `apcoa-flow-api-tests`).
+
+- **Live tests never run in parallel**: every live test class carries `[NotInParallel(LiveApi.Serial)]`
+  (one real account, one rate limit, a 403 lockout if hammered, one active session per account).
+- Every live test class also has `[Before(HookType.Class)]` → `LiveApi.SweepOnceAtStartAsync()` (ends any
+  session left ACTIVE — billable — by a crashed previous run; runs once per test run, whichever class
+  starts first) and `[After(HookType.Class)]` → `LiveApi.EndActiveSessionsAsync(…)`. Classes that start
+  sessions also end them after every test (`[After(Test)]`).
+- Start sessions **only on parking `LiveApi.FreeParkingId` (616319)** — unlimited free start/stop.

@@ -5,8 +5,15 @@ namespace ApcoaFlowApiClient.Tests;
 /// are covered by <see cref="LiveApiPublicEndpointTests"/> and <see cref="LiveApiSessionTests"/>.
 /// </summary>
 [Category("LiveApi")]
+[NotInParallel(LiveApi.Serial)]
 public class ApcoaFlowApiTests
 {
+    [Before(HookType.Class)]
+    public static Task SweepBefore() => LiveApi.SweepOnceAtStartAsync();
+
+    [After(HookType.Class)]
+    public static Task SweepAfter() => LiveApi.EndActiveSessionsAsync("after-class");
+
     private readonly IApcoaFlowApi _api = ApiClientFactory.Api;
 
     [Test]
