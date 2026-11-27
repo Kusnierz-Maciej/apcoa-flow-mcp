@@ -18,12 +18,21 @@ services:
       #- ParkingData__SoftRefreshAge=12:00:00
       #- ParkingData__HardRefreshAge=48:00:00
       #- ParkingData__BackgroundRefreshInterval=24:00:00
+      # MCP prompts (user-picked shortcuts like "Park here for free"); false = advertise none.
+      #- Prompts__Enabled=true
+      # Client-side rate limit on APCOA calls (login included): a burst, then one call per period.
+      #- RateLimit__TokenLimit=10
+      #- RateLimit__ReplenishmentPeriod=00:00:01
       # StorePath must match the bind mount target below.
       - ParkingData__StorePath=/data/parking
 
       # Security — require an allowlisted MCP API key (set false to drop the key gate; APCOA
       # credentials are still required). When true, at least one Security__AllowedApiKeys__N must be set.
       #- Security__RequireMcpApiKey=true
+      # OAuth token lifetimes (refresh = how long a client may stay idle before signing in again).
+      #- OAuth__AuthorizationCodeLifetime=00:01:00
+      #- OAuth__AccessTokenLifetime=01:00:00
+      #- OAuth__RefreshTokenLifetime=365.00:00:00
 
       # Logging — human-readable single-line console (good for `docker logs` on the NAS).
       - Logging__LogLevel__Default=Information
@@ -51,3 +60,13 @@ services:
     # Run as an ACL-trusted host user so the bind mount is writable (see Synology note above).
     user: "106808:106808"   # ContainerManager (uid:gid) — change to your own `id ContainerManager`
     restart: unless-stopped
+    # With telemetry on, join the observability stack's shared network so `alloy` resolves
+    # (uncomment this and the top-level `networks:` block at the end of the file).
+    #networks:
+    #  - default
+    #  - observability
+
+# Shared network created by the observability stack (Alloy/Loki/Tempo/Grafana) — start that stack first.
+#networks:
+#  observability:
+#    external: true

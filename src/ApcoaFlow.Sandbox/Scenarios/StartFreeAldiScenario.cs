@@ -17,6 +17,9 @@ namespace ApcoaFlow.Sandbox.Scenarios;
 /// WHY: confirm end-to-end that the nested-promotion fix ([[project_nested_promotion_code]]) makes the
 /// MCP recognise and start the free session the app grants at 8331.
 ///
+/// FOUND (2026-11-25): with the nested promotion code (FRE60MIN07) and the "valid" validate message accepted,
+/// the MCP starts the free 60-min session the app grants at 8331 (see commit 2d2c41a).
+///
 /// SAFETY (defence in depth — three independent gates so a lapsed/removed promo can NEVER charge):
 ///   (1) an explicit pre-flight breakdown MUST quote 0 cents for the default window WITH a validated
 ///       promo, or the scenario aborts before any start;

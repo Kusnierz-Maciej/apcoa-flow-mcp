@@ -62,6 +62,13 @@ public class ApiKeyMiddleware
                         "(Security__AllowedApiKeys is empty). Set a key or Security__RequireMcpApiKey=false.");
                 else
                     logger.LogWarning("Rejected /mcp request: missing or incorrect X-Api-Key.");
+                // No key and no Authorization at all usually means an OAuth client that hasn't signed in
+                // yet: point it at the metadata so it can discover the sign-in flow. A wrong key is a plain 401.
+                if (string.IsNullOrEmpty(provided) && authHeader is null)
+                {
+                    await Challenge(context);
+                    return;
+                }
                 context.Response.StatusCode = StatusCodes.Status401Unauthorized;
                 await context.Response.WriteAsync("Unauthorized");
                 return;

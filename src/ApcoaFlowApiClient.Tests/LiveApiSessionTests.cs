@@ -19,7 +19,7 @@ namespace ApcoaFlowApiClient.Tests;
 /// the normal suite — invoke explicitly.
 /// </summary>
 [Category("LiveApi")]
-[NotInParallel("LiveApi")]
+[NotInParallel(LiveApi.Serial)]
 public class LiveApiSessionTests
 {
     // Search origin — Tarnowskie Góry; parking 616319 is a base-tariff, genuinely-free (0.00 PLN),
@@ -65,12 +65,11 @@ public class LiveApiSessionTests
     }
 
     /// <summary>
-    /// Before EVERY test in this class, end any session left ACTIVE by a previous run (or a crashed
-    /// test). The account allows only one active session at a time, so a leftover session would make a
-    /// fresh start fail with 424 LIMIT_EXCEEDED. Best-effort — failures here are logged, not thrown.
+    /// Crash recovery, once per run: end any session left ACTIVE by a previous run. The account allows only
+    /// one active session at a time, so a leftover would make a fresh start fail with 424 LIMIT_EXCEEDED.
     /// </summary>
-    [Before(Test)]
-    public Task EndAnyActiveSessionBefore() => SweepActiveSessionsAsync("pre-test");
+    [Before(HookType.Class)]
+    public static Task SweepBefore() => LiveApi.SweepOnceAtStartAsync();
 
     /// <summary>
     /// Safety net: after EVERY test in this class, end any session left ACTIVE. This runs even if a
@@ -78,47 +77,7 @@ public class LiveApiSessionTests
     /// session running. Best-effort — failures here are logged, not thrown.
     /// </summary>
     [After(Test)]
-    public Task EndAnyActiveSession() => SweepActiveSessionsAsync("cleanup");
-
-    /// <summary>
-    /// Lists ACTIVE sessions and stops each one. Shared by the before/after hooks. A 422 on stop means
-    /// the session is already completing/finalized server-side (not actually stoppable) — that is a
-    /// success for our purposes (nothing is left active), so it is not treated as a failure.
-    /// </summary>
-    private static async Task SweepActiveSessionsAsync(string phase)
-    {
-        try
-        {
-            using var sp = BuildProvider();
-            var api = sp.GetRequiredService<IApcoaFlowApi>();
-            var active = await api.GetParkingSessionsAsync(new ParkingSessionV2Query { Status = "ACTIVE", PageSize = 20 });
-            foreach (var s in active)
-            {
-                try
-                {
-                    await api.StopParkingSessionAsync(new StopParkingSessionRequest
-                    {
-                        ParkingSessionId = s.Id,
-                        SessionCheckOutTime = DateTimeOffset.UtcNow,
-                    });
-                    Console.Error.WriteLine($"[session-test] {phase}: ended lingering ACTIVE session {s.Id} at {s.ParkingName}");
-                }
-                catch (ApiException ex) when ((int)ex.StatusCode == 422)
-                {
-                    // Already completing/finalized server-side — effectively stopped, so tolerate it.
-                    Console.Error.WriteLine($"[session-test] {phase}: session {s.Id} already finalizing (HTTP 422), treated as ended.");
-                }
-                catch (Exception ex)
-                {
-                    Console.Error.WriteLine($"[session-test] {phase}: FAILED to end session {s.Id}: {ex.Message}");
-                }
-            }
-        }
-        catch (Exception ex)
-        {
-            Console.Error.WriteLine($"[session-test] {phase}: could not sweep active sessions: {ex.Message}");
-        }
-    }
+    public Task EndAnyActiveSession() => LiveApi.EndActiveSessionsAsync("cleanup");
 
     /// <summary>A parking that can host a fully-free start + extension, with the IDs needed to do so.</summary>
     private sealed record FreeCandidate(
@@ -294,7 +253,7 @@ public class LiveApiSessionTests
 
         // 2. Start.
         Log($"starting session: parking {c.ParkingId}, {c.Start.TotalMinutes:0} min, check-out {checkOut:u}…");
-        var start = await api.StartParkingSessionAsync(new StartParkingSessionRequest
+        var start = await LiveApi.StartWhenSlotFreeAsync(api, () => api.StartParkingSessionAsync(new StartParkingSessionRequest
         {
             TariffId = c.TariffId,
             ParkingId = c.ParkingId,
@@ -310,7 +269,7 @@ public class LiveApiSessionTests
             PromotionId = c.Promo?.Id,
             OfferDiscountType = c.Promo is null ? null : "PROMOTION",
             IsAutoApplyPromotion = c.Promo is not null,
-        });
+        }));
         await Assert.That(start.IsActive).IsTrue()
             .Because("the started session should report ACTIVE status");
         var sessionId = start.SessionId;
@@ -409,7 +368,7 @@ public class LiveApiSessionTests
         StartSessionResponse first;
         try
         {
-            first = await api.StartParkingSessionAsync(new StartParkingSessionRequest
+            first = await LiveApi.StartWhenSlotFreeAsync(api, () => api.StartParkingSessionAsync(new StartParkingSessionRequest
             {
                 TariffId = c.TariffId,
                 ParkingId = c.ParkingId,
@@ -425,7 +384,7 @@ public class LiveApiSessionTests
                 PromotionId = c.Promo?.Id,
                 OfferDiscountType = c.Promo is null ? null : "PROMOTION",
                 IsAutoApplyPromotion = c.Promo is not null,
-            });
+            }));
         }
         catch (ApiException ex)
         {

@@ -6,8 +6,8 @@ using Refit;
 namespace ApcoaFlowApiClient;
 
 /// <summary>
-/// Shared APCOA login logic: a single <see cref="RestService"/>-based call with the static app headers,
-/// classifying the result into <see cref="LoginOutcome"/>. Both <see cref="ApcoaFlowAuthHandler"/> (to
+/// Shared APCOA login logic: a single call on the rate-limited login client (which carries the static app
+/// headers), classifying the result into <see cref="LoginOutcome"/>. Both <see cref="ApcoaFlowAuthHandler"/> (to
 /// obtain a bearer token) and the OAuth <c>/authorize</c> validator use this so the notion of a
 /// "bad-credential login" is defined in exactly one place.
 /// </summary>
@@ -20,13 +20,11 @@ public static class ApcoaFlowLogin
     /// <see cref="LoginOutcomeKind.ApiError"/>. Never throws for the expected failure cases.
     /// </summary>
     public static async Task<LoginOutcome> TryLoginAsync(
-        string email, string password, ILogger? logger, CancellationToken ct)
+        IHttpClientFactory httpClientFactory, string email, string password, ILogger? logger, CancellationToken ct)
     {
-        using var http = new HttpClient { BaseAddress = new Uri(ApcoaFlowClientOptions.BaseUrl) };
-        foreach (var (name, value) in ApcoaFlowClientOptions.AppHeaders)
-            http.DefaultRequestHeaders.TryAddWithoutValidation(name, value);
-
-        var api = RestService.For<IApcoaFlowApi>(http);
+        // Factory client: pooled handlers and the shared rate limit (see ServiceCollectionExtensions).
+        var api = RestService.For<IApcoaFlowApi>(
+            httpClientFactory.CreateClient(ServiceCollectionExtensions.LoginClientName));
 
         try
         {
@@ -37,13 +35,10 @@ public static class ApcoaFlowLogin
                 LocationCode = "PL",
             }, ct);
 
-            if (response.FailedLogin || string.IsNullOrWhiteSpace(response.AuthToken))
-            {
+            var outcome = Classify(response);
+            if (outcome.Kind == LoginOutcomeKind.BadCredentials)
                 logger?.LogInformation("APCOA login rejected the credentials (FailedLogin flag or empty token).");
-                return LoginOutcome.Bad("FailedLogin flag or empty token");
-            }
-
-            return LoginOutcome.Success(response.AuthToken);
+            return outcome;
         }
         catch (ApiException ex) when (IsCredentialRejection(ex.StatusCode))
         {
@@ -63,6 +58,16 @@ public static class ApcoaFlowLogin
         }
     }
 
+    /// <summary>
+    /// Classifies a 2xx login response. APCOA rejects wrong credentials (bad password or unknown email) with
+    /// HTTP 200, <c>failedLogin: true</c>, no <c>authToken</c> and a <c>failedLoginResponse</c> carrying its
+    /// lockout policy (5 attempts per 2 minutes) — observed 2026-11-27, pinned by LiveApiContractTests.
+    /// </summary>
+    public static LoginOutcome Classify(LoginResponse response) =>
+        response.FailedLogin || string.IsNullOrWhiteSpace(response.AuthToken)
+            ? LoginOutcome.Bad("FailedLogin flag or empty token")
+            : LoginOutcome.Success(response.AuthToken);
+
     // A credential rejection is an auth/validation status on the login call itself. 419 is explicitly
     // NOT here: APCOA uses it for invalid/expired token, which is an API condition, not a bad password.
     private static bool IsCredentialRejection(HttpStatusCode status) =>
@@ -70,8 +75,9 @@ public static class ApcoaFlowLogin
 }
 
 /// <summary>Default <see cref="IApcoaFlowLoginValidator"/> backed by <see cref="ApcoaFlowLogin"/>.</summary>
-public sealed class ApcoaFlowLoginValidator(ILogger<ApcoaFlowLoginValidator> logger) : IApcoaFlowLoginValidator
+public sealed class ApcoaFlowLoginValidator(
+    IHttpClientFactory httpClientFactory, ILogger<ApcoaFlowLoginValidator> logger) : IApcoaFlowLoginValidator
 {
     public Task<LoginOutcome> ValidateAsync(string email, string password, CancellationToken ct = default) =>
-        ApcoaFlowLogin.TryLoginAsync(email, password, logger, ct);
+        ApcoaFlowLogin.TryLoginAsync(httpClientFactory, email, password, logger, ct);
 }

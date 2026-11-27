@@ -3,6 +3,9 @@
 Captured from iOS app traffic (APCOA FLOW 6.85.2 / Alamofire 5.10.2) on 2026-11-23.
 Base host: `api.apcoaflow.com`
 
+**Last verified against the live API: 2026-11-27** (sandbox `login-probe`, `probe-silent-successes`; live
+contract tests green).
+
 ---
 
 ## Auth
@@ -13,6 +16,46 @@ Base host: `api.apcoaflow.com`
 - Logout: `POST /authentication/v1/consumer/logout` — form-urlencoded body with `refreshToken`.
 - All consumer endpoints require `Authorization: Bearer <authToken>`.
 - Token is attached by `ApcoaFlowAuthHandler`.
+- **Rejected login = HTTP 200** (observed 2026-11-27): a wrong password or an unknown email returns 200 with
+  `failedLogin: true`, no `authToken`, and `failedLoginResponse`
+  `{"maxLoginAttemptsAllowed":5,"timeGapInLoginInMinutes":2,"totalAttempts":N,…}` — APCOA's lockout policy
+  (5 failed attempts per 2 minutes). `ApcoaFlowLogin.Classify` reads the flag; 401/403/422 are also treated
+  as bad credentials, 419/5xx/transport as API errors.
+- **Invalid or expired bearer → HTTP 419** `{"message":"Invalid or Expired Token","statusCode":419}`
+  (observed 2026-11-27). The auth handler re-logs in once on 401/419; a second rejection means the
+  credentials themselves no longer work.
+
+---
+
+## Contracts guarded by live tests
+
+Each APCOA behaviour the code depends on has a `[Category("LiveApi")]` test, run nightly against the
+latest release by *Verify APCOA Flow API contract compatibility*. Live test classes are
+`[NotInParallel(LiveApi.Serial)]`; sessions left ACTIVE are ended once when the run starts (crash
+recovery), after each class, and after every session test. Sessions are only ever started on parking
+**616319**.
+
+| Contract | Code that relies on it | Test |
+|---|---|---|
+| Login → `authToken`, consumer profile with vehicles + payment methods | auth handler, OAuth sign-in, `start_*`, `get_registered_cars` | `Login_ValidCredentials_IsOk_WithToken`, `Login_And_GetConsumer_Succeeds` |
+| Wrong password → 200 + `failedLogin`, no token; unknown email likewise | `ApcoaFlowLogin.Classify`, OAuth sign-in error | `Login_WrongPassword_Is200_…`, `Login_UnknownEmail_IsBadCredentials` |
+| Invalid bearer → 419 | re-login in `ApcoaFlowAuthHandler` | `InvalidBearerToken_Is419` |
+| App config, `parkingLots`, parking detail are public (419 if a bearer is sent) | `NoAuth` sentinel, parking index, lot/tariff resolution | `AppConfig_IsPublic_…`, `PublicParkingEndpoints_SucceedWithoutBearer` |
+| Offline S3 tiles decrypt with the app-config key and index near a coordinate | `find_parking`, `*_current_location` | `PublicParkingEndpoints_SucceedWithoutBearer` |
+| Free quote → start → ACTIVE list → extend → stop → COMPLETED with amount 0 | `start_*`, `get_active_sessions`, `end_session`, `get_session_history` | `FreeSession_Discover_Start_List_Extend_End_Lifecycle` |
+| Second start while one is active → 424 `LIMIT_EXCEEDED` / 5012 | already-active handling in `start_*` | `DuplicateSession_AtSameParking_LogsApiResponse` |
+| Right after a stop, a new start can briefly still get 424 although nothing is listed ACTIVE (slot release lag, observed 2026-11-27) | live tests only (`LiveApi.StartWhenSlotFreeAsync` retries); the server reports it as "no active session was found, try again" | exercised by the session tests running back to back |
+| Stop of an unknown or already-ended id → 422 `PARKING_SESSION_NOT_FOUND` (no silent 200) | `end_session` error message | `StopSession_UnknownId_Is422_SessionNotFound_NotA200` |
+
+**Trusted, not tested** (deliberate — a live test would need a paid start or a one-use coupon):
+
+- A promo-applied `tariffBreakDownV2` quote can be 0 while the real start charges; `promotion/validate`
+  (422 `INVALID_PROMOTION_CODE` / 5007) is authoritative — observed 2026-11-24 (Lidl Rzeszów, session
+  84240817), see below. Unit-tested against recorded shapes.
+- The promotion code lives in the offer's nested `promotionResponseList`; free-time coupons have a reuse
+  cooldown — recorded from HAR 2026-11-25, unit-tested in `TariffAndPromotionLogicTests`.
+- Paid starts charge immediately and early stop refunds only when `allowRefund`/`isProrationAllowed` —
+  observed with the billable `capture-carrefour-paid-start` sandbox scenario, 2026-11-25.
 
 ---
 

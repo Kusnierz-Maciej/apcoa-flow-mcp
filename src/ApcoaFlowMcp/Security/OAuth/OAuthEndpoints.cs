@@ -2,6 +2,7 @@ using System.Net;
 using System.Text;
 using ApcoaFlowApiClient;
 using Microsoft.AspNetCore.Mvc;
+using Microsoft.Extensions.Options;
 
 namespace ApcoaFlowMcp.Security.OAuth;
 
@@ -14,10 +15,6 @@ namespace ApcoaFlowMcp.Security.OAuth;
 /// </summary>
 public static class OAuthEndpoints
 {
-    private static readonly TimeSpan CodeTtl = TimeSpan.FromSeconds(60);
-    private static readonly TimeSpan AccessTtl = TimeSpan.FromHours(1);
-    private static readonly TimeSpan RefreshTtl = TimeSpan.FromDays(365);
-
     public static void MapOAuthEndpoints(this IEndpointRouteBuilder app)
     {
         app.MapGet("/.well-known/oauth-protected-resource", ProtectedResourceMetadataDoc);
@@ -99,6 +96,7 @@ public static class OAuthEndpoints
         ApiKeyAllowlist allowlist,
         IApcoaFlowLoginValidator loginValidator,
         CredentialTokenService tokens,
+        IOptions<OAuthOptions> oauth,
         ILogger<Marker> logger,
         CancellationToken ct)
     {
@@ -150,7 +148,7 @@ public static class OAuthEndpoints
         var apiKeyHash = allowlist.RequireApiKey ? CredentialTokenService.HashApiKey(apiKey!) : string.Empty;
         var code = tokens.Protect(new TokenPayload(
             TokenKind.Code, email!, password!, apiKeyHash,
-            codeChallenge, redirectUri), CodeTtl);
+            codeChallenge, redirectUri), oauth.Value.AuthorizationCodeLifetime);
 
         logger.LogInformation("OAuth authorize: credentials validated, issuing authorization code.");
 
@@ -165,6 +163,7 @@ public static class OAuthEndpoints
         HttpContext ctx,
         ApiKeyAllowlist allowlist,
         CredentialTokenService tokens,
+        IOptions<OAuthOptions> oauth,
         ILogger<Marker> logger,
         CancellationToken ct)
     {
@@ -174,14 +173,14 @@ public static class OAuthEndpoints
 
         return grantType switch
         {
-            "authorization_code" => ExchangeCode(F, allowlist, tokens, logger),
-            "refresh_token" => Refresh(F, allowlist, tokens, logger),
+            "authorization_code" => ExchangeCode(F, allowlist, tokens, oauth.Value, logger),
+            "refresh_token" => Refresh(F, allowlist, tokens, oauth.Value, logger),
             _ => TokenError("unsupported_grant_type"),
         };
     }
 
     private static IResult ExchangeCode(
-        Func<string, string?> f, ApiKeyAllowlist allowlist, CredentialTokenService tokens, ILogger<Marker> logger)
+        Func<string, string?> f, ApiKeyAllowlist allowlist, CredentialTokenService tokens, OAuthOptions oauth, ILogger<Marker> logger)
     {
         var code = f("code");
         var verifier = f("code_verifier");
@@ -214,11 +213,11 @@ public static class OAuthEndpoints
         }
 
         logger.LogInformation("OAuth token: issuing access + refresh tokens.");
-        return IssueTokens(payload, tokens);
+        return IssueTokens(payload, tokens, oauth);
     }
 
     private static IResult Refresh(
-        Func<string, string?> f, ApiKeyAllowlist allowlist, CredentialTokenService tokens, ILogger<Marker> logger)
+        Func<string, string?> f, ApiKeyAllowlist allowlist, CredentialTokenService tokens, OAuthOptions oauth, ILogger<Marker> logger)
     {
         var refreshToken = f("refresh_token");
         var payload = tokens.TryUnprotect(refreshToken, TokenKind.Refresh);
@@ -236,21 +235,21 @@ public static class OAuthEndpoints
         }
 
         logger.LogInformation("OAuth refresh: re-minting access token (rotating refresh).");
-        return IssueTokens(payload, tokens);
+        return IssueTokens(payload, tokens, oauth);
     }
 
-    private static IResult IssueTokens(TokenPayload payload, CredentialTokenService tokens)
+    private static IResult IssueTokens(TokenPayload payload, CredentialTokenService tokens, OAuthOptions oauth)
     {
         var access = tokens.Protect(
-            payload with { Kind = TokenKind.Access, CodeChallenge = null, RedirectUri = null }, AccessTtl);
+            payload with { Kind = TokenKind.Access, CodeChallenge = null, RedirectUri = null }, oauth.AccessTokenLifetime);
         var refresh = tokens.Protect(
-            payload with { Kind = TokenKind.Refresh, CodeChallenge = null, RedirectUri = null }, RefreshTtl);
+            payload with { Kind = TokenKind.Refresh, CodeChallenge = null, RedirectUri = null }, oauth.RefreshTokenLifetime);
 
         return Results.Json(new Dictionary<string, object>
         {
             ["access_token"] = access,
             ["token_type"] = "Bearer",
-            ["expires_in"] = (int)AccessTtl.TotalSeconds,
+            ["expires_in"] = (int)oauth.AccessTokenLifetime.TotalSeconds,
             ["refresh_token"] = refresh,
         });
     }
@@ -277,8 +276,12 @@ public static class OAuthEndpoints
         var apiKeyBlock = requireApiKey
             ? """
                 <label for="mcp-api-key">MCP server API key</label>
-                <input id="mcp-api-key" name="api_key" type="password"
-                       autocapitalize="none" spellcheck="false" required>
+                <div class="secret">
+                  <input id="mcp-api-key" name="api_key" type="password"
+                         autocapitalize="none" spellcheck="false" required>
+                  <button type="button" class="reveal" aria-controls="mcp-api-key" aria-pressed="false"
+                          data-what="API key" aria-label="Show API key">Show</button>
+                </div>
                 <p class="field-hint">Provided by whoever runs this MCP server (not your APCOA password).</p>
             """
             : "";
@@ -293,15 +296,28 @@ public static class OAuthEndpoints
             <link rel="icon" href="/icon-192.png" type="image/png" sizes="192x192">
             <link rel="apple-touch-icon" href="/apple-touch-icon.png">
             <style>
+              /* Service brand colours — the only per-service part of this page (framework guideline §5.2).
+                 APCOA Flow green from the official app icon (#79b52a). White text on it is only 2.5:1, so
+                 filled buttons use a dark ink (6.4:1) and brand-coloured text on light surfaces uses a
+                 darker shade (--brand-text, 5.5:1). */
+              :root{--brand:#79b52a;--brand-hover:#6aa023;--brand-ink:#14260a;--brand-text:#4a7516;
+                    --brand-tint:rgba(121,181,42,.12)}
               body{font-family:system-ui,sans-serif;background:#f4f5f7;margin:0;padding:2rem;color:#1a1a2e}
               .card{max-width:24rem;margin:3rem auto;background:#fff;border-radius:12px;padding:1.75rem;
                     box-shadow:0 2px 12px rgba(0,0,0,.08)}
               h1{font-size:1.2rem;margin:0 0 1rem} label{display:block;margin:.75rem 0 .25rem;font-size:.85rem;font-weight:600}
               input{width:100%;box-sizing:border-box;padding:.6rem;border:1px solid #cbd0d8;border-radius:8px;font-size:1rem;
                     background:#fff;color:#1a1a2e}
-              button{margin-top:1.25rem;width:100%;padding:.7rem;border:0;border-radius:8px;background:#2d6cdf;color:#fff;
-                     font-size:1rem;font-weight:600;cursor:pointer} button:hover{background:#245bc0}
+              button{margin-top:1.25rem;width:100%;padding:.7rem;border:0;border-radius:8px;background:var(--brand);
+                     color:var(--brand-ink);font-size:1rem;font-weight:600;cursor:pointer}
+              button:hover{background:var(--brand-hover)}
               button:disabled{opacity:.65;cursor:progress} input:read-only{opacity:.65}
+              .secret{position:relative} .secret input{padding-right:4.5rem}
+              button.reveal{position:absolute;right:.35rem;top:50%;transform:translateY(-50%);margin:0;width:auto;
+                            padding:.3rem .65rem;font-size:.78rem;font-weight:600;background:transparent;
+                            color:var(--brand-text);border-radius:6px}
+              button.reveal:hover{background:var(--brand-tint)}
+              button.reveal:focus-visible{outline:2px solid var(--brand);outline-offset:1px}
               .error{background:#fde8e8;color:#9b1c1c;padding:.6rem .75rem;border-radius:8px;font-size:.85rem}
               .field-hint{color:#667085;font-size:.72rem;margin:.3rem 0 0}
               .hint{color:#667085;font-size:.78rem;margin-top:1rem}
@@ -310,7 +326,7 @@ public static class OAuthEndpoints
                 .card{background:#1a1d27;box-shadow:0 2px 12px rgba(0,0,0,.4)}
                 input{background:#0f1117;color:#e6e8ee;border-color:#3a3f4b}
                 input::placeholder{color:#8b90a0}
-                button{background:#3b7bf0} button:hover{background:#5590f5}
+                :root{--brand:#79b52a;--brand-hover:#8cc63f;--brand-text:#9bd157;--brand-tint:rgba(121,181,42,.18)}
                 .error{background:#3a1b1d;color:#f3b4b4}
                 .field-hint,.hint{color:#9aa0b0}
               }
@@ -329,8 +345,12 @@ public static class OAuthEndpoints
                        autocomplete="username" autocapitalize="none" spellcheck="false" required>
 
                 <label for="apcoa_password">APCOA account password</label>
-                <input id="apcoa_password" name="apcoa_password" type="password"
-                       autocomplete="current-password" required>
+                <div class="secret">
+                  <input id="apcoa_password" name="apcoa_password" type="password"
+                         autocomplete="current-password" required>
+                  <button type="button" class="reveal" aria-controls="apcoa_password" aria-pressed="false"
+                          data-what="password" aria-label="Show password">Show</button>
+                </div>
             {{apiKeyBlock}}
                 <button id="submit" type="submit">Sign in</button>
               </form>
@@ -343,14 +363,31 @@ public static class OAuthEndpoints
               const form = document.getElementById('login');
               const button = document.getElementById('submit');
               const fields = form.querySelectorAll('input:not([type=hidden])');
+              const reveals = form.querySelectorAll('button.reveal');
+
+              // Show/Hide toggle on secret fields.
+              const setRevealed = (toggle, shown) => {
+                const input = document.getElementById(toggle.getAttribute('aria-controls'));
+                input.type = shown ? 'text' : 'password';
+                toggle.textContent = shown ? 'Hide' : 'Show';
+                toggle.setAttribute('aria-pressed', String(shown));
+                toggle.setAttribute('aria-label', (shown ? 'Hide ' : 'Show ') + toggle.dataset.what);
+              };
+              reveals.forEach(t => t.addEventListener('click', () => {
+                const input = document.getElementById(t.getAttribute('aria-controls'));
+                setRevealed(t, input.type === 'password');
+                input.focus();
+              }));
               const setBusy = busy => {
                 fields.forEach(f => f.readOnly = busy);
+                reveals.forEach(t => t.disabled = busy);
                 button.disabled = busy;
                 button.textContent = busy ? 'Signing in…' : 'Sign in';
                 form.setAttribute('aria-busy', String(busy));
               };
               form.addEventListener('submit', e => {
                 if (button.disabled) { e.preventDefault(); return; } // swallow double submits
+                reveals.forEach(t => setRevealed(t, false)); // never submit / cache secrets as plain text
                 setBusy(true);
               });
               // Back/forward cache restores the locked page — unlock it.

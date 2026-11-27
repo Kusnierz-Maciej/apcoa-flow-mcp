@@ -3,6 +3,7 @@ using ApcoaFlowMcp;
 using ApcoaFlowMcp.Apcoa;
 using ApcoaFlowMcp.Security;
 using ApcoaFlowMcp.Security.OAuth;
+using ApcoaFlowMcp.Prompts;
 using ApcoaFlowMcp.Tools;
 using Microsoft.AspNetCore.HttpOverrides;
 using Microsoft.Extensions.Options;
@@ -54,6 +55,8 @@ if (telemetry.Enabled)
             .AddSource("System.Net.Http")
             // App spans: parking index load/build/refresh, APCOA login; business tags on tool spans.
             .AddSource(ApcoaTelemetry.SourceName)
+            // "POST /mcp [tools/call find_parking]" instead of "POST /mcp/" (see McpSpanNames); before the exporter.
+            .AddProcessor(new McpSpanNames.Processor())
             .AddOtlpExporter(o =>
             {
                 if (otlpEndpoint is not null) o.Endpoint = otlpEndpoint;
@@ -74,7 +77,8 @@ if (telemetry.Enabled)
 
 builder.Services.AddHttpContextAccessor();
 builder.Services.AddTransient<IApcoaFlowCredentialProvider, HttpContextCredentialProvider>();
-builder.Services.AddApcoaFlowApiClient();
+builder.Services.AddApcoaFlowApiClient(
+    rateLimit: builder.Configuration.GetSection(ApcoaFlowRateLimitOptions.Section));
 builder.Services.AddApcoaParkingDataSource(builder.Configuration.GetSection("ParkingData"));
 builder.Services.AddApcoaParkingRefreshService();
 builder.Services.AddOptions<ApcoaFlowToolsOptions>()
@@ -91,6 +95,10 @@ builder.Services.AddOptions<SecurityOptions>()
     .ValidateOnStart();
 builder.Services.AddSingleton<IValidateOptions<SecurityOptions>, SecurityOptionsValidator>();
 builder.Services.AddSingleton<ApiKeyAllowlist>();
+builder.Services.AddOptions<OAuthOptions>()
+    .Bind(builder.Configuration.GetSection(OAuthOptions.Section))
+    .ValidateOnStart();
+builder.Services.AddSingleton<IValidateOptions<OAuthOptions>, OAuthOptionsValidator>();
 
 // Token encryption derives its key deterministically from Security:TokenSecret — nothing is
 // persisted to disk, so tokens survive restarts/replicas and the secret alone controls validity.
@@ -104,7 +112,10 @@ builder.Services
         options.ServerInstructions = McpInstructions.Text;
     })
     .WithHttpTransport()
-    .WithTools<ApcoaFlowTools>();
+    .WithApcoaFlowTools()
+    .WithApcoaFlowPrompts(builder.Configuration)
+    .WithMessageFilters(filters => filters.AddIncomingFilter(McpSpanNames.MessageFilter))
+    .WithRequestFilters(filters => filters.AddCallToolFilter(ClientContextFilter.Create));
 
 var app = builder.Build();
 
@@ -137,7 +148,9 @@ app.UseWhen(
     ctx => ctx.Request.Path.StartsWithSegments("/mcp"),
     branch =>
     {
-        branch.UseMiddleware<CredentialFailureMiddleware>();
+        // Names the request span after its MCP message ("POST /mcp [tools/call find_parking]"); outermost, so the
+        // name is set when the request finishes.
+        branch.Use(McpSpanNames.Middleware);
         branch.UseMiddleware<ApiKeyMiddleware>();
         branch.UseMiddleware<UserScopeMiddleware>();
     });
@@ -148,3 +161,6 @@ app.Logger.LogInformation("ApcoaFlowMcp v{Version} starting",
     typeof(Program).Assembly.GetName().Version?.ToString(3) ?? "unknown");
 
 app.Run();
+
+/// <summary>Visible to <c>WebApplicationFactory&lt;Program&gt;</c> in the in-memory OAuth flow tests.</summary>
+public partial class Program;

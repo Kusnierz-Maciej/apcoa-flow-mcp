@@ -10,9 +10,15 @@ namespace ApcoaFlowApiClient.Tests;
 /// lookup. Pure GETs — never starts, extends or stops a session. Opt-in via the "LiveApi" category.
 /// </summary>
 [Category("LiveApi")]
-[NotInParallel("LiveApi")]
+[NotInParallel(LiveApi.Serial)]
 public class LiveApiPublicEndpointTests
 {
+    [Before(HookType.Class)]
+    public static Task SweepBefore() => LiveApi.SweepOnceAtStartAsync();
+
+    [After(HookType.Class)]
+    public static Task SweepAfter() => LiveApi.EndActiveSessionsAsync("after-class");
+
     private static (IApcoaFlowApi Api, IApcoaParkingDataSource Data) BuildClients()
     {
         var config = new ConfigurationBuilder()

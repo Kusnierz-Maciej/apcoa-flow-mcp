@@ -23,6 +23,20 @@ Unofficial MCP server for [APCOA Flow](https://www.apcoa.pl/krotkotrwale-parkowa
 
 Cost, duration and distance are user-facing in PLN, minutes and metres respectively.
 
+**Prompts** — shortcuts you pick yourself (slash commands in Claude Code, the "+" menu in claude.ai); they
+never run on their own. The `plate` argument autocompletes from your registered cars and `parking` from the
+parkings of your recent sessions:
+
+| Prompt | Does |
+|---|---|
+| `park_free_here` | Free session at the closest parking to where you are (confirms first; never starts a paid one) |
+| `park_free_at` | Free session at a parking you name, e.g. one you used before (confirms first; never paid) |
+| `end_parking` | End the running session after confirming, and report the cost |
+| `parking_costs` | What parking cost this month (or another period), from the session history |
+
+They are defaults: if you have your own instructions or skills for APCOA parking, those should win (the prompt
+text asks the model to prefer them — a hint, not enforced). Turn prompts off with `Prompts__Enabled=false`.
+
 See [`docs/MCP-TOOLS.md`](docs/MCP-TOOLS.md) for the detailed tool reference (inputs + example outputs)
 and [`docs/API-NOTES.md`](docs/API-NOTES.md) for notes on the underlying APCOA Flow API.
 
@@ -34,7 +48,7 @@ The server runs in one of **two transport modes**, and HTTP mode offers **three 
 
 | Transport | How it's used | Auth methods | APCOA credentials come from |
 |---|---|---|---|
-| **HTTP** (default) | Remote server; clients connect to `…/mcp` over the network. Serve over **HTTPS** in production. | **1. OAuth 2.1** — client runs the login flow; **2. `X-Api-Key` + `Authorization: Basic`** headers | Per user: the OAuth login screen, or the `Basic` header |
+| **HTTP** (default) | Remote server; clients connect to `…/mcp` over the network. Serve over **HTTPS** in production. | **1. OAuth 2.1** (recommended) — client runs the login flow; **2. `X-Api-Key` + `Authorization: Basic`** headers (legacy) | Per user: the OAuth login screen, or the `Basic` header |
 | **stdio** (`--stdio`) | Client spawns the server as a local subprocess; MCP over stdin/stdout. | **3. none** — local process, no gate | A single account from `ApcoaFlow__Email` / `ApcoaFlow__Password` |
 
 The three auth methods:
@@ -46,9 +60,14 @@ The three auth methods:
    against APCOA at login and then stored only inside an encrypted, client-held session token — never on
    the server. Requires `Security__TokenSecret` (min 32 chars) — the key that secures those tokens;
    keep it stable, and note that **changing it invalidates every issued token**. Removing a key from
-   `Security__AllowedApiKeys` and restarting likewise ends every session created with it.
-2. **`X-Api-Key` + `Authorization: Basic`** *(HTTP)* — for clients that support custom headers. The
-   `X-Api-Key` must match a configured key; the `Basic` header carries `base64(email:password)`.
+   `Security__AllowedApiKeys` and restarting likewise ends every session created with it. Sessions
+   refresh silently; token lifetimes are settings (defaults: code 1 minute, access token 1 hour,
+   refresh token 365 days — the refresh lifetime is how long a client may stay idle before signing in
+   again): `OAuth__AuthorizationCodeLifetime` (≤ 10 minutes), `OAuth__AccessTokenLifetime`,
+   `OAuth__RefreshTokenLifetime` (≥ the access lifetime).
+2. **`X-Api-Key` + `Authorization: Basic`** *(HTTP, legacy)* — for clients that support custom headers. The
+   `X-Api-Key` must match a configured key; the `Basic` header carries `base64(email:password)`. Still
+   supported, but prefer OAuth: with headers your APCOA password sits in the client's config in plain text.
 3. **stdio config account** *(stdio only)* — no network, no gate; the single APCOA account is read from
    `ApcoaFlow__Email` / `ApcoaFlow__Password`. OAuth and `X-Api-Key` do not apply in stdio mode.
 
@@ -132,9 +151,10 @@ The server supports two connection styles — pick whichever your client support
 
 The client discovers the OAuth endpoints automatically and opens a **login screen** for the user's
 API key + APCOA email/password. The session is refreshed silently, so the user does not have to log in
-again unless their API key is removed or their APCOA password changes.
+again unless their API key is removed or their APCOA password changes. If the password changes, tool
+calls return a plain "reconnect this connector" error — disconnect and connect it again.
 
-**Header auth (for clients that support custom headers):**
+**Header auth (legacy — prefer OAuth; the password ends up in the client config):**
 
 ```json
 {
@@ -160,8 +180,8 @@ Multiple users can share one server instance, each passing their own credentials
 3. Under **Authentication**, choose:
    - **OAuth** (recommended) — you'll be taken to the login screen to enter your API key + APCOA
      email/password; or
-   - **No sign-in** + **Request headers** `X-Api-Key` and `Authorization: Basic <base64(email:password)>`
-     if you prefer the header style.
+   - (legacy) **No sign-in** + **Request headers** `X-Api-Key` and `Authorization: Basic <base64(email:password)>`
+     — works, but stores your APCOA password in the connector settings.
 4. Click **Add**
 
 The server must be publicly reachable from the internet and served over **HTTPS** (the session tokens
@@ -192,10 +212,17 @@ dotnet user-secrets --project src/ApcoaFlowMcp set "Security:AllowedApiKeys:0" "
 dotnet user-secrets --project src/ApcoaFlowMcp set "Security:TokenSecret" "dev-token-secret-at-least-32-chars-long"
 ```
 
-For local work the simplest path is the **header** style — pass an
-`Authorization: Basic base64(email:password)` header plus `X-Api-Key: dev-key`. To exercise the
-**OAuth** flow, point the [MCP Inspector](https://github.com/modelcontextprotocol/inspector) (or Claude Code) at
-`http://localhost:5200/mcp` and complete the login screen with `dev-key` + your APCOA email/password.
+Test it with the official [MCP Inspector](https://github.com/modelcontextprotocol/inspector)
+(`npx @modelcontextprotocol/inspector`, needs Node): transport **Streamable HTTP**, URL
+`http://localhost:5200/mcp`, **Connect** — the sign-in page opens; use `dev-key` + your APCOA account. Claude
+Code works the same way, or send the legacy headers (`X-Api-Key: dev-key` +
+`Authorization: Basic base64(email:password)`). For stdio:
+`npx @modelcontextprotocol/inspector -e ApcoaFlow__Email=… -e ApcoaFlow__Password=… dotnet run --project src/ApcoaFlowMcp -- --stdio`.
+The Inspector's CLI mode (scripted `tools/list --strict`, tool calls, prompts) is described in `CLAUDE.md`.
+
+To see exactly what goes over the wire, use the diagnostic sandbox — see `CLAUDE.md`
+(`dotnet run --project src/ApcoaFlow.Sandbox`). Only parking **616319** may be used for write tests: it has
+unlimited free start/stop; every other start can cost money.
 
 Claude Code config (`.mcp.json` in the project root or `~/.claude/mcp.json`):
 
@@ -236,6 +263,27 @@ Example client configuration:
 }
 ```
 
+## Settings
+
+Set in the compose file (or `.env` for secrets) using the `Section__Key` convention. Details below the table.
+
+| Setting | Default | |
+|---|---|---|
+| `Security__AllowedApiKeys__N` | — | MCP API keys (secret). At least one while keys are required. |
+| `Security__TokenSecret` | — | Required (secret). ≥ 32 chars, stable; secures OAuth tokens. |
+| `Security__RequireMcpApiKey` | `true` | `false` drops the API-key gate (APCOA email + password still required). |
+| `OAuth__AuthorizationCodeLifetime` / `__AccessTokenLifetime` / `__RefreshTokenLifetime` | `00:01:00` / `01:00:00` / `365.00:00:00` | Token lifetimes; the refresh lifetime is how long a client may stay idle before signing in again. |
+| `ApcoaFlow__MaxSessionCostPln` | `100` | Most a single `start_session` may cost; `start_expensive_session` bypasses it. |
+| `ApcoaFlow__CurrentLocationRadiusMeters` | `300` | Default radius for the `*_current_location` tools. |
+| `ApcoaFlow__Email` / `ApcoaFlow__Password` | — | stdio mode only (required there). |
+| `Prompts__Enabled` | `true` | `false` removes the MCP prompts (and their completions). |
+| `RateLimit__TokenLimit` / `RateLimit__ReplenishmentPeriod` | `10` / `00:00:01` | Client-side limit on APCOA calls: a burst, then one call per period (extra calls wait). Loosen at your own risk. |
+| `ParkingData__StorePath` | `./tmp/data/parking` (`/data/parking` in Docker) | Parking snapshot directory (bind-mount it). |
+| `ParkingData__SoftRefreshAge` / `__HardRefreshAge` / `__BackgroundRefreshInterval` | `12:00:00` / `48:00:00` / `24:00:00` | Parking dataset freshness. |
+| `ParkingData__GeohashPrecision` / `ParkingData__CompanyId` | `6` / `9` | Spatial bucket size; APCOA tenant for the dataset key. |
+| `Telemetry__Enabled` / `Telemetry__OtlpEndpoint` | `false` / `http://localhost:4317` | OpenTelemetry export of traces + logs — see [`docs/OPENTELEMETRY.md`](docs/OPENTELEMETRY.md). |
+| `Logging__…` | Information, single-line console | Standard ASP.NET Core logging settings. |
+
 ## Parking data
 
 `find_parking` searches an offline dataset, because APCOA has no live search API — the app downloads static, encrypted parking tiles from a public S3 bucket and searches them on-device. This server does the same: on first use it downloads and decrypts every country tile, builds an in-memory spatial index (~1 MB), and persists a compact snapshot to disk.
@@ -255,13 +303,28 @@ Freshness and indexing are tunable via `ParkingData__*` environment variables:
 - **ApcoaFlow__MaxSessionCostPln** — the most a single `start_session` may cost (PLN). A quote above this is refused; use `start_expensive_session` to bypass.
 - **ApcoaFlow__CurrentLocationRadiusMeters** — default search radius for `start_session_current_location` (the tool may override per call).
 
+## Prompts
+
+- **Prompts__Enabled** — `true` (default) advertises the MCP prompts above and their argument completions;
+  `false` removes them.
+
+## Rate limit
+
+Every call to APCOA (login included) goes through one client-side token bucket, so the server never
+hammers the backend and trips its 403 lockout. Calls over the limit wait rather than fail.
+
+- **RateLimit__TokenLimit** — burst size: calls allowed back to back (default `10`, 1–1000).
+- **RateLimit__ReplenishmentPeriod** — one more call is allowed per period once the burst is used
+  (default `00:00:01`, i.e. 1 call/s; must be > 0 and ≤ 1 minute). Loosen at your own risk.
+
 ## Running tests
 
 Tests use TUnit (run via Microsoft.Testing.Platform) and come in three kinds:
 
 - **Unit** (`ApcoaFlowMcp.Tests`) — the MCP session orchestration (`start_session` free/paid logic,
-  promo validation, already-active handling) against a fully mocked API, plus the startup settings
-  validators. No credentials, no network.
+  promo validation, already-active handling) against a fully mocked API, tool errors, annotations and
+  schemas, prompts, telemetry tags, the startup settings validators, and the whole OAuth flow against an
+  in-memory server. No credentials, no network.
 - **Offline** (`ApcoaFlowApiClient.Tests`, no `LiveApi` category) — the spatial index, the on-disk
   snapshot store, and the tariff/promotion/cost logic. No credentials, no network.
 - **Live** (`[Category("LiveApi")]`) — exercise the real APCOA Flow API to catch upstream changes.
@@ -286,6 +349,9 @@ dotnet user-secrets --project src/ApcoaFlowApiClient.Tests set "ApcoaFlow:Email"
 dotnet user-secrets --project src/ApcoaFlowApiClient.Tests set "ApcoaFlow:Password" "yourpassword"
 ```
 
+The tests and the diagnostic sandbox (`src/ApcoaFlow.Sandbox`) share the user-secrets id
+`apcoa-flow-api-tests`; the server's own secrets live under `apcoa-flow-mcp`.
+
 Or pass them as environment variables (these override user-secrets — handy for CI or a one-off run):
 
 ```bash
@@ -298,6 +364,20 @@ Run the live tests (needs credentials):
 ```bash
 dotnet test --project src/ApcoaFlowApiClient.Tests --treenode-filter '/**[Category=LiveApi]'
 ```
+
+**Live tests** are the contract check for the unofficial APCOA Flow API: every API behaviour the server
+relies on has one (mapped to the code in the table in
+[`docs/API-NOTES.md`](docs/API-NOTES.md#contracts-guarded-by-live-tests)). They run nightly in CI against the
+latest release, and an issue is opened (or updated) when they fail. They:
+
+- run **one at a time** (never in parallel) — one real account, one rate limit, a lockout if hammered;
+- start sessions only on parking **616319** (unlimited free start/stop) and end them right away;
+- end any session left ACTIVE once when the run starts (so a crashed or cancelled run is cleaned up by the
+  next one), after each test class, and after every session test;
+- make one wrong-password login per run (APCOA locks an account after 5 failed logins in 2 minutes).
+
+Pull requests run only the unit + offline tests — including the whole OAuth sign-in flow against an
+in-memory server with a mocked APCOA (`OAuthFlowTests`).
 
 Run a single live test class by name, e.g. the full session lifecycle:
 
