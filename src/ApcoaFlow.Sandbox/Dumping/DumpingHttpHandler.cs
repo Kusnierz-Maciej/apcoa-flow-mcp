@@ -8,7 +8,7 @@ namespace ApcoaFlow.Sandbox.Dumping;
 /// Innermost pipeline handler for the sandbox: dumps every PHYSICAL HTTP send — the fully
 /// decorated request (app headers + bearer) and the response — to a per-run <c>.http</c> file.
 /// Because it sits inside <c>ApcoaFlowAuthHandler</c>, it fires once per <c>base.SendAsync</c>,
-/// i.e. twice when the auth handler re-sends on 401/419, so a retry shows up as two files.
+/// i.e. twice when the auth handler re-sends after a refused token, so a retry shows up as two files.
 ///
 /// Bodies are buffered and restored so capturing them does not consume the stream the real
 /// send needs.

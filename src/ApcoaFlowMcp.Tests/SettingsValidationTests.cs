@@ -1,4 +1,3 @@
-using ApcoaFlowApiClient.ParkingData;
 using ApcoaFlowMcp.Apcoa;
 using ApcoaFlowMcp.Security;
 using Microsoft.Extensions.Options;
@@ -89,46 +88,6 @@ public class SettingsValidationTests
     [Arguments("https://otel.example.com:4318")]
     public async Task Telemetry_Enabled_WithAbsoluteHttpEndpoint_Succeeds(string endpoint) =>
         await Assert.That(Telemetry(true, endpoint).Succeeded).IsTrue();
-
-    // ─── ParkingData ───────────────────────────────────────────────────────────────────────────────
-
-    private static ValidateOptionsResult Parking(ParkingDataSourceOptions o) =>
-        new ParkingDataSourceOptionsValidator().Validate(Options.DefaultName, o);
-
-    [Test]
-    public async Task Parking_Defaults_AreValid()
-    {
-        await Assert.That(Parking(new()).Succeeded).IsTrue();
-        await Assert.That(Annotations(new ParkingDataSourceOptions()).Succeeded).IsTrue();
-    }
-
-    [Test]
-    public async Task Parking_SoftGreaterThanHard_Fails() =>
-        await Assert.That(Parking(new() { SoftRefreshAge = TimeSpan.FromHours(50), HardRefreshAge = TimeSpan.FromHours(48) })
-            .Failed).IsTrue();
-
-    [Test]
-    public async Task Parking_NonPositiveAge_Fails()
-    {
-        await Assert.That(Parking(new() { SoftRefreshAge = TimeSpan.Zero }).Failed).IsTrue();
-        await Assert.That(Parking(new() { HardRefreshAge = TimeSpan.FromHours(-1), SoftRefreshAge = TimeSpan.FromHours(-2) })
-            .Failed).IsTrue();
-        await Assert.That(Parking(new() { BackgroundRefreshInterval = TimeSpan.Zero }).Failed).IsTrue();
-    }
-
-    [Test]
-    [Arguments(0)]
-    [Arguments(13)]
-    [Arguments(99)]
-    public async Task Parking_GeohashPrecisionOutOfRange_Fails(int precision) =>
-        await Assert.That(Annotations(new ParkingDataSourceOptions { GeohashPrecision = precision }).Failed).IsTrue();
-
-    [Test]
-    public async Task Parking_BadStorePathOrCompanyId_Fails()
-    {
-        await Assert.That(Annotations(new ParkingDataSourceOptions { StorePath = "" }).Failed).IsTrue();
-        await Assert.That(Annotations(new ParkingDataSourceOptions { CompanyId = 0 }).Failed).IsTrue();
-    }
 
     // ─── ApcoaFlow tools ───────────────────────────────────────────────────────────────────────────
 

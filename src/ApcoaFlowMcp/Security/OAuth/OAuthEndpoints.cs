@@ -1,6 +1,6 @@
 using System.Net;
 using System.Text;
-using ApcoaFlowApiClient;
+using ApcoaFlowApiClient.Auth;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.Extensions.Options;
 
@@ -138,13 +138,14 @@ public static class OAuthEndpoints
         if (string.IsNullOrWhiteSpace(email) || string.IsNullOrWhiteSpace(password))
             return Fail("APCOA email and password are required.", StatusCodes.Status400BadRequest, "credentials");
 
-        var outcome = await loginValidator.ValidateAsync(email, password, ct);
+        var outcome = await loginValidator.ValidateAsync(new ApcoaFlowCredentials(email, password), ct);
         switch (outcome.Kind)
         {
-            case LoginOutcomeKind.BadCredentials:
+            case TokenGrantOutcomeKind.Rejected:
                 logger.LogInformation("OAuth authorize: APCOA credentials rejected.");
-                return Fail("APCOA rejected these credentials. Check your email and password.", StatusCodes.Status401Unauthorized, "credentials");
-            case LoginOutcomeKind.ApiError:
+                return Fail("APCOA rejected these credentials. Check your email and password (the e-mail must be " +
+                    "verified in the APCOA Flow app).", StatusCodes.Status401Unauthorized, "credentials");
+            case TokenGrantOutcomeKind.ApiError:
                 logger.LogWarning("OAuth authorize: APCOA API error during validation ({Detail}).", outcome.Detail);
                 return Fail("APCOA service is temporarily unavailable. Please try again.", StatusCodes.Status503ServiceUnavailable);
         }

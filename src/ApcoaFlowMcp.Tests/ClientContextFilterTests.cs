@@ -3,7 +3,6 @@ using System.Diagnostics;
 using System.Net.Http.Headers;
 using System.Text;
 using ApcoaFlowApiClient;
-using ApcoaFlowApiClient.ParkingData;
 using Microsoft.AspNetCore.Hosting;
 using Microsoft.AspNetCore.Mvc.Testing;
 using Microsoft.AspNetCore.TestHost;
@@ -40,18 +39,17 @@ public class ClientContextFilterTests
             web.UseSetting("Security:TokenSecret", "test-token-secret-at-least-32-chars-long");
             web.ConfigureTestServices(services =>
             {
-                services.AddTransient(_ => Fake.Api());
-                services.AddSingleton(Substitute.For<IApcoaParkingDataSource>());
+                services.AddTransient(_ => FakeApi.Create());
                 services.RemoveAll<IHostedService>();
             });
         });
 
-    /// <summary>Calls get_registered_cars with the given _meta JSON (and optional HTTP traceparent); returns the tools/call span.</summary>
+    /// <summary>Calls get_vehicles with the given _meta JSON (and optional HTTP traceparent); returns the tools/call span.</summary>
     /// <remarks><paramref name="metaJson"/> must contain a unique <c>"test.marker/&lt;guid&gt;"</c> key; it identifies the span.</remarks>
     private static async Task<Activity> CallAsync(HttpClient http, string marker, string metaJson, string? httpTraceparent = null,
         IDictionary<string, string>? headers = null)
     {
-        var body = "{\"jsonrpc\":\"2.0\",\"id\":1,\"method\":\"tools/call\",\"params\":{\"name\":\"get_registered_cars\",\"arguments\":{},\"_meta\":"
+        var body = "{\"jsonrpc\":\"2.0\",\"id\":1,\"method\":\"tools/call\",\"params\":{\"name\":\"get_vehicles\",\"arguments\":{},\"_meta\":"
                    + metaJson + "}}";
         var request = new HttpRequestMessage(HttpMethod.Post, "/mcp")
         {
@@ -140,7 +138,7 @@ public class ClientContextFilterTests
 
         var tool = await CallAsync(server.CreateClient(), marker, $$"""{"test.marker/{{marker}}":true}""");
 
-        await Assert.That((await HttpSpanOf(tool)).DisplayName).IsEqualTo("POST /mcp [tools/call get_registered_cars]");
+        await Assert.That((await HttpSpanOf(tool)).DisplayName).IsEqualTo("POST /mcp [tools/call get_vehicles]");
     }
 
     [Test]
@@ -159,11 +157,11 @@ public class ClientContextFilterTests
     public async Task SpanNameProcessor_ReappliesMcpName_AfterInstrumentationRenamed()
     {
         using var activity = new Activity("test").Start();
-        activity.SetCustomProperty("mcp.span_name", "POST /mcp [tools/call get_registered_cars]");
+        activity.SetCustomProperty("mcp.span_name", "POST /mcp [tools/call get_vehicles]");
         activity.DisplayName = "POST /mcp/";   // what the OTel ASP.NET Core instrumentation sets on stop
 
         new McpSpanNames.Processor().OnEnd(activity);
 
-        await Assert.That(activity.DisplayName).IsEqualTo("POST /mcp [tools/call get_registered_cars]");
+        await Assert.That(activity.DisplayName).IsEqualTo("POST /mcp [tools/call get_vehicles]");
     }
 }

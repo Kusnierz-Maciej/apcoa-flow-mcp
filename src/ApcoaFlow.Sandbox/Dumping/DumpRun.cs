@@ -7,7 +7,7 @@ namespace ApcoaFlow.Sandbox.Dumping;
 /// a monotonically increasing exchange sequence counter (so concurrent HTTP sends get distinct,
 /// ordered filenames), and a free-form run log you can write diagnostic notes to.
 ///
-/// FULL FIDELITY: dumps include live bearer tokens and the static X-ApiKey, unredacted. The
+/// FULL FIDELITY: dumps include live bearer and refresh tokens and the login form, unredacted. The
 /// <c>out/</c> tree is gitignored and stays local — this is a private diagnostic tool.
 /// </summary>
 public sealed class DumpRun

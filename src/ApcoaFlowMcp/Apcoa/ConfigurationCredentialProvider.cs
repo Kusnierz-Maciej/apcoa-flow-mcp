@@ -1,4 +1,4 @@
-using ApcoaFlowApiClient;
+using ApcoaFlowApiClient.Auth;
 using Microsoft.Extensions.Options;
 
 namespace ApcoaFlowMcp.Apcoa;
@@ -9,9 +9,5 @@ namespace ApcoaFlowMcp.Apcoa;
 /// </summary>
 public class ConfigurationCredentialProvider(IOptions<StdioCredentialsOptions> options) : IApcoaFlowCredentialProvider
 {
-    public ApcoaFlowClientOptions GetCredentials() => new()
-    {
-        Email = options.Value.Email!,
-        Password = options.Value.Password!,
-    };
+    public ApcoaFlowCredentials GetCredentials() => new(options.Value.Email!, options.Value.Password!);
 }

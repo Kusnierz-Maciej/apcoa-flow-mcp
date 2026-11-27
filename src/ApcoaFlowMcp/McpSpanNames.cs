@@ -8,7 +8,7 @@ namespace ApcoaFlowMcp;
 
 /// <summary>
 /// Names the HTTP request span of each <c>/mcp</c> request after the MCP message it carries — e.g.
-/// <c>POST /mcp [tools/call find_parking]</c> instead of <c>POST /mcp/</c> for every request — so trace lists are readable.
+/// <c>POST /mcp [tools/call get_vehicles]</c> instead of <c>POST /mcp/</c> for every request — so trace lists are readable.
 /// Source, in order of preference:
 /// <list type="number">
 /// <item>the <c>Mcp-Method</c> / <c>Mcp-Name</c> HTTP headers (2026-07-28 Streamable HTTP revision) — read in
@@ -28,7 +28,7 @@ public static class McpSpanNames
     private const string PropertyKey = "mcp.span_name";
 
     /// <summary>
-    /// <c>POST /mcp [tools/call find_parking]</c>; without a target <c>POST /mcp [tools/list]</c>. The bracketed part equals
+    /// <c>POST /mcp [tools/call get_vehicles]</c>; without a target <c>POST /mcp [tools/list]</c>. The bracketed part equals
     /// the MCP SDK's own span name for the message, so one search matches both spans.
     /// </summary>
     public static string Format(HttpRequest request, string mcpMethod, string? target) =>

@@ -3,13 +3,12 @@ using System.Diagnostics;
 namespace ApcoaFlowApiClient;
 
 /// <summary>
-/// App-specific tracing: one <see cref="ActivitySource"/> plus helpers that tag/mark the current span.
-/// Everything is null-safe — with no listener (telemetry off) <see cref="ActivitySource.StartActivity(string, ActivityKind)"/>
-/// returns null and <see cref="Activity.Current"/> carries no recorded span, so each call is a cheap no-op.
+/// App tracing: one <see cref="ActivitySource"/> plus null-safe helpers that tag or mark the current span. With no
+/// listener (telemetry off) every call is a cheap no-op. Tag names follow the API's naming (space, vehicle, session).
 /// </summary>
 public static class ApcoaTelemetry
 {
-    /// <summary>ActivitySource name — subscribe with <c>tracing.AddSource(ApcoaTelemetry.SourceName)</c>.</summary>
+    /// <summary>Subscribe with <c>tracing.AddSource(ApcoaTelemetry.SourceName)</c>.</summary>
     public const string SourceName = "ApcoaFlow";
 
     public static readonly ActivitySource Source = new(SourceName);
@@ -18,47 +17,22 @@ public static class ApcoaTelemetry
     public static class Tags
     {
         public const string UserEmail = "user.email";
-        public const string ParkingId = "apcoa.parking.id";
-        public const string ParkingName = "apcoa.parking.name";
-        public const string LotId = "apcoa.lot.id";
-        public const string TariffId = "apcoa.tariff.id";
-        public const string Plate = "apcoa.plate";
-        public const string StartMode = "apcoa.start.mode";
-        public const string BypassCap = "apcoa.start.bypass_cap";
-        public const string DurationMinutes = "apcoa.duration_min";
-        public const string CostPln = "apcoa.cost_pln";
-        public const string ConfirmedCostPln = "apcoa.confirmed_cost_pln";
-        public const string Promotion = "apcoa.promotion";
-        public const string SessionId = "apcoa.session.id";
-        public const string DistanceMeters = "apcoa.distance_m";
-        public const string RadiusMeters = "apcoa.radius_m";
-        public const string NameFilter = "apcoa.name_filter";
-        public const string ResultsCount = "apcoa.results.count";
-        public const string ParkingIds = "apcoa.parking.ids";
-        public const string Plates = "apcoa.plates";
-        public const string SessionIds = "apcoa.session.ids";
+        public const string Outcome = "apcoa.outcome";
         public const string ClientName = "apcoa.client.name";
         public const string ClientVersion = "apcoa.client.version";
         public const string ClientTraceContext = "apcoa.client.trace_context";
         public const string ClientMetaKeys = "apcoa.client.meta_keys";
-        public const string Outcome = "apcoa.outcome";
-        public const string IndexEntries = "apcoa.parking_index.entries";
-        public const string IndexSource = "apcoa.parking_index.source";
-        public const string IndexTiles = "apcoa.parking_index.tiles";
-        public const string IndexFailedTiles = "apcoa.parking_index.failed_tiles";
+        public const string ResultsCount = "apcoa.results.count";
+        public const string LicensePlates = "apcoa.license_plates";
     }
 
-    /// <summary>Longest list attribute we record (ids/plates); the matching count tag carries the full size.</summary>
+    /// <summary>Longest list attribute we record (ids, plates); a count tag carries the full size.</summary>
     public const int MaxListedValues = 20;
 
     /// <summary>A capped string-array attribute value (first <see cref="MaxListedValues"/> entries).</summary>
     public static string[] Capped(IEnumerable<string> values) => values.Take(MaxListedValues).ToArray();
 
-    /// <summary>
-    /// Starts a child span for one phase of a tool (resolve lot, quote, start, stop…) so a trace shows where time
-    /// goes and which backend calls belong together. Dispose to end it. Null (free) when telemetry is off.
-    /// While a phase is open it is <see cref="Activity.Current"/>, so set tool-level tags outside it.
-    /// </summary>
+    /// <summary>A child span for one phase of a tool (search, quote, start…). Dispose to end it.</summary>
     public static Activity? Phase(string name, params (string Key, object? Value)[] tags)
     {
         var activity = Source.StartActivity(name);
@@ -73,10 +47,7 @@ public static class ApcoaTelemetry
     /// <summary>Records a business outcome on the current span (e.g. "started", "quote", "refused").</summary>
     public static void Outcome(string outcome) => Tag(Tags.Outcome, outcome);
 
-    /// <summary>
-    /// Marks the current span as failed for a handled, non-exception failure (refused start, cost cap,
-    /// credentials rejected…) so Grafana's "Errors" filter and TraceQL <c>{ status = error }</c> find it.
-    /// </summary>
+    /// <summary>Marks the current span failed for a handled failure, with an outcome tag.</summary>
     public static void Fail(string outcome, string description)
     {
         var activity = Activity.Current;

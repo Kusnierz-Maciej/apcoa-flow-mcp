@@ -2,21 +2,9 @@ namespace ApcoaFlowMcp;
 
 public static class McpInstructions
 {
+    /// <summary>Server instructions for the model; rewritten with the tools (port plan M2).</summary>
     public const string Text =
         """
-        APCOA Flow parking sessions. Typical flow: find_parking → start_session → end_session.
-        - Only one session can be active per account. You do not need to check first: if one is already
-          running, start_session refuses and reports the existing session (here or elsewhere) with the
-          end_session id and time remaining, so the user can keep it or end it. Use get_active_sessions
-          to inspect running sessions on demand.
-        - Always confirm parking and license plate with the user before starting a session.
-        - Use get_session_history to look up past sessions (it returns only the most recent ones).
-        - Pass the parking's name (parkingName) with every tool that takes a parking or session id, so the
-          permission prompt shows which parking it is.
-        - Free-only tools (start_free_session*) never charge. Use start_expensive_session only when the user
-          explicitly accepts a cost above the limit.
-        - Not supported: extending or changing a running session, booking ahead, favourites, adding cars or
-          payment methods, EV charging, permits/passes, receipts or invoices. Say so instead of searching for
-          another tool.
+        APCOA Flow parking: find parking spaces and start, check and end parking sessions.
         """;
 }

@@ -5,15 +5,9 @@ public static class ScenarioRegistry
 {
     public static readonly IReadOnlyList<IScenario> All =
     [
-        new DumpSessionsScenario(),
-        new InvestigateCarrefourScenario(),
-        new InvestigateAldiScenario(),
-        new StartFreeAldiScenario(),
-        new CaptureCarrefourPaidStartScenario(),
-        new DumpTariffScenario(),
-        new LoginProbeScenario(),
-        new ProbeSilentSuccessesScenario(),
-        new ToolsSmokeScenario(),
+        new LoginScenario(),
+        new AccountScenario(),
+        new FindSpacesScenario(),
     ];
 
     public static IScenario? Find(string name) =>

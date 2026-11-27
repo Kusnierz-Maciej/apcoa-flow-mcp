@@ -1,9 +1,10 @@
 using ApcoaFlowApiClient;
+using ApcoaFlowApiClient.Auth;
+using ApcoaFlowApiClient.Http;
 using ApcoaFlowMcp;
 using ApcoaFlowMcp.Apcoa;
 using ApcoaFlowMcp.Security;
 using ApcoaFlowMcp.Security.OAuth;
-using ApcoaFlowMcp.Prompts;
 using ApcoaFlowMcp.Tools;
 using Microsoft.AspNetCore.HttpOverrides;
 using Microsoft.Extensions.Options;
@@ -36,7 +37,7 @@ if (telemetry.Enabled)
     TelemetryOptionsValidator.IsValidEndpoint(telemetry.OtlpEndpoint, out var otlpEndpoint);
 
     // Keep query strings in HttpClient span URLs (url.full) — .NET redacts them by default. They carry
-    // ids, the plate and tariff parameters that make APCOA calls debuggable. No secrets travel in query
+    // ids, the plate and price parameters that make APCOA calls debuggable. No secrets travel in query
     // strings (credentials are in the login body, tokens in headers). Process-wide; telemetry-only.
     AppContext.SetSwitch("System.Net.Http.DisableUriRedaction", true);
 
@@ -49,13 +50,13 @@ if (telemetry.Enabled)
                 o.RecordException = true;
                 o.Filter = ctx => !TelemetryNoise.IsNoise(ctx.Request.Path);
             })
-            // MCP SDK spans: one per JSON-RPC request, e.g. "tools/call find_parking" (tag gen_ai.tool.name).
+            // MCP SDK spans: one per JSON-RPC request, e.g. "tools/call get_vehicles" (tag gen_ai.tool.name).
             .AddSource("Experimental.ModelContextProtocol")
-            // .NET built-in HttpClient spans: outbound APCOA API + S3 calls.
+            // .NET built-in HttpClient spans: outbound APCOA Flow API calls.
             .AddSource("System.Net.Http")
-            // App spans: parking index load/build/refresh, APCOA login; business tags on tool spans.
+            // App spans: APCOA login and token refresh; business tags on tool spans.
             .AddSource(ApcoaTelemetry.SourceName)
-            // "POST /mcp [tools/call find_parking]" instead of "POST /mcp/" (see McpSpanNames); before the exporter.
+            // "POST /mcp [tools/call get_vehicles]" instead of "POST /mcp/" (see McpSpanNames); before the exporter.
             .AddProcessor(new McpSpanNames.Processor())
             .AddOtlpExporter(o =>
             {
@@ -79,13 +80,10 @@ builder.Services.AddHttpContextAccessor();
 builder.Services.AddTransient<IApcoaFlowCredentialProvider, HttpContextCredentialProvider>();
 builder.Services.AddApcoaFlowApiClient(
     rateLimit: builder.Configuration.GetSection(ApcoaFlowRateLimitOptions.Section));
-builder.Services.AddApcoaParkingDataSource(builder.Configuration.GetSection("ParkingData"));
-builder.Services.AddApcoaParkingRefreshService();
 builder.Services.AddOptions<ApcoaFlowToolsOptions>()
     .Bind(builder.Configuration.GetSection("ApcoaFlow"))
     .ValidateDataAnnotations()
     .ValidateOnStart();
-builder.Services.AddScoped<ApcoaFlowSessionService>();
 
 // OAuth authorization: API-key allowlist + encrypted stateless tokens carrying the APCOA credentials.
 // SecurityOptionsValidator fails startup on a missing/placeholder/short TokenSecret or an empty
@@ -113,7 +111,6 @@ builder.Services
     })
     .WithHttpTransport()
     .WithApcoaFlowTools()
-    .WithApcoaFlowPrompts(builder.Configuration)
     .WithMessageFilters(filters => filters.AddIncomingFilter(McpSpanNames.MessageFilter))
     .WithRequestFilters(filters => filters.AddCallToolFilter(ClientContextFilter.Create));
 
@@ -148,7 +145,7 @@ app.UseWhen(
     ctx => ctx.Request.Path.StartsWithSegments("/mcp"),
     branch =>
     {
-        // Names the request span after its MCP message ("POST /mcp [tools/call find_parking]"); outermost, so the
+        // Names the request span after its MCP message ("POST /mcp [tools/call get_vehicles]"); outermost, so the
         // name is set when the request finishes.
         branch.Use(McpSpanNames.Middleware);
         branch.UseMiddleware<ApiKeyMiddleware>();

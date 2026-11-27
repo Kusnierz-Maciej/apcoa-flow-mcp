@@ -3,19 +3,19 @@ using ApcoaFlow.Sandbox.Dumping;
 using ApcoaFlow.Sandbox.Scenarios;
 
 // ─────────────────────────────────────────────────────────────────────────────────────────────
-// ApcoaFlow.Sandbox — a private, local-only harness for driving the APCOA Flow API / MCP with
+// ApcoaFlow.Sandbox — a private, local-only harness for driving the APCOA Flow API with
 // FULL request/response dumping, for diagnosis. Not shipped, not a test project.
 //
 // Usage:
-//   dotnet run --project src/ApcoaFlow.Sandbox                 → list scenarios
-//   dotnet run --project src/ApcoaFlow.Sandbox -- dump-sessions → run a scenario
+//   dotnet run --project src/ApcoaFlow.Sandbox                  → list scenarios
+//   dotnet run --project src/ApcoaFlow.Sandbox -- account         → run a scenario
 //
 // Every run writes to src/ApcoaFlow.Sandbox/out/<UTC-timestamp>/ : one NNNN_*.http file per HTTP
 // exchange (full headers + body, request and response) plus run.log and meta.txt.
 //
-// SAFETY: starting / extending / stopping sessions is BILLABLE and the test account is limited.
-// Keep casual probing read-only. Parking 616319 (lot 41905, tariff 108014) is the only target
-// with unlimited free start/stop — use it for any write test.
+// SAFETY: starting / extending / stopping sessions can be BILLABLE. Keep casual probing read-only.
+// Write only on a space with a dated PLN 0.00 quote (docs/API-NOTES.md "Test spaces": Ostrów outside
+// Sat 06–15, a Biedronka inside its free window), and only with the user's OK.
 // ─────────────────────────────────────────────────────────────────────────────────────────────
 
 var scenarioName = args.FirstOrDefault();

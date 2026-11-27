@@ -1,330 +1,165 @@
-# APCOA Flow API Notes
+# APCOA Flow API notes
 
-Captured from iOS app traffic (APCOA FLOW 6.85.2 / Alamofire 5.10.2) on 2026-11-23.
-Base host: `api.apcoaflow.com`
+The unofficial API this server uses, as the APCOA Flow app 26.12.1 (web app `https://app.apcoaflow.com` and the
+mobile apps) talks to it. Everything here was observed on the wire; dates say when. The client is
+`src/ApcoaFlowApiClient`; the sandbox (`src/ApcoaFlow.Sandbox`, see `CLAUDE.md`) re-checks any of it in one command.
 
-**Last verified against the live API: 2026-11-27** (sandbox `login-probe`, `probe-silent-successes`; live
-contract tests green).
+## Hosts
 
----
+| Host | Role |
+|---|---|
+| `https://api.nucleus.apcoaflow.com` | The REST API, everything under `/api/v1/…`. ASP.NET Core behind Azure Front Door and Cloudflare; `x-trace-id` response header. |
+| `https://auth.prd.nucleus.valuespaces.io` | The OAuth server (OpenIddict): `/connect/token` for sign-in and token refresh. |
 
-## Auth
+Headers the app sends on every API call, and so does the client: `Authorization: Bearer <access token>`,
+`x-user-agent: Flow 26.12.1 (Web)`, `Accept-Language: en`, `X-Timezone-Offset: <minutes>` (60 in Polish
+winter). `sessions/startParking` also carries `idempotency-key: <uuid>`.
 
-- Login: `POST /authentication/v2/consumer/login` — JSON body with `email`, `password`, `locationCode` (ISO country, e.g. "PL"), `failedResponseRequired: true`.
-- Response field is `authToken` (NOT `accessToken`) — this is the bearer token.
-- Also returns `refreshToken` (separate long-lived token), `ttl` in ms (observed: 7776000000 = 90 days), `userId`.
-- Logout: `POST /authentication/v1/consumer/logout` — form-urlencoded body with `refreshToken`.
-- All consumer endpoints require `Authorization: Bearer <authToken>`.
-- Token is attached by `ApcoaFlowAuthHandler`.
-- **Rejected login = HTTP 200** (observed 2026-11-27): a wrong password or an unknown email returns 200 with
-  `failedLogin: true`, no `authToken`, and `failedLoginResponse`
-  `{"maxLoginAttemptsAllowed":5,"timeGapInLoginInMinutes":2,"totalAttempts":N,…}` — APCOA's lockout policy
-  (5 failed attempts per 2 minutes). `ApcoaFlowLogin.Classify` reads the flag; 401/403/422 are also treated
-  as bad credentials, 419/5xx/transport as API errors.
-- **Invalid or expired bearer → HTTP 419** `{"message":"Invalid or Expired Token","statusCode":419}`
-  (observed 2026-11-27). The auth handler re-logs in once on 401/419; a second rejection means the
-  credentials themselves no longer work.
+## Sign-in
 
----
+- **Password grant** (2026-11-27): `POST {auth}/connect/token`, form `grant_type=password`, `username` = the
+  account e-mail (what this server uses) or the phone number in E.164 (`+48…`), `password`,
+  `client_id=flownextapp.prd.nucleus.valuespaces.io`, `scope=offline_access`. No client secret, no bot check on
+  this path. → `200 {access_token, token_type: "Bearer", expires_in: 3600, refresh_token}`.
+  - Slow: a flat **~7.2 s** server-side. **The first sign-in of a new account took 71 s**, so the client keeps the
+    default 100 s timeout.
+  - Wrong e-mail or password: `400 {"error":"invalid_grant","error_description":"The username/password couple is invalid."}`.
+  - E-mail sign-in was only seen on accounts whose e-mail is verified (`users/profile` → `email.status: "approved"`,
+    `loginMethods` includes `email`).
+- **Refresh grant**: same endpoint, `grant_type=refresh_token&refresh_token=…&client_id=…` → ~0.15 s, a new 1 h
+  access token and a **rotated** refresh token; the old refresh token was still accepted right after. Its lifetime
+  is unknown, so the client signs in again whenever a refresh fails.
+- **Access token**: RS256 JWT (`typ at+jwt`), 1 h. The refresh token is encrypted (opaque).
+- **No or invalid token on the API**: `403 {"code":"Unauthenticated","message":"An error has occurred."}` (not 401).
+  What an *expired* token returns hasn't been seen yet; the client treats 401 the same way.
+
+## Errors
+
+Business errors are `{"code": "...", "message": "..."}`; validation errors are ASP.NET ProblemDetails
+(`{type, title, status, errors}`).
+
+| Code | Status | When |
+|---|---|---|
+| `Unauthenticated` | 403 | No or invalid bearer token. |
+| `ParkingSessionInvalidArgument` | 400 | A second start for a plate that has a running session ("The session for the same license plate has already been started."); extending a stopped session ("Only planned or active sessions can be extended."). |
+| `SessionNotFound` | 404 | Stopping an unknown session id; `sessionsHistory/{id}` of a running post-pay session. |
+| `NotFound` | 404 | Generic (e.g. `users/features/{id}` with an unknown id). |
+
+## Account
+
+- `GET /api/v1/users/profile` → `{userId, firstName, lastName, phoneNumber, email: {address, status} | null,
+  loginMethods, preferredLanguage, isMarketingOptIn, isTelematicsOptIn, termsToAccept: [{termsId, title,
+  description, versionId, language, content, required, category}]}`.
+- `GET /api/v1/vehicles` → `[{id, countryCode, licensePlate, description, isDefault, isAnprAutoPaymentEnabled,
+  validUntil, companyName, …}]`. `id` is the `licensePlateId` that prices and starts take. **Plates come without
+  spaces** (`"ABC12345"`); `description` is the user's own label.
+- `GET /api/v1/paymentMethods[?spaceId=]` → `[{id, type, identifier: "****4412", expiration, status, isDefault, psp:
+  "stripe", flow, requiredAction, availability}]`. `flow: "saved"` methods are charged without any interaction;
+  there's also a pseudo-method `{id: "hosted-checkout", type: "unknown", flow: "hostedCheckout"}` (an interactive
+  payment page). With `spaceId`, only what that space accepts.
+
+## Spaces
+
+Parking places are **spaces**, with GUID ids. There's no offline dataset: the app finds spaces with these calls.
+
+- `GET /api/v1/search?query&latitude&longitude&size&isParking&isCharging` → `{spaces, chargers, places}`.
+  - Space hits: `{id, name, tariffCode, coordinates: {latitude, longitude}, address: {displayValue}, distance,
+    parkingIconUrl, countryCode, isUserCountry}`. `tariffCode` is the space's **location code** (what users type);
+    searching for it returns exactly that space.
+  - With a position: nearest first, `distance` in **km**; 20 hits by default, `size=50` gave 30 (2026-11-27).
+  - Without a position: arbitrary order, and the same names came back with **different ids** than with a position
+    (which of them quotes is still to check).
+  - `places` are geocoded streets/towns, not spaces.
+- `GET /api/v1/spaces/getByBoundingBox?NELatitude&NELongitude&SWLatitude&SWLongitude&Zoom` → map pins `[{id, name,
+  coordinates, parkingType: "startStop" | "anpr", chargingType, mapPinImage, geoBorder, isMunicipality}]`
+  (`[]` for an empty view, 500 without parameters).
+  - **`geoBorder`** is the space's outline, when it has one (78 of 525 Polish spaces, 2026-11-27):
+    `{coordinates: [{latitude, longitude}, …], color: null}`, a closed ring (last point = first). Only these pins
+    carry it; search hits and space details don't.
+- `GET /api/v1/spaces/{spaceId}` → `{id, name, tariffCode, maxDuration, defaultLengthOfStayInMinutes, coordinates,
+  address, parkingOverview: [{title, imageUrl}], sessionsStartAutomatically, prices: [{sectionName, prices: [{label,
+  price}], description}], allowedPSPs, hasLengthOfStayPreset, ctaButtonType: "startParking", isMunicipality,
+  countryCode, disclaimer, …}`. `prices` is the readable tariff table, not a quote. Biedronka spaces:
+  `defaultLengthOfStayInMinutes: 90` (= their free window) and `maxDuration: 43200` (unit to confirm).
+
+## Prices
+
+Amounts are strings: `"PLN 5.00"` (currency, space, invariant decimal).
+
+- **Quote a start**: `GET /api/v1/prices?SpaceId&LicensePlateId&Duration&StartDate` (what the app sends; `StartDate`
+  UTC with milliseconds). **`Duration` is in seconds.** → `{priceItems, priceDetailItems, totalPrice,
+  promocode, priceRequestIdentifier, startDate, endDate, requiresPrepayment, prepaymentMode: "autoCharge" | "none",
+  prepaymentMethod: {paymentMethodId, maskedIdentifier, flow}, hostedCheckoutAllowed, …}`.
+  - The quote already includes whatever the space gives this plate: Biedronka's free 1.5 h (once per 4 h per space)
+    shows as PLN 0.00 for up to 90 min and as the full price once used. Quotes right after a session can lag for a
+    minute.
+  - A 1-minute quote usually costs the same as 15 minutes (minimum charge).
+- **Quote an extension**: `GET /api/v1/prices/updatedPrice?sessionId&duration` (seconds to add) → the same shape,
+  with the new `endDate`.
+
+## Sessions
+
+- **Start**: `POST /api/v1/sessions/startParking {spaceId, licensePlateId, startDate, endDate, paymentMethodId,
+  paymentChoice: null, extendedSessionId: null, promoCode: null, priceRequestIdentifier: null, tariffPeriodId: null,
+  companyBillingAddressId: null, isPreBooked: false}` + `idempotency-key` → `200 {id, status: null, pendingId: null,
+  clientSecret: null, prepaymentMode: null, publishableKey: null}`: running at once (free, pre-pay and post-pay
+  starts with a saved card alike, 2026-11-27). `paymentMethodId` is needed even for a free start (the app sends the
+  default method). A `pendingId` / `clientSecret` would mean the payment needs an interactive step.
+- **Running sessions**: `GET /api/v1/sessions` → `[{id, type: "Parking", status: "active", startDate, endDate,
+  sessionCanBeStopped, sessionCanBeExtended, space: {id, name, tariffCode, countryCode, …}, vehicle: {id,
+  licensePlate, …}, details: [{title: "Total", subTitle: "0", footer: "PLN"}], extensionType: "flexible", promoCode,
+  canApplyPromoCode, paymentFlow: "prePay" | "postPay"}]`; `[]` when none. There is no `GET sessions/{id}` (404).
+- **Extend**: `POST /api/v1/sessions/updateParkingDuration {sessionId, newEnd, paymentMethodId, promoCode}` → 200,
+  empty body; the same session continues with the new end.
+- **Stop**: `POST /api/v1/sessions/stopParking/{id}` → **204**. Stopping it again is 204 too (silent); an unknown id
+  is `404 SessionNotFound`.
+- A post-pay session stopped after 19 s was billed PLN 0.00 although the quote said PLN 1.00 (a short grace period,
+  not shown anywhere; length unknown).
+
+## History
+
+- `GET /api/v1/sessionsHistory?page=1&size=8` → newest first, `[{id, spaceName, type: "parking", endDate,
+  totalPrice, paymentStatus: "paid", licensePlate, state: "billed", subType, permitDeduction}]`.
+- `GET /api/v1/sessionsHistory/{id}` → `{id, type, spaceName, spaceId, tariffCode, receiptUrls, paymentMethod:
+  {paymentId, type, identifier}, startDate, endDate, status, licensePlate, priceItems, totalPrice, promoCode,
+  isReceiptManagedExternally, receiptType, isSessionActive, state: "active" | "billed", userOwesNothing}`.
+  - Works for a running pre-pay session (`isSessionActive: true`); a running **post-pay** one is `404 SessionNotFound`.
+  - `endDate` is the real stop time for post-pay, but stays the **planned** end for pre-pay even after an early stop.
+
+## Test spaces
+
+Write tests (start / extend / stop) only where a **dated** quote for the test car says PLN 0.00 right before the
+start, and end the session within minutes.
+
+| Space | Id | Location code | Free when |
+|---|---|---|---|
+| Targowiska Miejskie Ostrów Wlkp. III, ul. Grabowska 29a, Ostrów Wielkopolski | `c9a52a81-3c6f-4ddc-9879-21a9ad0e4cc8` | `22941` | Always, **except Saturday 06:00–15:00** (Europe/Warsaw). Pre-pay. |
+| Any "Biedronka" space (find with `search?query=Biedronka`) | — | — | The first 1.5 h, **once per 4 h per space**: rotate between several. Pre-pay. |
 
 ## Contracts guarded by live tests
 
-Each APCOA behaviour the code depends on has a `[Category("LiveApi")]` test, run nightly against the
-latest release by *Verify APCOA Flow API contract compatibility*. Live test classes are
-`[NotInParallel(LiveApi.Serial)]`; sessions left ACTIVE are ended once when the run starts (crash
-recovery), after each class, and after every session test. Sessions are only ever started on parking
-**616319**.
+Every API behaviour the server relies on has a live test (`[Category("LiveApi")]` in `src/ApcoaFlowApiClient.Tests`,
+run nightly). When code starts depending on a new behaviour, check it with the sandbox, add the test, and add a row
+here.
 
-| Contract | Code that relies on it | Test |
-|---|---|---|
-| Login → `authToken`, consumer profile with vehicles + payment methods | auth handler, OAuth sign-in, `start_*`, `get_registered_cars` | `Login_ValidCredentials_IsOk_WithToken`, `Login_And_GetConsumer_Succeeds` |
-| Wrong password → 200 + `failedLogin`, no token; unknown email likewise | `ApcoaFlowLogin.Classify`, OAuth sign-in error | `Login_WrongPassword_Is200_…`, `Login_UnknownEmail_IsBadCredentials` |
-| Invalid bearer → 419 | re-login in `ApcoaFlowAuthHandler` | `InvalidBearerToken_Is419` |
-| App config, `parkingLots`, parking detail are public (419 if a bearer is sent) | `NoAuth` sentinel, parking index, lot/tariff resolution | `AppConfig_IsPublic_…`, `PublicParkingEndpoints_SucceedWithoutBearer` |
-| Offline S3 tiles decrypt with the app-config key and index near a coordinate | `find_parking`, `*_current_location` | `PublicParkingEndpoints_SucceedWithoutBearer` |
-| Free quote → start → ACTIVE list → extend → stop → COMPLETED with amount 0 | `start_*`, `get_active_sessions`, `end_session`, `get_session_history` | `FreeSession_Discover_Start_List_Extend_End_Lifecycle` |
-| Second start while one is active → 424 `LIMIT_EXCEEDED` / 5012 | already-active handling in `start_*` | `DuplicateSession_AtSameParking_LogsApiResponse` |
-| Right after a stop, a new start can briefly still get 424 although nothing is listed ACTIVE (slot release lag, observed 2026-11-27) | live tests only (`LiveApi.StartWhenSlotFreeAsync` retries); the server reports it as "no active session was found, try again" | exercised by the session tests running back to back |
-| Stop of an unknown or already-ended id → 422 `PARKING_SESSION_NOT_FOUND` (no silent 200) | `end_session` error message | `StopSession_UnknownId_Is422_SessionNotFound_NotA200` |
-
-**Trusted, not tested** (deliberate — a live test would need a paid start or a one-use coupon):
-
-- A promo-applied `tariffBreakDownV2` quote can be 0 while the real start charges; `promotion/validate`
-  (422 `INVALID_PROMOTION_CODE` / 5007) is authoritative — observed 2026-11-24 (Lidl Rzeszów, session
-  84240817), see below. Unit-tested against recorded shapes.
-- The promotion code lives in the offer's nested `promotionResponseList`; free-time coupons have a reuse
-  cooldown — recorded from HAR 2026-11-25, unit-tested in `TariffAndPromotionLogicTests`.
-- Paid starts charge immediately and early stop refunds only when `allowRefund`/`isProrationAllowed` —
-  observed with the billable `capture-carrefour-paid-start` sandbox scenario, 2026-11-25.
-
----
-
-## Endpoint Oddities
-
-### Path prefix `/authentication/v1/`
-All consumer endpoints use this prefix, even non-auth ones (parking details, tariffs, etc.).
-This is an APCOA API convention, not a mistake.
-
-### EV Sessions trailing slash
-`GET /authentication/v1/evSession/` — the trailing slash is real, server returns 404 without it.
-
-### `vehicleNumbwe` typo in tariff breakdown
-`GET /authentication/v1/tariff/tariffBreakDownV2` has the query param `vehicleNumbwe` (not `vehicleNumber`).
-This is a **server-side typo** preserved in production. Must be sent exactly as `vehicleNumbwe`.
-
-### Tariff breakdown `parkingSessionId`
-When extending an existing session, the tariff breakdown request also includes `parkingSessionId`.
-When starting fresh it is absent. Both cases observed in dumps.
-
-### Favourites 204 = empty list
-`GET /authentication/v1/consumers/favourite/parking` returns **204 No Content** when the user has
-no favourites. The client should treat 204 as an empty list rather than an error.
-
-### One active session per account → HTTP 424 `LIMIT_EXCEEDED`
-Starting a session (`POST /consumer/parkingSession`) while one is already active is rejected with
-**HTTP 424 Failed Dependency** and body `{"message":"LIMIT_EXCEEDED","statusCode":5012,...}`. The
-backend allows only one active session per account. Handle this by listing active sessions and
-surfacing the existing one rather than retrying.
-
-### Tariff breakdown applies promos it cannot honour (free quote, paid start)
-`GET /tariff/tariffBreakDownV2` with a promotion applies the discount **optimistically** — it returns
-`totalPayableAmountInCents=0` / `discountApplicable=1` even for a promo that is actually unusable
-(expired, used up, or not valid for the account). The real start then **charges full price**. The
-authoritative check is `POST /promotion/validate`: a usable coupon returns 2xx with
-`{"message":"valid","error":null,...}`; an unusable one returns **HTTP 422** with
-`{"message":"INVALID_PROMOTION_CODE","statusCode":5007,...}`. Always validate before trusting a
-promo-applied quote. (The `free_duration*` fields on the breakdown are always 0/empty in PL and are not
-a reliable signal either — use the base-tariff `totalPayableAmountInCents` to judge "free".)
-
-> Note: the official app does **not** call `promotion/validate` at all — it goes offers →
-> `tariffBreakDownV2` (with the promo) and trusts the 0-cost result. We keep validate as an extra safety
-> gate. The success body says `message:"valid"` (NOT "SUCCESS"/"OK"), so a success check must accept
-> "valid" and reject only explicit error markers, or a usable promo gets wrongly dropped.
-
-### The promotion code lives in the offer's nested `promotionResponseList`, not the offer id/name
-An offer object's top-level `id`/`name` are a **display code** (e.g. `4107` /
-`"Darmowe60minutparkowania."`). The promotion the API actually accepts for `promotion/validate`,
-`tariffBreakDownV2` (`discountName`/`promotionId`) and session start is nested under
-`promotionResponseList` — e.g. `{ "id": 104539, "name": "FRE60MIN07", "isPrimary": 1 }`. Sending the
-offer display name instead returns 422 `INVALID_PROMOTION_CODE`. Read the primary nested promotion
-(`isPrimary==1`, else the first) and fall back to the offer's own id/name only when the list is empty.
-
-The app's offers call is `POST /authentication/v2/promotion/applicableOffersWithPromotion` with body
-`{company, checkDurationBasedPromotion:true, parkingLot, isAutoApply:true, tenant:"apcoa", identifier:"<PLATE>"}`
-— identifier is the **plate**, and the response is a **bare array** of offers (not the `{entities:[…]}`
-envelope of the `…V2` user-id-keyed variant).
-
-Concrete example (Aldi Tarnowskie Góry, parking `8331`, lot `9085`, tariff `7562`, coupon offer
-`4107` / nested promotion `FRE60MIN07`/`104539` = 60 min free): with the nested code, `promotion/validate`
-returns `200 "valid"` and the 60-min breakdown returns `totalPayableAmountInCents=0` (genuinely free) —
-a live free start+stop confirmed `amount=0.0`. With the offer display name it 422s and the breakdown
-only applies a 10 % discount (3.60 PLN). Earlier notes blaming the Carrefour `FREE120PL2_4H` 422 on a 4 h
-cooldown may be the same wrong-code bug — re-verify with the nested promotion name before assuming a
-cooldown.
-
-### Free-time coupons are one-use-per-cooldown; the period is on the nested promotion
-The nested promotion carries its reuse cooldown: `promotionDurationUsageTime` + `promotionDurationUsageType`
-(e.g. `240` / `"PROMO_MINUTE"` = usable once every **4 hours**), alongside `usageType:"per_person"` /
-`usageLimit:1`. **Do not** confuse these with the sibling `durationUsageType`/`durationUsageTime`/
-`durationUsageLimit` fields, which describe the free grant, not the cooldown. Only `PROMO_MINUTE` has been
-observed on the wire; the client parses the `PROMO_<UNIT>` token (`MINUTE`/`SECOND`/`HOUR`/`DAY`) and treats
-any unmapped unit as "unknown" (no cooldown shown, logged as a warning). After a session consumes a coupon,
-the same fields appear on the completed session (`GET /consumer/parkingSessionV2`: `promotionName`,
-`promotionId`, `offerDetails.promotionResponseList[].promotionDurationUsageTime`), and the coupon drops out
-of `applicableOffersWithPromotion` for the cooldown window. The MCP reports the **period** after a start
-("can be used again in 4 hours") — it does **not** derive an absolute next-available clock time (the 422
-body carries no timing).
-
-### `GET /tariff?parkingLotId=...` returns the full pricing grid (unit = 1/100 cent!)
-Confirmed live (2026-11-25). The response is **not** flat name/description — it is the whole rate grid:
-```
-{ "tariffTemplates": [ {
-    "tariffId", "parkingLotId", "name", "isDefault", "isActive",
-    "isProrationAllowed",            // 0 = early stop is NOT prorated/refunded
-    "freeDurationInMinutes",
-    "stacks": [ {
-      "slots": [ {
-        "startDay","startTime","endDay","endTime","maxMinutes","freeSlot",
-        "grids": [ { "type": "FLAT"|"INCREMENTAL", "amountInCents", "duration", "sequence" } ]
-      } ],
-      "maxima": [ { "type": "DAY", "amountInCents", "isDurationBoss" } ]
-    } ]
-} ] }
-```
-**UNIT GOTCHA:** `amountInCents` here is in **1/100 of a cent** — divide by **10000** (not 100) for the
-currency amount. Carrefour lot `10584`: FLAT `20000`/60 min = **2.00 PLN** first hour; INCREMENTAL
-`40000`/60 min = **+4.00 PLN** per further hour (so 90–120 min = 6.00 PLN); DAY maxima `500000` =
-**50.00 PLN/day**. Price tiers are derived from this grid (FLAT block + cumulative INCREMENTAL blocks,
-capped by the daily maximum). The iOS app does **not** call `/tariff`; it derives prices by probing
-`tariffBreakDownV2` at discrete durations — but the grid is the authoritative source.
-
-### Start charges immediately; early stop does not refund
-`POST /consumer/parkingSession` (start) **captures money immediately** — the response carries
-`transactionStatus:SUCCESSFUL` and `transactionAmount` (⚠ in **cents**, e.g. `200.0` = 2.00 PLN) and
-`sessionPaymentType:CAPTURE`. `PUT /consumer/parkingSession` (stop) returns the final amount nested at
-`parkingSession.amount` (PLN) — the **top-level `transactionAmount` is null** on stop. Ending a paid
-session early does **not** refund when the lot's `parkingLotConfiguration.allowRefund=0` (and tariff
-`isProrationAllowed=0`) — the remaining paid time is forfeited. `enableStopButton` says whether a
-session can be stopped at all. (Carrefour `10584`: `allowRefund:0`, `isProrationAllowed:0`,
-`enableStopButton:1`.)
-
----
-
-## Parking Search — S3 Offline Data
-
-The app does **not** use a live search API. It downloads and locally searches static binary files from S3.
-
-### S3 Setup
-- Bucket: `apcoa-parking-data` (public, no signing required despite the app using pre-signed URLs)
-- Region: `eu-central-1`
-- Checksum manifest: `apcoa_parking_checksum_map` — JSON, keys like `apcoa_u3_PL_parking_checksum`, values are base64-encoded MD5 hashes.
-- Data files: `apcoa_{geohash2}_{CC}_parking` — e.g. `apcoa_u3_PL_parking`
-  - Geohash2 = first 2 chars of geohash covering that region
-  - CC = ISO country code (PL, DE, UK, AT, NO, SE, DK, IT, NL, BE, CH, IE)
-
-### File Encryption: AES-128-GCM
-Format: `[nonce:12 bytes][ciphertext][auth_tag:16 bytes]`
-
-- Key: `parkingDataKey` from `GET /authentication/v1/dashboard/tenant/appConfigByCompanyId/{companyId}?version=v3`
-  - Value is a base64-encoded 16-byte key (AES-128). Fetched at runtime — see `ApcoaS3ParkingDataSource`.
-- After decryption: JSON object keyed by parking ID string.
-
-### Decrypted JSON Structure
-Top-level: `{ "5688": { ...parkingEntry }, "5689": { ... }, ... }` — ~1355 entries in `apcoa_u3_PL_parking`.
-
-Each entry has:
-```
-id, displayName, address, city, zipCode, countryCode, currencyCode
-geoLocation: { latitude, longitude }
-entranceGeoLocation: { latitude, longitude } | null
-isParkingEnabled: 0|1
-parkingType: null | string
-accessTypeList: ["LPR", ...]
-services: ["VIDEO_SURVEILLANCE", "LIFT", "STAFF_ON_SITE", "OTHERS", ...]
-operationalHours: [{ id, day(1-7), openTime, closeTime }, ...]
-parkingLotTypeList: ["CAR", "MOTORCYCLE", ...]
-isPassAvailable, isPermitAvailable, isPreBookingAvailable, isEvOnly: 0|1
-parkingTranslations: { "pl": { name, displayName, address, city, description }, ... }
-parkingImageObjects: [{ sequence, externalId(UUID) }, ...]
-parkingConfigs: { locationManagerDetails: { ... } }
-appInterface: "DIALER_UI" | ...
-showPromoSection: "EVERYWHERE" | ...
-isTimeAdditionEnabled: 0|1
-geofences: []
-displayPolygon, displayPolygonZoomLevel
-externalId: string (the old external ID)
-```
-
-**No pricing/tariff data in S3 files** — only location, metadata, and operational hours.
-Tariff info requires a separate API call: `GET /authentication/v1/tariff?parkingLotId=...` — which
-returns the full pricing grid (see "`GET /tariff` returns the full pricing grid" above).
-
-### Credentials in App Config
-The app config (`GET /authentication/v1/dashboard/tenant/appConfigByCompanyId/9?version=v3`) returns:
-- `awsParkingBucket`: `"apcoa-parking-data"` — S3 bucket name
-- `awsParkingRegion`: `"eu-central-1"`
-- `awsParkingAccessKeyId`: `[redacted]` — for S3 request signing (not needed for public bucket)
-- `awsParkingSecretKey`: `[redacted]` — S3 signing only
-- `awsParkingChecksumMap`: `"apcoa_parking_checksum_map"` — manifest filename
-- `parkingDataKey`: `[redacted]` — **file decryption key (AES-128); fetched at runtime, never hardcoded**
-
-**Implementation note:** Fetch app config to get `parkingDataKey`, then use it to decrypt S3 files.
-The bucket is publicly accessible without signing.
-
----
-
-## Session Flow
-
-```
-1. POST /authentication/v1/consumer/parkingSession        → start (creates session)
-2. GET  /authentication/v1/consumer/parkingSessionV2      → poll active sessions
-3. POST /authentication/v1/consumer/parkingSession/extendParkingSession → extend
-4. PUT  /authentication/v1/consumer/parkingSession        → stop (ends session)
-```
-
-The app polls step 2 aggressively (~every 2–5 s while the home screen is visible).
-
-Before starting a session the app always:
-1. `GET /authentication/v1/tariff/tariffBreakDownV2` with `duration=0` to show entry cost
-2. `POST /authentication/v1/parking/operational-hours/validate`
-3. `POST /authentication/v2/promotion/applicableOffersWithPromotion`
-4. `POST /authentication/v1/promotion/validate`
-5. `GET /authentication/v1/parking/utcDateTime`
-
----
-
-## Real IDs Observed in Traffic
-
-| Item | Value |
+| Behaviour | Test (`AccountContractTests`) |
 |---|---|
-| Company ID (Poland) | `9` |
-| Consumer/User ID | `6341735` |
-| Consumer Profile ID | `6340557` |
-| Payment Method ID (BLIK) | `5876545` |
-| Vehicle ID | `7417618` |
-| Vehicle plate | `ABC 123DE` |
-| Parking IDs observed | `9882`, `8331`, `10395`, `616319` |
-| Parking Lot IDs observed | `9085`, `10584`, `11089`, `41905` |
-| Country code | `PL` |
+| Password grant with the e-mail returns an access and a refresh token, ~1 h | `Password_grant_with_the_email_returns_an_access_and_a_refresh_token` |
+| Refresh grant rotates the refresh token | `Refresh_grant_rotates_the_refresh_token` |
+| Wrong password is `400 invalid_grant` | `Wrong_password_is_400_invalid_grant` |
+| No token on the API is `403 Unauthenticated` | `No_token_on_the_API_is_403_Unauthenticated` |
+| Profile has the sign-in e-mail, `approved` | `Profile_has_a_verified_email` |
+| Vehicles carry an id and a plate without spaces | `Vehicles_carry_an_id_and_a_plate_without_spaces` |
+| The default payment method is a saved card (`flow: saved`, no action needed) | `The_default_payment_method_is_a_saved_card` |
+| Sessions and history are lists | `Sessions_and_history_are_lists` |
+| Stopping an unknown session is `404 SessionNotFound` | `Stopping_an_unknown_session_is_404_SessionNotFound` |
 
-### Good parking for testing (unlimited free sessions)
+## Trusted, not tested
 
-**Parking ID: `616319`** — observed to have no session limit and free tariff (tariff ID `108014`,
-parking lot ID `41905`). Safe to use for start/stop/extend testing without consuming the daily limit.
-Name / location TBD — appeared in dump 24 Nov 1027.
+Behaviours relied on without a live test, because testing them costs money or can't be repeated:
 
----
-
-## Missing / TBD — Needs Live API Testing
-
-The following response shapes were NOT cleanly isolated from the WebProxyTool HAR dumps (buffer merging issue). Confirm these during live testing against parking `616319`.
-
-### Response shapes to verify
-
-| Endpoint | Unknown fields |
+| Behaviour | Observed |
 |---|---|
-| `GET /authentication/v1/consumer/parkingSessionV2` | Full `ParkingSessionV2` shape — `parkingName`? `tariffId`? `promotionId`? exact field names |
-| `GET /authentication/v1/parking/{id}` | Full `ParkingDetail` — does it include `operationalHours`? `parkingLots`? `tariffId`? |
-| `POST /authentication/v2/promotion/applicableOffersWithPromotion` | Full `Offer` shape |
-| `GET /authentication/v1/consumers/favourite/parking` | Full `FavouriteParking` shape (may have more than 3 fields) |
-
-Resolved (confirmed live 2026-11-25):
-- `PUT /consumer/parkingSession` (stop) — final amount nested at `parkingSession.amount`; top-level `transactionAmount` null. See "Start charges immediately; early stop does not refund" above.
-- `GET /parking/{id}/parkingLots` — `parkingLotConfiguration` carries `enableStopButton`, `allowRefund`, `allowExtension`, `minDuration`/`maxDuration`, `durationPerRotationInMins`, `paygTariffRows`, `sessionIntervalInMins`.
-- `GET /tariff?parkingLotId=...` — full pricing grid; see "`GET /tariff` returns the full pricing grid" above (amountInCents is 1/100-cent, ÷10000 for PLN).
-
-### Other TBD
-
-- **Parking 616319 name / location** — **Tarnowskie Góry ul. Oświęcimska**, ul. Oświęcimska 21, 42-600 Tarnowskie Góry, PL. Lat: 50.44333, Lon: 18.86299. Found in `apcoa_u2_PL_parking` tile.
-- **`ParkingSessionV2Query` params** — observed: `displayVat`, `displayVatWithoutConvenienceFeeVat`, `pageNumber`, `pageSize`, `parkingSessionStatuses`, `profileNames`, `status`. Confirm all are correct.
-- **`DELETE` favourites** — endpoint not observed, likely `DELETE /authentication/v1/consumers/favourite/parking/{parkingId}`.
-- **App config `parkingDataKey` for other companies/regions** — may differ per `companyId`. Always fetch from live config before decrypting.
-- **`appInterface` field on parking** — values seen: `"DIALER_UI"`. Others unknown.
-
----
-
-## Pagination
-
-Standard across the API:
-- `pageNumber` (1-based)
-- `pageSize`
-
----
-
-## App / SDK Headers
-
-- `User-Agent: APCOA FLOW/6.85.2 (com.apcoaflow.consumer; build:1; iOS 27.2.1) Alamofire/5.10.2`
-- `Accept-Language: en-PL;q=1.0, pl-PL;q=0.9`
-- Requests use JSON bodies (Content-Type: application/json) unless noted.
-
----
-
-## Third-Party Traffic (not APCOA API — ignore)
-
-The dumps contain noise from other SDKs the app bundles:
-- `/a1?os=iOS` — analytics (likely Adjust)
-- `/glm/mmap` — Google Maps / Location
-- `/api/v6.17/iosevent` — OneSignal push
-- `/distanceMatrix/v2:computeRouteMatrix` — Google Routes API
-- `/a/t?m=a` — Usabilla / SurveyMonkey
-- `/log/batch` — logging SDK
+| A paid start with a saved card runs at once, no interactive step | 2026-11-27, post-pay space (Czarny Dunajec), stopped after 19 s |
+| A post-pay session stopped within seconds is billed PLN 0.00 | 2026-11-27, same session |
+| Biedronka free time is once per 4 h per space, and shows in the quote | 2026-11-27, Biedronka Żyrardów |

@@ -22,8 +22,8 @@ internal static class ToolRegistration
 
     /// <summary>
     /// Argument binding: the SDK defaults plus leniency for how clients and models actually send values —
-    /// numeric parameters (<c>parkingId</c>, <c>sessionId</c>, <c>durationMinutes</c>, <c>confirmedCostPln</c>…)
-    /// also accept numbers sent as JSON strings (<c>"616319"</c>), and string parameters accept JSON numbers
+    /// numeric parameters (<c>durationMinutes</c>, <c>confirmedCostPln</c>, coordinates…)
+    /// also accept numbers sent as JSON strings (<c>"1800"</c>), and string parameters accept JSON numbers
     /// (<see cref="LenientStringConverter"/>). Without this, such calls fail before the tool runs with an opaque
     /// error.
     /// </summary>

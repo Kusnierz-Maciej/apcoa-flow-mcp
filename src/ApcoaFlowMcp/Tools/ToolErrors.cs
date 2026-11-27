@@ -1,5 +1,6 @@
 using System.Net;
 using ApcoaFlowApiClient;
+using ApcoaFlowApiClient.Auth;
 using ModelContextProtocol;
 using Refit;
 
@@ -12,8 +13,8 @@ namespace ApcoaFlowMcp.Tools;
 /// whose message the SDK passes to the model as the tool result.
 /// This is also how rejected credentials surface — the SDK catches tool exceptions inside an already-started
 /// 200 SSE response, so an HTTP 401 can't be sent at that point (no middleware ever sees the exception).
-/// Business refusals (cost cap, unknown plate, already active…) are not exceptions — the session service
-/// returns them as normal text and they never reach this class.
+/// Business refusals (cost cap, unknown plate, already active…) are not exceptions — the tools return them as
+/// normal text and they never reach this class.
 /// </summary>
 internal static class ToolErrors
 {
@@ -44,31 +45,32 @@ internal static class ToolErrors
         if (ex is OperationCanceledException)
             return null;
 
-        for (var e = ex; e is not null; e = e.InnerException)
-            if (e is ApcoaFlowCredentialsRejectedException)
-                return new("credentials_rejected", CredentialsRejected);
+        // Thrown inside the handler chain, so Refit wraps them (ApiRequestException): look through the inner chain.
+        if (ApcoaFlowAuthErrors.Find<ApcoaFlowCredentialsRejectedException>(ex) is not null)
+            return new("credentials_rejected", CredentialsRejected);
+        if (ApcoaFlowAuthErrors.Find<ApcoaFlowAuthUnavailableException>(ex) is not null)
+            return new("unavailable", "APCOA sign-in is not available right now. Try again in a moment.");
 
-        for (var e = ex; e is not null; e = e.InnerException)
-            if (e is ApiException api)
-                return FromBody(api) ?? FromStatus(api.StatusCode);
+        if (ApcoaFlowAuthErrors.Find<ApiException>(ex) is { } api)
+            return FromBody(api) ?? FromStatus(api.StatusCode);
 
-        for (var e = ex; e is not null; e = e.InnerException)
-            if (e is HttpRequestException)
-                return new("unavailable",
-                    "APCOA could not be reached or failed to sign in right now. Try again in a moment.");
+        if (ApcoaFlowAuthErrors.Find<HttpRequestException>(ex) is not null)
+            return new("unavailable", "APCOA could not be reached right now. Try again in a moment.");
 
         return null;
     }
 
-    /// <summary>Known APCOA error codes in the body take precedence over the bare status.</summary>
-    private static Mapped? FromBody(ApiException api) =>
-        // Stop of an unknown or already-ended session: 422 {"message":"PARKING_SESSION_NOT_FOUND","statusCode":5001}
-        // (probed 2026-11-27; pinned by LiveApiContractTests).
-        api.Content?.Contains("PARKING_SESSION_NOT_FOUND", StringComparison.Ordinal) == true
-            ? new("session_not_found",
-                "APCOA has no active parking session with that id — it may already have ended, or the id is wrong. " +
-                "Call get_active_sessions for the running session's id.")
-            : null;
+    /// <summary>The API's error code in the body takes precedence over the bare status.</summary>
+    private static Mapped? FromBody(ApiException api) => ApcoaFlowApiError.TryRead(api) switch
+    {
+        { Code: ApcoaFlowApiError.Codes.SessionNotFound } => new("session_not_found",
+            "APCOA has no parking session with that id — it may have ended already, or the id is wrong. " +
+            "Check the running sessions for the current id."),
+        { Code: ApcoaFlowApiError.Codes.ParkingSessionInvalidArgument, Message: { } message } =>
+            new("session_refused", $"APCOA refused the session change: {message}"),
+        { Code: ApcoaFlowApiError.Codes.Unauthenticated } => new("credentials_rejected", CredentialsRejected),
+        _ => null,
+    };
 
     private static Mapped FromStatus(HttpStatusCode status)
     {
@@ -76,21 +78,16 @@ internal static class ToolErrors
         return status switch
         {
             HttpStatusCode.NotFound => new("not_found",
-                $"APCOA couldn't find that parking or session (HTTP {code}). Call find_parking or " +
-                "get_active_sessions again for current ids."),
-            // APCOA answers 403 when it locks the account out after too many requests.
+                $"APCOA couldn't find that space or session (HTTP {code}). Search again for current ids."),
+            HttpStatusCode.Unauthorized => new("credentials_rejected", CredentialsRejected),
             HttpStatusCode.Forbidden => new("forbidden",
-                $"APCOA refused the request (HTTP {code}). The account may be temporarily locked after too many " +
-                "requests — wait a few minutes before trying again."),
-            // 401/419 normally trigger one re-login in the auth handler; reaching here means it didn't help.
-            HttpStatusCode.Unauthorized or (HttpStatusCode)419 => new("credentials_rejected", CredentialsRejected),
+                $"APCOA refused the request (HTTP {code}). Wait a few minutes before trying again."),
             HttpStatusCode.TooManyRequests => new("rate_limited",
                 $"APCOA is rate-limiting requests (HTTP {code}). Wait a moment and try again."),
             _ when code >= 500 => new("unavailable",
                 $"APCOA is temporarily unavailable (HTTP {code}). Try again in a moment."),
             _ => new("rejected_request",
-                $"APCOA rejected the request (HTTP {code}). Check the parking id, plate and session id " +
-                "(find_parking / get_registered_cars / get_active_sessions) and try again."),
+                $"APCOA rejected the request (HTTP {code}). Check the space, vehicle and session ids and try again."),
         };
     }
 }

@@ -5,7 +5,7 @@ using System.Text;
 using System.Text.Json;
 using System.Text.RegularExpressions;
 using ApcoaFlowApiClient;
-using ApcoaFlowApiClient.ParkingData;
+using ApcoaFlowApiClient.Auth;
 using Microsoft.AspNetCore.Hosting;
 using Microsoft.AspNetCore.Mvc.Testing;
 using Microsoft.AspNetCore.TestHost;
@@ -20,7 +20,7 @@ namespace ApcoaFlowMcp.Tests;
 /// The whole OAuth 2.1 flow against the real HTTP host running in memory (no process, no ports, no account):
 /// metadata → dynamic registration → sign-in form → code + PKCE → token → Bearer /mcp tool call → refresh
 /// rotation → key revocation. The APCOA login validator, API and parking data source are mocked and the parking
-/// refresh service is removed (no S3 download); the real login is pinned by the live Login_* contract tests.
+/// hosted services are removed; the real login is pinned by the live contract tests (AccountContractTests).
 /// </summary>
 public class OAuthFlowTests
 {
@@ -40,14 +40,13 @@ public class OAuthFlowTests
             web.ConfigureTestServices(services =>
             {
                 var validator = Substitute.For<IApcoaFlowLoginValidator>();
-                validator.ValidateAsync(Arg.Any<string>(), Arg.Any<string>(), Arg.Any<CancellationToken>())
-                    .Returns(ci => ci.ArgAt<string>(0) == Email && ci.ArgAt<string>(1) == Password
-                        ? LoginOutcome.Success("apcoa-token")
-                        : LoginOutcome.Bad("FailedLogin flag or empty token"));
+                validator.ValidateAsync(Arg.Any<ApcoaFlowCredentials>(), Arg.Any<CancellationToken>())
+                    .Returns(ci => ci.ArgAt<ApcoaFlowCredentials>(0) == new ApcoaFlowCredentials(Email, Password)
+                        ? TokenGrantOutcome.Success(new AccessTokens("apcoa-token", "refresh", DateTimeOffset.UtcNow.AddHours(1)))
+                        : TokenGrantOutcome.Rejected("invalid_grant"));
                 services.AddTransient(_ => validator);
 
-                services.AddTransient(_ => Fake.Api());
-                services.AddSingleton(Substitute.For<IApcoaParkingDataSource>());
+                services.AddTransient(_ => FakeApi.Create());
                 services.RemoveAll<IHostedService>();
             });
         });
@@ -97,7 +96,7 @@ public class OAuthFlowTests
         PostForm(http, "/token", new() { ["grant_type"] = "refresh_token", ["refresh_token"] = refreshToken });
 
     /// <summary>initialize + tools/call over Streamable HTTP with a Bearer token; returns the tool's text.</summary>
-    private static async Task<string> CallGetRegisteredCarsAsync(HttpClient http, string accessToken)
+    private static async Task<string> CallGetVehiclesAsync(HttpClient http, string accessToken)
     {
         async Task<HttpResponseMessage> Rpc(string json)
         {
@@ -111,7 +110,7 @@ public class OAuthFlowTests
         var init = await Rpc("""{"jsonrpc":"2.0","id":1,"method":"initialize","params":{"protocolVersion":"2025-06-18","capabilities":{},"clientInfo":{"name":"test","version":"1"}}}""");
         await Assert.That(init.StatusCode).IsEqualTo(HttpStatusCode.OK);
 
-        var call = await Rpc("""{"jsonrpc":"2.0","id":2,"method":"tools/call","params":{"name":"get_registered_cars","arguments":{}}}""");
+        var call = await Rpc("""{"jsonrpc":"2.0","id":2,"method":"tools/call","params":{"name":"get_vehicles","arguments":{}}}""");
         await Assert.That(call.StatusCode).IsEqualTo(HttpStatusCode.OK);
         var body = await call.Content.ReadAsStringAsync();
         var data = body.Split('\n').Where(l => l.StartsWith("data:")).Select(l => l[5..].Trim()).LastOrDefault() ?? body;
@@ -158,7 +157,7 @@ public class OAuthFlowTests
         await Assert.That(tokens.GetProperty("expires_in").GetInt32()).IsEqualTo(3600);
 
         // The access token works on /mcp end to end.
-        await Assert.That(await CallGetRegisteredCarsAsync(http, access)).IsEqualTo($"{Fake.Plate} [default]");
+        await Assert.That(await CallGetVehiclesAsync(http, access)).IsEqualTo($"{FakeApi.LicensePlate} [default] - {FakeApi.VehicleDescription}");
 
         // Refresh rotates; an access token can't be used as a refresh token.
         var refreshed = await RefreshAsync(http, refresh);
@@ -166,7 +165,7 @@ public class OAuthFlowTests
         var newAccess = (await Json(refreshed)).GetProperty("access_token").GetString()!;
         await Assert.That(newAccess).IsNotEqualTo(access);
         await Assert.That((await RefreshAsync(http, access)).StatusCode).IsEqualTo(HttpStatusCode.BadRequest);
-        await Assert.That(await CallGetRegisteredCarsAsync(http, newAccess)).Contains(Fake.Plate);
+        await Assert.That(await CallGetVehiclesAsync(http, newAccess)).Contains(FakeApi.LicensePlate);
     }
 
     private const string WrongPassword = "wrong <&\" pass";

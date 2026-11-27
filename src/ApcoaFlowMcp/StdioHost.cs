@@ -1,6 +1,7 @@
 using ApcoaFlowApiClient;
+using ApcoaFlowApiClient.Auth;
+using ApcoaFlowApiClient.Http;
 using ApcoaFlowMcp.Apcoa;
-using ApcoaFlowMcp.Prompts;
 using ApcoaFlowMcp.Tools;
 using Microsoft.Extensions.Options;
 
@@ -24,14 +25,12 @@ public static class StdioHost
         builder.Services.AddSingleton<IValidateOptions<StdioCredentialsOptions>, StdioCredentialsOptionsValidator>();
         builder.Services.AddTransient<IApcoaFlowCredentialProvider, ConfigurationCredentialProvider>();
         builder.Services.AddApcoaFlowApiClient(
-        rateLimit: builder.Configuration.GetSection(ApcoaFlowRateLimitOptions.Section));
-        builder.Services.AddApcoaParkingDataSource(builder.Configuration.GetSection("ParkingData"));
-        builder.Services.AddOptions<ApcoaFlowToolsOptions>()
+            rateLimit: builder.Configuration.GetSection(ApcoaFlowRateLimitOptions.Section));
+                builder.Services.AddOptions<ApcoaFlowToolsOptions>()
             .Bind(builder.Configuration.GetSection("ApcoaFlow"))
             .ValidateDataAnnotations()
             .ValidateOnStart();
-        builder.Services.AddScoped<ApcoaFlowSessionService>();
-
+        
         builder.Services
             .AddMcpServer(options =>
             {
@@ -40,8 +39,7 @@ public static class StdioHost
             })
             .WithStdioServerTransport()
             .WithApcoaFlowTools()
-            .WithApcoaFlowPrompts(builder.Configuration)
-            .WithRequestFilters(filters => filters.AddCallToolFilter(ClientContextFilter.Create));
+                    .WithRequestFilters(filters => filters.AddCallToolFilter(ClientContextFilter.Create));
 
         var host = builder.Build();
         if (!StartupValidation.TryValidate(host.Services))

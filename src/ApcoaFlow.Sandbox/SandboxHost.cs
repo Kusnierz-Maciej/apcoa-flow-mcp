@@ -1,15 +1,17 @@
-using ApcoaFlow.Sandbox.Dumping;
 using ApcoaFlowApiClient;
+using ApcoaFlowApiClient.Auth;
+using ApcoaFlow.Sandbox.Dumping;
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
+using Microsoft.Extensions.Logging;
 
 namespace ApcoaFlow.Sandbox;
 
 /// <summary>
-/// Builds the sandbox DI container: the real APCOA Flow API client (same handler chain the app
-/// uses) plus the innermost <see cref="DumpingHttpHandler"/>, the parking data source, and the
-/// MCP service layer so scenarios can exercise either level. Credentials come from user secrets
-/// (ApcoaFlow:Email / ApcoaFlow:Password) or env vars — the same store the test projects use.
+/// Builds the sandbox DI container: the real API client (same handler chain the MCP uses) with the innermost
+/// <see cref="DumpingHttpHandler"/> on both the API and the auth-server pipelines. Credentials come from user-secrets
+/// (<c>ApcoaFlow:Email</c> / <c>ApcoaFlow:Password</c>, id <c>apcoa-flow-api-tests</c>, shared with the live
+/// tests) or the env vars <c>ApcoaFlow__Email</c> / <c>ApcoaFlow__Password</c>.
 /// </summary>
 public static class SandboxHost
 {
@@ -20,31 +22,23 @@ public static class SandboxHost
             .AddEnvironmentVariables()
             .Build();
 
-        var options = new ApcoaFlowClientOptions
-        {
-            Email = config["ApcoaFlow:Email"]
-                ?? throw new InvalidOperationException("ApcoaFlow:Email not set (user secret or env var)."),
-            Password = config["ApcoaFlow:Password"]
-                ?? throw new InvalidOperationException("ApcoaFlow:Password not set (user secret or env var)."),
-        };
+        var credentials = new ApcoaFlowCredentials(
+            config["ApcoaFlow:Email"] ?? throw new InvalidOperationException("ApcoaFlow:Email not set (user secret or env var)."),
+            config["ApcoaFlow:Password"] ?? throw new InvalidOperationException("ApcoaFlow:Password not set (user secret or env var)."));
 
         var services = new ServiceCollection();
-
-        // The dump run + handler. The handler is appended as the INNERMOST pipeline handler via the
-        // optional hook, so it sees the fully decorated request and fires per physical send.
+        services.AddLogging(b => b.AddProvider(new RunLogLoggerProvider(run)).SetMinimumLevel(LogLevel.Information)
+            .AddFilter("System.Net.Http", LogLevel.Warning)); // the dump already shows every exchange
         services.AddSingleton(run);
+        services.AddSingleton(credentials);
         services.AddTransient<DumpingHttpHandler>();
-
-        services.AddSingleton<IApcoaFlowCredentialProvider>(new StaticCredentialProvider(options));
+        services.AddSingleton<IApcoaFlowCredentialProvider>(new StaticCredentialProvider(credentials));
         services.AddApcoaFlowApiClient(client => client.AddHttpMessageHandler<DumpingHttpHandler>());
-        services.AddApcoaParkingDataSource(configure: o =>
-            o.StorePath = Path.Combine(Path.GetTempPath(), "apcoa-sandbox-store"));
-
         return services.BuildServiceProvider();
     }
 
-    private sealed class StaticCredentialProvider(ApcoaFlowClientOptions options) : IApcoaFlowCredentialProvider
+    private sealed class StaticCredentialProvider(ApcoaFlowCredentials credentials) : IApcoaFlowCredentialProvider
     {
-        public ApcoaFlowClientOptions GetCredentials() => options;
+        public ApcoaFlowCredentials GetCredentials() => credentials;
     }
 }

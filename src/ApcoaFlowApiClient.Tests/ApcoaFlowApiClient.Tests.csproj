@@ -7,7 +7,8 @@
         <OutputType>Exe</OutputType>
         <IsPackable>false</IsPackable>
         <TestingPlatformDotnetTestSupport>true</TestingPlatformDotnetTestSupport>
-        <UserSecretsId>apcoa-flow-api-tests-nucleus</UserSecretsId>
+        <!-- Shared with the sandbox: ApcoaFlow:Email / ApcoaFlow:Password of the test account. -->
+        <UserSecretsId>apcoa-flow-api-tests</UserSecretsId>
     </PropertyGroup>
 
     <ItemGroup>
@@ -17,7 +18,6 @@
         <PackageReference Include="Microsoft.Extensions.Configuration.EnvironmentVariables" />
         <PackageReference Include="Microsoft.Extensions.DependencyInjection" />
         <PackageReference Include="Microsoft.Extensions.Logging.Abstractions" />
-        <PackageReference Include="Microsoft.Extensions.Options" />
     </ItemGroup>
 
     <ItemGroup>
