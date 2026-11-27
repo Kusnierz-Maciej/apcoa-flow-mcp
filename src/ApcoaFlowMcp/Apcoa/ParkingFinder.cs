@@ -80,7 +80,7 @@ public sealed class ParkingFinder(IApcoaFlowApi api)
     }
 
     /// <summary>The map pin of one parking (for its outline and type): the pins in a small box around its coordinates.</summary>
-    public async Task<MapSpace?> PinAsync(string spaceId, Coordinates? at, CancellationToken ct)
+    public async Task<MapSpace?> PinAsync(string parkingId, Coordinates? at, CancellationToken ct)
     {
         if (at is null) return null;
         var (swLat, swLon, neLat, neLon) = Geo.Box(at.Latitude, at.Longitude, 300);
@@ -88,7 +88,7 @@ public sealed class ParkingFinder(IApcoaFlowApi api)
         {
             SwLatitude = swLat, SwLongitude = swLon, NeLatitude = neLat, NeLongitude = neLon, Zoom = 16,
         }, ct);
-        return pins.FirstOrDefault(p => p.Id == spaceId);
+        return pins.FirstOrDefault(p => p.Id == parkingId);
     }
 
     // The API pads missing parts: ", Strzegom, Poland".

@@ -14,10 +14,10 @@ public sealed class Pricing(IApcoaFlowApi api, TimeProvider time)
     public const int FreeWindowCapMinutes = 24 * 60;
 
     /// <summary>A dated quote for <paramref name="minutes"/> starting now (what the app sends).</summary>
-    public Task<PriceQuote> QuoteAsync(string spaceId, string vehicleId, int minutes, CancellationToken ct) =>
+    public Task<PriceQuote> QuoteAsync(string parkingId, string vehicleId, int minutes, CancellationToken ct) =>
         api.GetPriceAsync(new PriceQuery
         {
-            SpaceId = spaceId, LicensePlateId = vehicleId, Duration = minutes * 60,
+            SpaceId = parkingId, LicensePlateId = vehicleId, Duration = minutes * 60,
             StartDate = UtcMillisecondsConverter.ToWire(time.GetUtcNow()),
         }, ct);
 
@@ -30,9 +30,9 @@ public sealed class Pricing(IApcoaFlowApi api, TimeProvider time)
     /// The longest stay starting now that quotes 0.00. Tries the parking's preselected duration first (Biedronka:
     /// 90 min = its free window; 2 quotes), else a binary search over up to a day (~12 quotes).
     /// </summary>
-    public async Task<FreeWindow> FreeWindowAsync(string spaceId, string vehicleId, int? hintMinutes, int? maxMinutes, CancellationToken ct)
+    public async Task<FreeWindow> FreeWindowAsync(string parkingId, string vehicleId, int? hintMinutes, int? maxMinutes, CancellationToken ct)
     {
-        async Task<bool> Free(int minutes) => (await QuoteAsync(spaceId, vehicleId, minutes, ct)).Total.IsZero;
+        async Task<bool> Free(int minutes) => (await QuoteAsync(parkingId, vehicleId, minutes, ct)).Total.IsZero;
 
         if (!await Free(1))
             return new FreeWindow(0, AtLeast: false);

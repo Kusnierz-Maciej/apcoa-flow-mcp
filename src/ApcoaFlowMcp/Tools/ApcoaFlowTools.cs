@@ -38,7 +38,7 @@ public sealed class ApcoaFlowTools(
     /// <summary>Two parkings whose distances differ by less than this are too close to call from a phone's GPS.</summary>
     public const double GpsToleranceMeters = 30;
 
-    private const string LicensePlateDescription = "License plate of one of the account's vehicles (see get_vehicles), e.g. \"ABC12345\"; spaces and case don't matter.";
+    private const string LicensePlateDescription = "License plate of one of the account's vehicles (see get_vehicles), e.g. \"ABC12345\"; whitespace and case don't matter.";
 
     // ── Vehicles ───────────────────────────────────────────────────────────────────────────────
 
@@ -212,24 +212,24 @@ public sealed class ApcoaFlowTools(
         }
         ApcoaTelemetry.Tag(ApcoaTelemetry.Tags.LicensePlate, vehicle.LicensePlate);
 
-        var space = await api.GetSpaceAsync(parkingId.Trim(), ct);
-        var quote = await pricing.QuoteAsync(space.Id, vehicle.Id, durationMinutes, ct);
+        var parking = await api.GetSpaceAsync(parkingId.Trim(), ct);
+        var quote = await pricing.QuoteAsync(parking.Id, vehicle.Id, durationMinutes, ct);
         var total = quote.Total;
         ApcoaTelemetry.Tag(ApcoaTelemetry.Tags.CostPln, (double)total.Amount);
 
-        var sb = new StringBuilder($"{space.Name}, {vehicle.LicensePlate}, {Text.Duration(durationMinutes)} from now: {total}");
+        var sb = new StringBuilder($"{parking.Name}, {vehicle.LicensePlate}, {Text.Duration(durationMinutes)} from now: {total}");
         sb.Append(quote.PrepaymentMode == "autoCharge" ? " (charged at start)" : " (charged at the end)");
         sb.AppendLine(".");
-        var window = await pricing.FreeWindowAsync(space.Id, vehicle.Id, space.DefaultLengthOfStayInMinutes, space.MaxDuration, ct);
+        var window = await pricing.FreeWindowAsync(parking.Id, vehicle.Id, parking.DefaultLengthOfStayInMinutes, parking.MaxDuration, ct);
         if (window.Minutes > 0)
             sb.AppendLine(window.AtLeast
                 ? $"Free for at least {Text.Duration(window.Minutes)} for this vehicle right now."
                 : $"Free for up to {Text.Duration(window.Minutes)} for this vehicle right now; longer stays cost money.");
-        if (space.MaxDuration is > 0 && durationMinutes > space.MaxDuration)
-            sb.AppendLine($"Note: the longest allowed stay here is {Text.Duration(space.MaxDuration.Value)}.");
+        if (parking.MaxDuration is > 0 && durationMinutes > parking.MaxDuration)
+            sb.AppendLine($"Note: the longest allowed stay here is {Text.Duration(parking.MaxDuration.Value)}.");
 
         logger.LogInformation("get_price [{Id}] {Name}: {Plate}, {Minutes} min → {Total}; free window {Free} min",
-            space.Id, space.Name, vehicle.LicensePlate, durationMinutes, total, window.Minutes);
+            parking.Id, parking.Name, vehicle.LicensePlate, durationMinutes, total, window.Minutes);
         ApcoaTelemetry.Outcome("ok");
         return sb.ToString().TrimEnd();
     });

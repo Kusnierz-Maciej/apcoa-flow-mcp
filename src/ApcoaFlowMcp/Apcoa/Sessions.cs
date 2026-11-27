@@ -34,7 +34,7 @@ public sealed class Sessions(IApcoaFlowApi api, Pricing pricing, TimeProvider ti
     /// <summary>When the user gives no duration and the stay isn't free: the parking's preselected duration, else this.</summary>
     public const int DefaultDurationMinutes = 60;
 
-    public async Task<SessionResult> StartAsync(string spaceId, string licensePlate, int? durationMinutes,
+    public async Task<SessionResult> StartAsync(string parkingId, string licensePlate, int? durationMinutes,
         decimal? confirmedCostPln, StartMode mode, decimal maxCostPln, CancellationToken ct)
     {
         var vehicle = Plates.Find(await api.GetVehiclesAsync(ct), licensePlate);
@@ -48,16 +48,16 @@ public sealed class Sessions(IApcoaFlowApi api, Pricing pricing, TimeProvider ti
                 $"{vehicle.LicensePlate} already has a running session: {Describe(running)}. End it with end_session (or " +
                 "extend it with extend_session) before starting another one.", running.Id);
 
-        var space = await api.GetSpaceAsync(spaceId.Trim(), ct);
-        ApcoaTelemetry.Tag(ApcoaTelemetry.Tags.ParkingId, space.Id);
-        ApcoaTelemetry.Tag(ApcoaTelemetry.Tags.ParkingName, space.Name);
-        if (space.CtaButtonType is not null && space.CtaButtonType != "startParking")
-            return Refused("not_startable", space.SessionsStartAutomatically
-                ? $"Sessions can't be started at {space.Name}: it recognises plates and starts and ends sessions by itself " +
+        var parking = await api.GetSpaceAsync(parkingId.Trim(), ct);
+        ApcoaTelemetry.Tag(ApcoaTelemetry.Tags.ParkingId, parking.Id);
+        ApcoaTelemetry.Tag(ApcoaTelemetry.Tags.ParkingName, parking.Name);
+        if (parking.CtaButtonType is not null && parking.CtaButtonType != "startParking")
+            return Refused("not_startable", parking.SessionsStartAutomatically
+                ? $"Sessions can't be started at {parking.Name}: it recognises plates and starts and ends sessions by itself " +
                   "when the car enters and leaves (see get_parking_details for its rules and free time)."
-                : $"Sessions can't be started at {space.Name} (not in the APCOA Flow app either).");
+                : $"Sessions can't be started at {parking.Name} (not in the APCOA Flow app either).");
 
-        var card = await DefaultCardAsync(space.Id, ct);
+        var card = await DefaultCardAsync(parking.Id, ct);
         if (card.Refusal is { } noCard)
             return noCard;
 
@@ -66,38 +66,38 @@ public sealed class Sessions(IApcoaFlowApi api, Pricing pricing, TimeProvider ti
         var duration = durationMinutes;
         Pricing.FreeWindow? window = null;
         if (duration is null || mode == StartMode.FreeOnly)
-            window = await pricing.FreeWindowAsync(space.Id, vehicle.Id, space.DefaultLengthOfStayInMinutes, space.MaxDuration, ct);
-        duration ??= window is { Minutes: > 0 } free ? free.Minutes : space.DefaultLengthOfStayInMinutes ?? DefaultDurationMinutes;
-        if (space.MaxDuration is > 0 && duration > space.MaxDuration)
-            return Refused("exceeds_max_duration", $"{space.Name} allows stays of up to {Text.Duration(space.MaxDuration.Value)}.");
+            window = await pricing.FreeWindowAsync(parking.Id, vehicle.Id, parking.DefaultLengthOfStayInMinutes, parking.MaxDuration, ct);
+        duration ??= window is { Minutes: > 0 } free ? free.Minutes : parking.DefaultLengthOfStayInMinutes ?? DefaultDurationMinutes;
+        if (parking.MaxDuration is > 0 && duration > parking.MaxDuration)
+            return Refused("exceeds_max_duration", $"{parking.Name} allows stays of up to {Text.Duration(parking.MaxDuration.Value)}.");
         ApcoaTelemetry.Tag(ApcoaTelemetry.Tags.DurationMinutes, duration);
 
         if (mode == StartMode.FreeOnly && window is { Minutes: 0 })
         {
-            var price = (await pricing.QuoteAsync(space.Id, vehicle.Id, duration.Value, ct)).Total;
-            return NotFree($"{space.Name} isn't free for {vehicle.LicensePlate} right now: {Text.Duration(duration.Value)} costs {price}. " +
+            var price = (await pricing.QuoteAsync(parking.Id, vehicle.Id, duration.Value, ct)).Total;
+            return NotFree($"{parking.Name} isn't free for {vehicle.LicensePlate} right now: {Text.Duration(duration.Value)} costs {price}. " +
                            "Nothing was started; use start_session to park there for a fee.", price.Amount);
         }
         if (mode == StartMode.FreeOnly && duration > window!.Value.Minutes)
-            return NotFree($"{space.Name} is free for {vehicle.LicensePlate} only up to {Text.Duration(window.Value.Minutes)} right now, " +
+            return NotFree($"{parking.Name} is free for {vehicle.LicensePlate} only up to {Text.Duration(window.Value.Minutes)} right now, " +
                            $"so {Text.Duration(duration.Value)} would cost money. Nothing was started; start with a shorter duration " +
                            "(or leave it out to use the whole free time).", null);
 
-        var quote = await pricing.QuoteAsync(space.Id, vehicle.Id, duration.Value, ct);
+        var quote = await pricing.QuoteAsync(parking.Id, vehicle.Id, duration.Value, ct);
         var cost = quote.Total;
         ApcoaTelemetry.Tag(ApcoaTelemetry.Tags.CostPln, (double)cost.Amount);
         if (!cost.IsZero)
         {
             if (mode == StartMode.FreeOnly)
-                return NotFree($"{space.Name} isn't free for {vehicle.LicensePlate} for {Text.Duration(duration.Value)}: it costs {cost}. Nothing was started.", cost.Amount);
+                return NotFree($"{parking.Name} isn't free for {vehicle.LicensePlate} for {Text.Duration(duration.Value)}: it costs {cost}. Nothing was started.", cost.Amount);
             if (mode == StartMode.Normal && cost.Amount > maxCostPln)
                 return Refused("cost_cap_exceeded",
-                    $"{Text.Duration(duration.Value)} at {space.Name} costs {cost}, more than this server's limit of " +
+                    $"{Text.Duration(duration.Value)} at {parking.Name} costs {cost}, more than this server's limit of " +
                     $"{maxCostPln.ToString("0.00", CultureInfo.InvariantCulture)} PLN. Nothing was started. Use start_expensive_session " +
                     "only if the user explicitly accepts this cost.");
             if (confirmedCostPln is null)
                 return new SessionResult(
-                    $"{Text.Duration(duration.Value)} at {space.Name} for {vehicle.LicensePlate} costs {cost}, " +
+                    $"{Text.Duration(duration.Value)} at {parking.Name} for {vehicle.LicensePlate} costs {cost}, " +
                     $"{(quote.PrepaymentMode == "autoCharge" ? "charged at start" : "charged at the end")} to {card.Method!.Type} {card.Method.Identifier}." +
                     (window is { Minutes: > 0 } w ? $" (Free for up to {Text.Duration(w.Minutes)}.)" : "") +
                     $" Nothing was started yet: confirm with the user, then call again with durationMinutes={duration} and " +
@@ -105,14 +105,14 @@ public sealed class Sessions(IApcoaFlowApi api, Pricing pricing, TimeProvider ti
                     "quote", CostPln: cost.Amount, DurationMinutes: duration);
             if (confirmedCostPln.Value != cost.Amount)
                 return Refused("cost_mismatch",
-                    $"The price changed: {Text.Duration(duration.Value)} at {space.Name} now costs {cost} (you confirmed " +
+                    $"The price changed: {Text.Duration(duration.Value)} at {parking.Name} now costs {cost} (you confirmed " +
                     $"{confirmedCostPln.Value.ToString("0.00", CultureInfo.InvariantCulture)} PLN). Nothing was started; confirm the new price with the user.");
         }
 
         var start = Minute(time.GetUtcNow());
         var started = await api.StartParkingAsync(new StartParkingRequest
         {
-            SpaceId = space.Id, LicensePlateId = vehicle.Id, PaymentMethodId = card.Method!.Id,
+            SpaceId = parking.Id, LicensePlateId = vehicle.Id, PaymentMethodId = card.Method!.Id,
             StartDate = start, EndDate = start.AddMinutes(duration.Value),
         }, Guid.NewGuid().ToString(), ct);
 
@@ -131,25 +131,25 @@ public sealed class Sessions(IApcoaFlowApi api, Pricing pricing, TimeProvider ti
         // Whatever the answer said, the running list is the truth: never report "not started" while one runs.
         var runningNow = (await api.GetSessionsAsync(ct)).FirstOrDefault(s =>
             (sessionId is not null && s.Id == sessionId) ||
-            (Plates.Normalize(s.Vehicle?.LicensePlate) == Plates.Normalize(vehicle.LicensePlate) && s.Space?.Id == space.Id));
+            (Plates.Normalize(s.Vehicle?.LicensePlate) == Plates.Normalize(vehicle.LicensePlate) && s.Space?.Id == parking.Id));
 
         if (failure == "payment_action_required")
         {
-            logger.LogWarning("start at {Space} needs an interactive payment step; ending anything that started.", space.Id);
+            logger.LogWarning("start at {Parking} needs an interactive payment step; ending anything that started.", parking.Id);
             if (runningNow is not null)
                 await api.StopParkingAsync(runningNow.Id, ct);
             return Refused("payment_action_required",
-                $"The card payment at {space.Name} needs a confirmation step (e.g. 3-D Secure) that this server can't do. " +
+                $"The card payment at {parking.Name} needs a confirmation step (e.g. 3-D Secure) that this server can't do. " +
                 (runningNow is null ? "Nothing was started." : $"The session that began ({runningNow.Id}) was ended at once.") +
                 " Try another parking, or start it in the APCOA Flow app.");
         }
         if (runningNow is null)
         {
-            logger.LogWarning("start at {Space} didn't produce a running session ({Failure}, pendingId {Pending}).", space.Id, failure, started.PendingId);
+            logger.LogWarning("start at {Parking} didn't produce a running session ({Failure}, pendingId {Pending}).", parking.Id, failure, started.PendingId);
             return Refused(failure is null or "still_pending" ? "start_unconfirmed" : "start_failed",
                 failure is null or "still_pending"
-                    ? $"APCOA accepted the start at {space.Name} but the session isn't running yet. Check get_active_sessions in a moment before trying again."
-                    : $"APCOA didn't start the session at {space.Name} ({failure}). Nothing is running.");
+                    ? $"APCOA accepted the start at {parking.Name} but the session isn't running yet. Check get_active_sessions in a moment before trying again."
+                    : $"APCOA didn't start the session at {parking.Name} ({failure}). Nothing is running.");
         }
 
         ApcoaTelemetry.Tag(ApcoaTelemetry.Tags.SessionId, runningNow.Id);
@@ -254,9 +254,9 @@ public sealed class Sessions(IApcoaFlowApi api, Pricing pricing, TimeProvider ti
     }
 
     /// <summary>The account's default payment method, if this server can pay with it.</summary>
-    private async Task<(PaymentMethod? Method, SessionResult? Refusal)> DefaultCardAsync(string? spaceId, CancellationToken ct)
+    private async Task<(PaymentMethod? Method, SessionResult? Refusal)> DefaultCardAsync(string? parkingId, CancellationToken ct)
     {
-        var methods = await api.GetPaymentMethodsAsync(spaceId, ct);
+        var methods = await api.GetPaymentMethodsAsync(parkingId, ct);
         var def = methods.FirstOrDefault(m => m.IsDefault);
         if (def is null)
             return (null, Refused("no_payment_method",
