@@ -141,7 +141,7 @@ public class LiveApiSessionTests
         using var sp = BuildProvider();
         var api = sp.GetRequiredService<IApcoaFlowApi>();
         var consumer = await api.GetConsumerAsync();
-        var plate = consumer.VehicleInformationResponses.First().VehicleNumber;
+        var plate = LiveApi.FirstRegisteredCar(consumer).VehicleNumber;
 
         // Lots + tariff for the parking.
         var lots = await api.GetParkingLotsAsync(ParkingId);
@@ -229,7 +229,7 @@ public class LiveApiSessionTests
         var data = sp.GetRequiredService<IApcoaParkingDataSource>();
 
         var consumer = await api.GetConsumerAsync();
-        var vehicle = consumer.VehicleInformationResponses.First();
+        var vehicle = LiveApi.FirstRegisteredCar(consumer);
         var payment = consumer.ConsumerUserPaymentMethods.First(p => p.IsDefault == 1);
         Log($"account consumerId={consumer.Id}, profileId={consumer.DefaultProfileId}, plate={vehicle.VehicleNumber}, payment={payment.PaymentType} (id {payment.Id}).");
 
@@ -351,7 +351,7 @@ public class LiveApiSessionTests
         var data = sp.GetRequiredService<IApcoaParkingDataSource>();
 
         var consumer = await api.GetConsumerAsync();
-        var vehicle = consumer.VehicleInformationResponses.First();
+        var vehicle = LiveApi.FirstRegisteredCar(consumer);
         var payment = consumer.ConsumerUserPaymentMethods.First(p => p.IsDefault == 1);
 
         Log($"finding a free parking to test duplicate-session behaviour…");

@@ -1,3 +1,4 @@
+using ApcoaFlowApiClient.Models.Consumer;
 using ApcoaFlowApiClient.Models.Session;
 using Refit;
 
@@ -19,6 +20,19 @@ internal static class LiveApi
     /// tariff). The only parking live tests may start a session on.
     /// </summary>
     public const int FreeParkingId = 616319;
+
+    /// <summary>
+    /// The car live tests park with: the <b>first</b> car in the account's registered car list, whatever it is.
+    /// Never hard-code a car id, plate or name — the test account (and its car) can change. Each test reads the
+    /// profile itself (no caching: tests must not depend on each other). Fails the test when the account has no car.
+    /// </summary>
+    public static Vehicle FirstRegisteredCar(ConsumerProfile consumer)
+    {
+        var car = consumer.VehicleInformationResponses.FirstOrDefault();
+        if (car is null)
+            Assert.Fail("The test account has no registered car; add one in the APCOA Flow app.");
+        return car!;
+    }
 
     /// <summary>
     /// Starts a session, retrying while APCOA still holds the account's one-session slot for a session that was
