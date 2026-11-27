@@ -46,6 +46,24 @@ public class SettingsValidationTests
     public async Task Security_Valid_Succeeds() =>
         await Assert.That(Security(GoodSecret, true, "key-1").Succeeded).IsTrue();
 
+    // ─── Stdio credentials ─────────────────────────────────────────────────────────────────────────
+
+    private static ValidateOptionsResult Stdio(string? email, string? password) =>
+        new StdioCredentialsOptionsValidator().Validate(Options.DefaultName,
+            new StdioCredentialsOptions { Email = email, Password = password });
+
+    [Test]
+    public async Task Stdio_MissingEmailOrPassword_Fails()
+    {
+        await Assert.That(Stdio(null, "pw").Failed).IsTrue();
+        await Assert.That(Stdio("a@b.c", " ").Failed).IsTrue();
+        await Assert.That(Stdio(null, null).Failures!.Count()).IsEqualTo(2);
+    }
+
+    [Test]
+    public async Task Stdio_BothSet_Succeeds() =>
+        await Assert.That(Stdio("a@b.c", "pw").Succeeded).IsTrue();
+
     // ─── Telemetry ─────────────────────────────────────────────────────────────────────────────────
 
     private static ValidateOptionsResult Telemetry(bool enabled, string? endpoint) =>
