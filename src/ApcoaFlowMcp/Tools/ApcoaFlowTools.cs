@@ -1,5 +1,6 @@
 using System.ComponentModel;
 using System.Text;
+using ApcoaFlowApiClient;
 using ApcoaFlowApiClient.Models.Session;
 using ApcoaFlowMcp.Apcoa;
 using Microsoft.Extensions.Options;
@@ -33,6 +34,11 @@ public sealed class ApcoaFlowTools(
         logger.LogInformation("lat={Lat}, lon={Lon}, radius={Radius} m, filter={Filter}.",
             latitude, longitude, radiusMeters, nameContains ?? "(none)");
         var results = await parkingData.FindNearbyAsync(latitude, longitude, radiusMeters / 1000.0, nameContains, ct);
+        ApcoaTelemetry.Tag(ApcoaTelemetry.Tags.RadiusMeters, radiusMeters);
+        ApcoaTelemetry.Tag(ApcoaTelemetry.Tags.NameFilter, nameContains);
+        ApcoaTelemetry.Tag(ApcoaTelemetry.Tags.ResultsCount, results.Count);
+        ApcoaTelemetry.Tag(ApcoaTelemetry.Tags.ParkingIds, ApcoaTelemetry.Capped(results.Select(r => r.Parking.Id.ToString())));
+        ApcoaTelemetry.Outcome("ok");
         if (results.Count == 0)
             return "No parkings found for the given location/filter.";
 
@@ -54,6 +60,9 @@ public sealed class ApcoaFlowTools(
         using var _ = logger.BeginScope("{Tool}", "get_registered_cars");
         logger.LogInformation("Fetching registered cars.");
         var cars = await sessions.GetVehiclesAsync(ct);
+        ApcoaTelemetry.Tag(ApcoaTelemetry.Tags.ResultsCount, cars.Count);
+        ApcoaTelemetry.Tag(ApcoaTelemetry.Tags.Plates, ApcoaTelemetry.Capped(cars.Select(c => c.VehicleNumber)));
+        ApcoaTelemetry.Outcome("ok");
         if (cars.Count == 0)
             return "No registered cars on the account.";
 
@@ -75,6 +84,7 @@ public sealed class ApcoaFlowTools(
         using var _ = logger.BeginScope("{Tool}", "get_active_sessions");
         logger.LogInformation("Fetching active sessions.");
         var active = await sessions.GetActiveAsync(ct);
+        TagSessions(active);
         if (active.Count == 0)
             return "No active parking session.";
         return string.Join("\n", active.Select(FormatSession));
@@ -88,6 +98,7 @@ public sealed class ApcoaFlowTools(
         using var _ = logger.BeginScope("{Tool}", "get_session_history");
         logger.LogInformation("Fetching session history.");
         var history = await sessions.GetHistoryAsync(ct);
+        TagSessions(history);
         if (history.Count == 0)
             return "No past parking sessions.";
         return string.Join("\n", history.Select(FormatSession));
@@ -269,6 +280,13 @@ public sealed class ApcoaFlowTools(
         if (d.Hours > 0) parts.Add(Unit(d.Hours, "hour"));
         if (d.Minutes > 0) parts.Add(Unit(d.Minutes, "minute"));
         return string.Join(" ", parts);
+    }
+
+    private static void TagSessions(IReadOnlyCollection<ParkingSessionV2> list)
+    {
+        ApcoaTelemetry.Tag(ApcoaTelemetry.Tags.ResultsCount, list.Count);
+        ApcoaTelemetry.Tag(ApcoaTelemetry.Tags.SessionIds, ApcoaTelemetry.Capped(list.Select(s => s.Id.ToString())));
+        ApcoaTelemetry.Outcome("ok");
     }
 
     private static string FormatSession(ParkingSessionV2 s)

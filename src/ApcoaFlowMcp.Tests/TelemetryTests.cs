@@ -1,6 +1,8 @@
+using System.Collections.Concurrent;
 using System.Diagnostics;
 using ApcoaFlowApiClient;
 using ApcoaFlowApiClient.ParkingData;
+using ApcoaFlowMcp.Tools;
 using ApcoaFlowMcp.Apcoa;
 using Microsoft.AspNetCore.Http;
 using NSubstitute;
@@ -15,14 +17,73 @@ namespace ApcoaFlowMcp.Tests;
 public class TelemetryTests
 {
     private static readonly ActivitySource TestSource = new("ApcoaFlowMcp.Tests.Telemetry");
+    private static readonly ConcurrentBag<Activity> Stopped = [];
 
     static TelemetryTests()
     {
         ActivitySource.AddActivityListener(new ActivityListener
         {
-            ShouldListenTo = s => s.Name == TestSource.Name,
+            // The test span stands in for the MCP tools/call span; the ApcoaFlow source records the phase
+            // spans — so these tests also prove business tags land on the tool span, not on an open phase.
+            ShouldListenTo = s => s.Name == TestSource.Name || s.Name == ApcoaTelemetry.SourceName,
             Sample = (ref ActivityCreationOptions<ActivityContext> _) => ActivitySamplingResult.AllDataAndRecorded,
+            ActivityStopped = a => Stopped.Add(a),
         });
+    }
+
+    /// <summary>Names of the child spans recorded directly under <paramref name="parent"/>, in start order.</summary>
+    private static List<string> Phases(Activity parent) =>
+        Stopped.Where(a => a.ParentSpanId == parent.SpanId && a.TraceId == parent.TraceId)
+            .OrderBy(a => a.StartTimeUtc).Select(a => a.OperationName).ToList();
+
+    [Test]
+    public async Task FreeStart_RecordsPhaseSpans_InOrder()
+    {
+        var span = await RunStart(Fake.Api(quote: Fake.Quote(0m)));
+
+        await Assert.That(Phases(span)).IsEquivalentTo(new[]
+        {
+            "apcoa.resolve_lot", "apcoa.resolve_consumer", "apcoa.offers", "apcoa.cancel_note", "apcoa.quote", "apcoa.start",
+        }, TUnit.Assertions.Enums.CollectionOrdering.Matching);
+    }
+
+    [Test]
+    public async Task Stop_RecordsStopThenRereadPhases()
+    {
+        var api = Fake.Api();
+        api.GetParkingSessionsAsync(Arg.Any<ApcoaFlowApiClient.Models.Session.ParkingSessionV2Query>(), Arg.Any<CancellationToken>())
+            .Returns([]);
+        using var span = TestSource.StartActivity("tools/call end_session")!;
+        await new ApcoaFlowSessionService(api, Substitute.For<IApcoaParkingDataSource>(),
+                Microsoft.Extensions.Logging.Abstractions.NullLogger<ApcoaFlowSessionService>.Instance)
+            .StopAsync(123, CancellationToken.None);
+        span.Stop();
+
+        await Assert.That(Phases(span)).IsEquivalentTo(new[] { "apcoa.stop", "apcoa.reread_completed" },
+            TUnit.Assertions.Enums.CollectionOrdering.Matching);
+        await Assert.That(span.GetTagItem(ApcoaTelemetry.Tags.Outcome)).IsEqualTo("stopped");
+    }
+
+    [Test]
+    public async Task FindParking_TagsCappedParkingIds_AndCount()
+    {
+        var data = Substitute.For<IApcoaParkingDataSource>();
+        var many = Enumerable.Range(1, 30)
+            .Select(i => (new ParkingEntry { Id = i, DisplayName = $"P{i}" }, i / 1000.0))
+            .ToList();
+        data.FindNearbyAsync(Arg.Any<double>(), Arg.Any<double>(), Arg.Any<double>(), Arg.Any<string?>(), Arg.Any<CancellationToken>())
+            .Returns(many);
+        var tools = new ApcoaFlowTools(
+            new ApcoaFlowSessionService(Fake.Api(), data, Microsoft.Extensions.Logging.Abstractions.NullLogger<ApcoaFlowSessionService>.Instance),
+            data, Microsoft.Extensions.Options.Options.Create(new ApcoaFlowToolsOptions()),
+            Microsoft.Extensions.Logging.Abstractions.NullLogger<ApcoaFlowTools>.Instance);
+
+        using var span = TestSource.StartActivity("tools/call find_parking")!;
+        await tools.FindParkingAsync(50.4, 18.8, 2000, "Carrefour");
+
+        await Assert.That(span.GetTagItem(ApcoaTelemetry.Tags.ResultsCount)).IsEqualTo(30);
+        await Assert.That(((string[])span.GetTagItem(ApcoaTelemetry.Tags.ParkingIds)!).Length).IsEqualTo(ApcoaTelemetry.MaxListedValues);
+        await Assert.That(span.GetTagItem(ApcoaTelemetry.Tags.NameFilter)).IsEqualTo("Carrefour");
     }
 
     private static async Task<Activity> RunStart(

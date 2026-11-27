@@ -83,7 +83,9 @@ public sealed class ApcoaFlowSessionService(
         double radiusMeters,
         CancellationToken ct)
     {
-        var nearby = await parkingData.FindNearbyAsync(latitude, longitude, radiusMeters / 1000.0, ct: ct);
+        IReadOnlyList<(ApcoaFlowApiClient.ParkingData.ParkingEntry Parking, double DistanceKm)> nearby;
+        using (ApcoaTelemetry.Phase("apcoa.find_nearest", (ApcoaTelemetry.Tags.RadiusMeters, radiusMeters)))
+            nearby = await parkingData.FindNearbyAsync(latitude, longitude, radiusMeters / 1000.0, ct: ct);
         var closest = nearby.FirstOrDefault();
         if (closest.Parking is null)
             return Refused($"No parking found within {radiusMeters:0} m of your location.", "no_parking_nearby");
@@ -123,7 +125,8 @@ public sealed class ApcoaFlowSessionService(
         List<ParkingLot> lots;
         try
         {
-            lots = await api.GetParkingLotsAsync(parkingId, ct: ct);
+            using (ApcoaTelemetry.Phase("apcoa.resolve_lot"))
+                lots = await api.GetParkingLotsAsync(parkingId, ct: ct);
         }
         catch (Refit.ApiException ex)
         {
@@ -152,7 +155,8 @@ public sealed class ApcoaFlowSessionService(
         ConsumerProfile consumer;
         try
         {
-            consumer = await api.GetConsumerAsync(ct: ct);
+            using (ApcoaTelemetry.Phase("apcoa.resolve_consumer"))
+                consumer = await api.GetConsumerAsync(ct: ct);
         }
         catch (Refit.ApiException ex)
         {
@@ -191,12 +195,13 @@ public sealed class ApcoaFlowSessionService(
         List<Offer> offers;
         try
         {
-            offers = await api.GetApplicableOffersAsync(new ApplicableOffersRequest
-            {
-                ParkingLot = lotId,
-                Identifier = vehicle.VehicleNumber,
-                Company = Company,
-            }, ct);
+            using (ApcoaTelemetry.Phase("apcoa.offers"))
+                offers = await api.GetApplicableOffersAsync(new ApplicableOffersRequest
+                {
+                    ParkingLot = lotId,
+                    Identifier = vehicle.VehicleNumber,
+                    Company = Company,
+                }, ct);
         }
         catch (Refit.ApiException ex)
         {
@@ -262,7 +267,9 @@ public sealed class ApcoaFlowSessionService(
         var checkOut = checkIn.Add(window);
 
         // 6. Quote the final (promo-applied) price.
-        var quote = await QuoteAsync(tariffId, lotId, window, checkIn, vehicle.VehicleNumber, promo, consumer.Id, ct);
+        TariffBreakdown quote;
+        using (ApcoaTelemetry.Phase("apcoa.quote", (ApcoaTelemetry.Tags.DurationMinutes, (int)window.TotalMinutes)))
+            quote = await QuoteAsync(tariffId, lotId, window, checkIn, vehicle.VehicleNumber, promo, consumer.Id, ct);
         var costPln = quote.TotalPayablePln;
         var minutes = (int)window.TotalMinutes;
         ApcoaTelemetry.Tag(ApcoaTelemetry.Tags.DurationMinutes, minutes);
@@ -326,6 +333,7 @@ public sealed class ApcoaFlowSessionService(
         StartSessionResponse response;
         try
         {
+            using var startPhase = ApcoaTelemetry.Phase("apcoa.start");
             response = await api.StartParkingSessionAsync(new StartParkingSessionRequest
             {
                 TariffId = tariffId,
@@ -351,8 +359,10 @@ public sealed class ApcoaFlowSessionService(
             // when a session is already active (one at a time per account). Fetch the active session(s)
             // and tell the user whether one is already running HERE (so they may just use it) or
             // ELSEWHERE (so they can end it and retry), including how long each has left.
-            var stillActive = await api.GetParkingSessionsAsync(
-                new ParkingSessionV2Query { Status = "ACTIVE", PageSize = 10 }, ct);
+            List<ParkingSessionV2> stillActive;
+            using (ApcoaTelemetry.Phase("apcoa.active_lookup"))
+                stillActive = await api.GetParkingSessionsAsync(
+                    new ParkingSessionV2Query { Status = "ACTIVE", PageSize = 10 }, ct);
 
             ApcoaTelemetry.Fail("session_already_active", "HTTP 424 LIMIT_EXCEEDED");
             if (stillActive.Count == 0)
@@ -417,11 +427,12 @@ public sealed class ApcoaFlowSessionService(
         ApcoaTelemetry.Tag(ApcoaTelemetry.Tags.SessionId, sessionId);
         try
         {
-            await api.StopParkingSessionAsync(new StopParkingSessionRequest
-            {
-                ParkingSessionId = sessionId,
-                SessionCheckOutTime = DateTimeOffset.UtcNow,
-            }, ct);
+            using (ApcoaTelemetry.Phase("apcoa.stop"))
+                await api.StopParkingSessionAsync(new StopParkingSessionRequest
+                {
+                    ParkingSessionId = sessionId,
+                    SessionCheckOutTime = DateTimeOffset.UtcNow,
+                }, ct);
         }
         catch (Refit.ApiException ex)
         {
@@ -429,7 +440,9 @@ public sealed class ApcoaFlowSessionService(
             throw;
         }
 
-        var completed = await api.GetParkingSessionsAsync(new ParkingSessionV2Query { Status = "COMPLETED", PageSize = 10 }, ct);
+        List<ParkingSessionV2> completed;
+        using (ApcoaTelemetry.Phase("apcoa.reread_completed"))
+            completed = await api.GetParkingSessionsAsync(new ParkingSessionV2Query { Status = "COMPLETED", PageSize = 10 }, ct);
         var result = completed.FirstOrDefault(s => s.Id == sessionId);
         ApcoaTelemetry.Outcome("stopped");
         ApcoaTelemetry.Tag(ApcoaTelemetry.Tags.CostPln, (double?)result?.Amount);
@@ -461,6 +474,7 @@ public sealed class ApcoaFlowSessionService(
     private async Task<IReadOnlyList<PriceTier>> BuildPriceLadderAsync(
         int tariffId, int lotId, DateTimeOffset checkIn, string plate, int consumerId, TimeSpan maxLot, CancellationToken ct)
     {
+        using var phase = ApcoaTelemetry.Phase("apcoa.price_ladder");
         var candidates = await CandidateDurationsAsync(lotId, maxLot, ct);
 
         var tiers = new List<PriceTier>();
@@ -559,6 +573,7 @@ public sealed class ApcoaFlowSessionService(
     /// </summary>
     private async Task<string?> BuildCancelRefundNoteAsync(int lotId, ParkingLot lot, CancellationToken ct)
     {
+        using var phase = ApcoaTelemetry.Phase("apcoa.cancel_note");
         var cfg = lot.PrimaryConfig;
         var refunds = cfg?.AllowRefund == 1;
 
@@ -614,6 +629,7 @@ public sealed class ApcoaFlowSessionService(
     private async Task<bool> PromotionValidatesAsync(
         Offer promo, int lotId, string plate, int consumerId, DateTimeOffset startTime, TimeSpan window, CancellationToken ct)
     {
+        using var phase = ApcoaTelemetry.Phase("apcoa.promotion.validate");
         try
         {
             var response = await api.ValidatePromotionAsync(new ValidatePromotionRequest

@@ -31,11 +31,36 @@ public static class ApcoaTelemetry
         public const string Promotion = "apcoa.promotion";
         public const string SessionId = "apcoa.session.id";
         public const string DistanceMeters = "apcoa.distance_m";
+        public const string RadiusMeters = "apcoa.radius_m";
+        public const string NameFilter = "apcoa.name_filter";
+        public const string ResultsCount = "apcoa.results.count";
+        public const string ParkingIds = "apcoa.parking.ids";
+        public const string Plates = "apcoa.plates";
+        public const string SessionIds = "apcoa.session.ids";
         public const string Outcome = "apcoa.outcome";
         public const string IndexEntries = "apcoa.parking_index.entries";
         public const string IndexSource = "apcoa.parking_index.source";
         public const string IndexTiles = "apcoa.parking_index.tiles";
         public const string IndexFailedTiles = "apcoa.parking_index.failed_tiles";
+    }
+
+    /// <summary>Longest list attribute we record (ids/plates); the matching count tag carries the full size.</summary>
+    public const int MaxListedValues = 20;
+
+    /// <summary>A capped string-array attribute value (first <see cref="MaxListedValues"/> entries).</summary>
+    public static string[] Capped(IEnumerable<string> values) => values.Take(MaxListedValues).ToArray();
+
+    /// <summary>
+    /// Starts a child span for one phase of a tool (resolve lot, quote, start, stop…) so a trace shows where time
+    /// goes and which backend calls belong together. Dispose to end it. Null (free) when telemetry is off.
+    /// While a phase is open it is <see cref="Activity.Current"/>, so set tool-level tags outside it.
+    /// </summary>
+    public static Activity? Phase(string name, params (string Key, object? Value)[] tags)
+    {
+        var activity = Source.StartActivity(name);
+        if (activity is not null)
+            foreach (var (k, v) in tags) activity.SetTag(k, v);
+        return activity;
     }
 
     /// <summary>Sets a tag on the current span (the MCP <c>tools/call</c> span inside a tool).</summary>
