@@ -7,9 +7,18 @@ parameters, behaviour, or output format changes.**
 All tools return a plain-text string (one or more lines). Units are user-facing: **PLN** for cost,
 **minutes** for duration, **metres** for distance.
 
+Each tool carries a human-readable title and annotations: **R** = read-only, **D** = destructive,
+**I** = idempotent. Clients use these hints to auto-approve reads and to prompt before the destructive
+ones (`start_expensive_session` bypasses the cost cap, `end_session` ends a session).
+
+Errors come back as a tool error with a plain message, e.g. *"APCOA couldn't find that parking or
+session (HTTP 404)…"* or, when the stored password no longer works, *"APCOA rejected the account's
+sign-in… Reconnect this APCOA connector…"*. Business refusals (cost cap, unknown plate, already active…)
+are normal text results.
+
 ---
 
-## `find_parking`
+## `find_parking` — R, I
 
 Find APCOA parkings near a coordinate, optionally filtered by name (e.g. a retail brand). Backed by
 the offline parking dataset (no live search API exists). Nearest first.
@@ -37,7 +46,7 @@ No parkings found for the given location/filter.
 
 ---
 
-## `get_registered_cars`
+## `get_registered_cars` — R, I
 
 List the licence plates registered on the account.
 
@@ -54,7 +63,7 @@ No registered cars on the account.
 
 ---
 
-## `get_active_sessions`
+## `get_active_sessions` — R, I
 
 Return the currently running session(s). You do **not** need to call this before starting — the start
 tools detect an already-active session themselves and report it (see `start_session`) — but it is handy
@@ -73,7 +82,7 @@ No active parking session.
 
 ---
 
-## `get_session_history`
+## `get_session_history` — R, I
 
 Return recent completed sessions, most recent first.
 
@@ -90,7 +99,7 @@ No past parking sessions.
 
 ---
 
-## `start_session`
+## `start_session` — write
 
 Start a session at a parking (by id, from `find_parking`) for a registered plate. **May cost money.**
 Resolves the lot, tariff, vehicle, payment method and profile automatically.
@@ -166,7 +175,7 @@ Parking: Carrefour Tarnowskie Góry ul. Kościuszki 5 [9882]. Can't start here �
 
 ---
 
-## `start_free_session`
+## `start_free_session` — write
 
 Start a **free-only** session at a parking (by id). Auto-applies a **validated** active free-time
 promotion and starts only if the session is actually free (cost 0). If it would cost anything, it
@@ -198,7 +207,7 @@ Parking: Carrefour … [9882]. No free parking is available at parking 9882. Sho
 
 ---
 
-## `start_session_current_location`
+## `start_session_current_location` — write
 
 Like `start_session` (**may cost money**), but finds the closest parking to a GPS location within a
 radius and starts there. Use when the user says "park here / where I am". Same free/paid behaviour: a
@@ -228,7 +237,7 @@ No parking found within 300 m of your location.
 
 ---
 
-## `start_free_session_current_location`
+## `start_free_session_current_location` — write
 
 Free-only variant of `start_session_current_location`: finds the closest parking within the radius and
 starts only if the session is actually free; if it would cost anything it starts nothing and reports
@@ -252,7 +261,7 @@ Parking: Tarnowskie Góry ul. Oświęcimska [616319], 237 m away. Started a free
 
 ---
 
-## `start_expensive_session`
+## `start_expensive_session` — D
 
 Identical to `start_session` but **bypasses the maximum-cost cap**. Exposed as a separate tool so a
 host can allow/deny or require extra confirmation for over-cap sessions independently. Still uses the
@@ -266,7 +275,7 @@ as `start_session`; no `onlyFree`).
 
 ---
 
-## `end_session`
+## `end_session` — D, I
 
 End an active session by id (from `get_active_sessions`). Returns the final cost.
 

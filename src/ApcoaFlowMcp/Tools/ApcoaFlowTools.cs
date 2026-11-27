@@ -19,7 +19,7 @@ public sealed class ApcoaFlowTools(
 {
     private readonly ApcoaFlowToolsOptions _options = options.Value;
 
-    [McpServerTool(Name = "find_parking")]
+    [McpServerTool(Name = "find_parking", Title = "Find APCOA parkings", ReadOnly = true, Idempotent = true)]
     [Description("Find APCOA parkings near a location, optionally filtered by name (e.g. \"Carrefour\", \"Lidl\"). Returns one line per parking as \"[id] name - address (distance m)\", nearest first. Use the id with start_session.")]
     public Task<string> FindParkingAsync(
         [Description("Latitude of the search center (decimal degrees)")] double latitude,
@@ -46,7 +46,7 @@ public sealed class ApcoaFlowTools(
         return sb.ToString().TrimEnd();
     });
 
-    [McpServerTool(Name = "get_registered_cars")]
+    [McpServerTool(Name = "get_registered_cars", Title = "Get registered cars", ReadOnly = true, Idempotent = true)]
     [Description("List the license plates registered on the account. Returns one line per car as \"plate [default] - status\".")]
     public Task<string> GetRegisteredCarsAsync(CancellationToken ct = default)
         => ToolErrors.GuardAsync("get_registered_cars", logger, async () =>
@@ -67,7 +67,7 @@ public sealed class ApcoaFlowTools(
         return sb.ToString().TrimEnd();
     });
 
-    [McpServerTool(Name = "get_active_sessions")]
+    [McpServerTool(Name = "get_active_sessions", Title = "Get active parking sessions", ReadOnly = true, Idempotent = true)]
     [Description("Returns the currently active parking session(s), or a message if none is running. You don't need to call this before starting — start_session detects an already-active session itself — but it's useful to inspect running sessions or get an id to end.")]
     public Task<string> GetActiveSessionsAsync(CancellationToken ct = default)
         => ToolErrors.GuardAsync("get_active_sessions", logger, async () =>
@@ -80,7 +80,7 @@ public sealed class ApcoaFlowTools(
         return string.Join("\n", active.Select(FormatSession));
     });
 
-    [McpServerTool(Name = "get_session_history")]
+    [McpServerTool(Name = "get_session_history", Title = "Get parking history", ReadOnly = true, Idempotent = true)]
     [Description("Returns the user's recent completed parking sessions, most recent first, with cost and duration.")]
     public Task<string> GetSessionHistoryAsync(CancellationToken ct = default)
         => ToolErrors.GuardAsync("get_session_history", logger, async () =>
@@ -93,7 +93,7 @@ public sealed class ApcoaFlowTools(
         return string.Join("\n", history.Select(FormatSession));
     });
 
-    [McpServerTool(Name = "start_session")]
+    [McpServerTool(Name = "start_session", Title = "Start parking session", ReadOnly = false, Destructive = false, Idempotent = false)]
     [Description(
         "Start a parking session at a parking (by id, from find_parking) for a registered license plate. " +
         "May cost money. FREE sessions start immediately. PAID sessions do NOT start on the first call: the " +
@@ -119,7 +119,7 @@ public sealed class ApcoaFlowTools(
         return FormatStart(result);
     });
 
-    [McpServerTool(Name = "start_free_session")]
+    [McpServerTool(Name = "start_free_session", Title = "Start free parking session", ReadOnly = false, Destructive = false, Idempotent = false)]
     [Description(
         "Start a FREE parking session at a parking (by id, from find_parking) for a registered license plate. " +
         "Auto-applies an active free-time promotion and starts only if the session is actually free (cost 0); " +
@@ -138,7 +138,7 @@ public sealed class ApcoaFlowTools(
         return FormatStart(result);
     });
 
-    [McpServerTool(Name = "start_session_current_location")]
+    [McpServerTool(Name = "start_session_current_location", Title = "Start parking session here", ReadOnly = false, Destructive = false, Idempotent = false)]
     [Description(
         "Start a parking session at the closest parking to the user's current GPS location (within a " +
         "search radius), for a registered license plate. May cost money. Same FREE/PAID behaviour as " +
@@ -163,7 +163,7 @@ public sealed class ApcoaFlowTools(
         return FormatStart(result);
     });
 
-    [McpServerTool(Name = "start_free_session_current_location")]
+    [McpServerTool(Name = "start_free_session_current_location", Title = "Start free parking session here", ReadOnly = false, Destructive = false, Idempotent = false)]
     [Description(
         "Start a FREE parking session at the closest parking to the user's current GPS location (within a " +
         "search radius), for a registered license plate. Auto-applies an active free-time promotion and " +
@@ -186,7 +186,7 @@ public sealed class ApcoaFlowTools(
         return FormatStart(result);
     });
 
-    [McpServerTool(Name = "start_expensive_session")]
+    [McpServerTool(Name = "start_expensive_session", Title = "Start parking session above the cost limit", ReadOnly = false, Destructive = true, Idempotent = false)]
     [Description("Does the same as start_session but bypasses the maximum-cost limit.")]
     public Task<string> StartExpensiveSessionAsync(
         [Description("Parking id (from find_parking)")] int parkingId,
@@ -203,7 +203,7 @@ public sealed class ApcoaFlowTools(
         return FormatStart(result);
     });
 
-    [McpServerTool(Name = "end_session")]
+    [McpServerTool(Name = "end_session", Title = "End parking session", Destructive = true, Idempotent = true)]
     [Description("End an active parking session by its id (from get_active_sessions). Returns the final cost. Always confirm with the user before calling.")]
     public Task<string> EndSessionAsync(
         [Description("The session id (from get_active_sessions)")] long sessionId,
