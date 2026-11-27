@@ -109,7 +109,7 @@ builder.Services
         options.ServerInstructions = McpInstructions.Text;
     })
     .WithHttpTransport()
-    .WithTools<ApcoaFlowTools>();
+    .WithApcoaFlowTools();
 
 var app = builder.Build();
 
