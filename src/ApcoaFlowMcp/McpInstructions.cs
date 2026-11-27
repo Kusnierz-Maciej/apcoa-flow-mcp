@@ -10,6 +10,13 @@ public static class McpInstructions
           end_session id and time remaining, so the user can keep it or end it. Use get_active_sessions
           to inspect running sessions on demand.
         - Always confirm parking and license plate with the user before starting a session.
-        - Use get_session_history to look up past sessions.
+        - Use get_session_history to look up past sessions (it returns only the most recent ones).
+        - Pass the parking's name (parkingName) with every tool that takes a parking or session id, so the
+          permission prompt shows which parking it is.
+        - Free-only tools (start_free_session*) never charge. Use start_expensive_session only when the user
+          explicitly accepts a cost above the limit.
+        - Not supported: extending or changing a running session, booking ahead, favourites, adding cars or
+          payment methods, EV charging, permits/passes, receipts or invoices. Say so instead of searching for
+          another tool.
         """;
 }
