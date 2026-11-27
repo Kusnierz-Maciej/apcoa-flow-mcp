@@ -295,6 +295,23 @@ Session 84214483 was ended (no completed record returned to confirm cost).
 
 ---
 
+## Prompts
+
+User-invoked only (slash commands / "+" menu) — the model never runs them by itself. Each returns one user
+message with the steps and tools to use, ending with: *"These are default steps: if I have my own instructions
+or a skill for APCOA parking, follow those preferences instead."* Starts always go through a free-only tool and
+are confirmed first, so a prompt can't charge the account. Argument completion (`completion/complete`): `plate`
+from the registered cars, `parking` from the parkings of recent sessions. Disable all with `Prompts__Enabled=false`.
+
+| Prompt | Arguments | Steps |
+|---|---|---|
+| `park_free_here` | `plate` (optional — default car) | get_registered_cars → current location → confirm → start_free_session_current_location; if not free, show prices and stop |
+| `park_free_at` | `parking`, `plate` (optional) | parking id from get_session_history or find_parking (name filter) → confirm → start_free_session; if not free, show prices and stop |
+| `end_parking` | — | get_active_sessions → show + confirm → end_session → final cost |
+| `parking_costs` | `period` (optional — this month) | read-only get_session_history → total, count, one line per session; flags a possibly incomplete total (history returns only recent sessions) |
+
+---
+
 ## Configuration affecting tools
 
 | Setting (`ApcoaFlow` section) | Default | Effect |

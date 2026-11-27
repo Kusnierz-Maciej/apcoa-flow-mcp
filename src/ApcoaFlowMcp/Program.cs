@@ -3,6 +3,7 @@ using ApcoaFlowMcp;
 using ApcoaFlowMcp.Apcoa;
 using ApcoaFlowMcp.Security;
 using ApcoaFlowMcp.Security.OAuth;
+using ApcoaFlowMcp.Prompts;
 using ApcoaFlowMcp.Tools;
 using Microsoft.AspNetCore.HttpOverrides;
 using Microsoft.Extensions.Options;
@@ -112,6 +113,7 @@ builder.Services
     })
     .WithHttpTransport()
     .WithApcoaFlowTools()
+    .WithApcoaFlowPrompts(builder.Configuration)
     .WithMessageFilters(filters => filters.AddIncomingFilter(McpSpanNames.MessageFilter))
     .WithRequestFilters(filters => filters.AddCallToolFilter(ClientContextFilter.Create));
 

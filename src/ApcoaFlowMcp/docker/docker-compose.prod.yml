@@ -18,6 +18,8 @@ services:
       #- ParkingData__SoftRefreshAge=12:00:00
       #- ParkingData__HardRefreshAge=48:00:00
       #- ParkingData__BackgroundRefreshInterval=24:00:00
+      # MCP prompts (user-picked shortcuts like "Park here for free"); false = advertise none.
+      #- Prompts__Enabled=true
       # Client-side rate limit on APCOA calls (login included): a burst, then one call per period.
       #- RateLimit__TokenLimit=10
       #- RateLimit__ReplenishmentPeriod=00:00:01

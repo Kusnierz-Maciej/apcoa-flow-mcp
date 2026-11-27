@@ -23,6 +23,20 @@ Unofficial MCP server for [APCOA Flow](https://www.apcoa.pl/krotkotrwale-parkowa
 
 Cost, duration and distance are user-facing in PLN, minutes and metres respectively.
 
+**Prompts** — shortcuts you pick yourself (slash commands in Claude Code, the "+" menu in claude.ai); they
+never run on their own. The `plate` argument autocompletes from your registered cars and `parking` from the
+parkings of your recent sessions:
+
+| Prompt | Does |
+|---|---|
+| `park_free_here` | Free session at the closest parking to where you are (confirms first; never starts a paid one) |
+| `park_free_at` | Free session at a parking you name, e.g. one you used before (confirms first; never paid) |
+| `end_parking` | End the running session after confirming, and report the cost |
+| `parking_costs` | What parking cost this month (or another period), from the session history |
+
+They are defaults: if you have your own instructions or skills for APCOA parking, those should win (the prompt
+text asks the model to prefer them — a hint, not enforced). Turn prompts off with `Prompts__Enabled=false`.
+
 See [`docs/MCP-TOOLS.md`](docs/MCP-TOOLS.md) for the detailed tool reference (inputs + example outputs)
 and [`docs/API-NOTES.md`](docs/API-NOTES.md) for notes on the underlying APCOA Flow API.
 
@@ -259,6 +273,11 @@ Freshness and indexing are tunable via `ParkingData__*` environment variables:
 
 - **ApcoaFlow__MaxSessionCostPln** — the most a single `start_session` may cost (PLN). A quote above this is refused; use `start_expensive_session` to bypass.
 - **ApcoaFlow__CurrentLocationRadiusMeters** — default search radius for `start_session_current_location` (the tool may override per call).
+
+## Prompts
+
+- **Prompts__Enabled** — `true` (default) advertises the MCP prompts above and their argument completions;
+  `false` removes them.
 
 ## Rate limit
 
