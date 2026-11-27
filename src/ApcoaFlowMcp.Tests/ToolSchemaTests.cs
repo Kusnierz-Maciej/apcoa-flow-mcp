@@ -48,6 +48,20 @@ public class ToolSchemaTests
     }
 
     [Test]
+    [Arguments("start_session")]
+    [Arguments("start_free_session")]
+    [Arguments("start_expensive_session")]
+    [Arguments("end_session")]
+    public async Task IdTools_RequireAReadableParkingName_ForThePermissionPrompt(string tool)
+    {
+        var schema = Tools.Single(t => t.ProtocolTool.Name == tool).ProtocolTool.InputSchema;
+        var required = schema.GetProperty("required").EnumerateArray().Select(e => e.GetString()).ToList();
+
+        await Assert.That(required).Contains("parkingName");
+        await Assert.That(Property(tool, "parkingName").GetProperty("description").GetString()!).Contains("not sent to the API");
+    }
+
+    [Test]
     public async Task NumericIds_StayNumbers_InSchema()
     {
         await Assert.That(Property("start_session", "parkingId").GetProperty("type").GetString()).IsEqualTo("integer");

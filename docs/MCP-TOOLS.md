@@ -11,6 +11,11 @@ Each tool carries a human-readable title and annotations: **R** = read-only, **D
 **I** = idempotent. Clients use these hints to auto-approve reads and to prompt before the destructive
 ones (`start_expensive_session` bypasses the cost cap, `end_session` ends a session).
 
+Tools that act on a parking or session by id (`start_session`, `start_free_session`,
+`start_expensive_session`, `end_session`) also take **`parkingName`**. It is **not sent to the API**: it only
+makes the client's permission prompt readable ("start at *Tarnowskie Góry ul. Oświęcimska*" instead of an id),
+so the user can confirm the right parking.
+
 Errors come back as a tool error with a plain message, e.g. *"APCOA couldn't find that parking or
 session (HTTP 404)…"* or, when the stored password no longer works, *"APCOA rejected the account's
 sign-in… Reconnect this APCOA connector…"*. Business refusals (cost cap, unknown plate, already active…)
@@ -138,6 +143,7 @@ Resolves the lot, tariff, vehicle, payment method and profile automatically.
 | Name | Type | Required | Default | Description |
 |---|---|---|---|---|
 | `parkingId` | int | yes | — | Parking id from `find_parking`. |
+| `parkingName` | string | yes | — | The parking's name as `find_parking` shows it — for the permission prompt, not sent to the API. |
 | `licensePlate` | string | yes | — | Registered plate, e.g. `ABC 123DE`. |
 | `durationMinutes` | int | no | server default | Desired duration in minutes. Omitting it uses the server default (60 min unless changed). Only rounded up to a free-time promotion's window when that promotion **validates as usable**; otherwise your exact requested duration is quoted. On a paid confirming call, set this to the chosen option's duration. |
 | `confirmedCostPln` | decimal | no | — | Exact cost being confirmed (the chosen option's price; paid, second call only). |
@@ -189,6 +195,7 @@ rounded up to it (capped by the lot's max duration), and a longer one is refused
 | Name | Type | Required | Default | Description |
 |---|---|---|---|---|
 | `parkingId` | int | yes | — | Parking id from `find_parking`. |
+| `parkingName` | string | yes | — | The parking's name as `find_parking` shows it — for the permission prompt, not sent to the API. |
 | `licensePlate` | string | yes | — | Registered plate. |
 | `durationMinutes` | int | no | full free window | Desired duration in minutes. A shorter value is rounded up to the full free window; longer than the window is refused. |
 
@@ -268,7 +275,7 @@ host can allow/deny or require extra confirmation for over-cap sessions independ
 two-step confirmation (chosen `durationMinutes` + exact `confirmedCostPln`) for paid sessions, returns
 the price tiers + cancel/refund note, and only applies/fills a free-time promotion when it validates.
 
-**Inputs** — `parkingId`, `licensePlate`, `durationMinutes?`, `confirmedCostPln?` (same types/defaults
+**Inputs** — `parkingId`, `parkingName`, `licensePlate`, `durationMinutes?`, `confirmedCostPln?` (same types/defaults
 as `start_session`; no `onlyFree`).
 
 **Output** — same format as `start_session` (never blocked by the cap).
@@ -284,6 +291,7 @@ End an active session by id (from `get_active_sessions`). Returns the final cost
 | Name | Type | Required | Description |
 |---|---|---|---|
 | `sessionId` | long | yes | Session id from `get_active_sessions`. |
+| `parkingName` | string | yes | The session's parking name as `get_active_sessions` shows it — for the permission prompt, not sent to the API. |
 
 **Output**
 ```

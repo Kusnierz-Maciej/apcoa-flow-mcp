@@ -93,7 +93,7 @@ public class ToolErrorTests
         api.StopParkingSessionAsync(Arg.Any<ApcoaFlowApiClient.Models.Session.StopParkingSessionRequest>(), Arg.Any<CancellationToken>())
             .ThrowsAsync(await Api(HttpStatusCode.UnprocessableEntity, SessionNotFound));
 
-        var ex = await Assert.ThrowsAsync<McpException>(() => Tools(api).EndSessionAsync(84420857));
+        var ex = await Assert.ThrowsAsync<McpException>(() => Tools(api).EndSessionAsync(84420857, "Tarnowskie Góry ul. Oświęcimska"));
 
         await Assert.That(ex!.Message).Contains("no active parking session with that id");
     }

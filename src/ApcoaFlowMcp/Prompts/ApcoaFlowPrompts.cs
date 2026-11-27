@@ -62,7 +62,7 @@ public sealed class ApcoaFlowPrompts
         End my APCOA parking session.
         1. Call get_active_sessions. If nothing is running, just tell me so.
         2. Show me the running session (parking, plate, since when) and ask me to confirm before ending it.
-        3. Only after I confirm, call end_session with its id and report the final cost.
+        3. Only after I confirm, call end_session with its id and parking name, and report the final cost.
         {Defer}
         """;
 

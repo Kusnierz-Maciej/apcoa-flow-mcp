@@ -20,6 +20,10 @@ public sealed class ApcoaFlowTools(
 {
     private readonly ApcoaFlowToolsOptions _options = options.Value;
 
+    private const string ParkingNameDescription =
+        "The parking's name exactly as find_parking shows it. Shown in the permission prompt so the user can " +
+        "confirm the right parking; not sent to the API.";
+
     [McpServerTool(Name = "find_parking", Title = "Find APCOA parkings", ReadOnly = true, Idempotent = true)]
     [Description("Find APCOA parkings near a location, optionally filtered by name (e.g. \"Carrefour\", \"Lidl\"). Returns one line per parking as \"[id] name - address (distance m)\", nearest first. Use the id with start_session.")]
     public Task<string> FindParkingAsync(
@@ -115,6 +119,7 @@ public sealed class ApcoaFlowTools(
         "with the user before confirming a paid session. (To guarantee a free-only start, use start_free_session.)")]
     public Task<string> StartSessionAsync(
         [Description("Parking id (from find_parking)")] int parkingId,
+        [Description(ParkingNameDescription)] string parkingName,
         [Description("Registered license plate, e.g. \"ABC 123DE\" (see get_registered_cars)")] string licensePlate,
         [Description("Desired duration in minutes. Omit to use the server's default. Only rounded up to a free-time promotion's window when that promotion actually validates as usable; otherwise your exact requested duration is quoted.")] int? durationMinutes = null,
         [Description("For a PAID session: the exact cost in PLN you are confirming (the chosen option's price from a prior call's quote). Must match the live cost exactly. Omit on the first call.")] decimal? confirmedCostPln = null,
@@ -138,6 +143,7 @@ public sealed class ApcoaFlowTools(
         "suggests using start_session for a paid session. Safe: this tool never incurs a charge.")]
     public Task<string> StartFreeSessionAsync(
         [Description("Parking id (from find_parking)")] int parkingId,
+        [Description(ParkingNameDescription)] string parkingName,
         [Description("Registered license plate, e.g. \"ABC 123DE\" (see get_registered_cars)")] string licensePlate,
         [Description("Desired duration in minutes. Omit to use the full free window.")] int? durationMinutes = null,
         CancellationToken ct = default)
@@ -201,7 +207,8 @@ public sealed class ApcoaFlowTools(
     [Description("Does the same as start_session but bypasses the maximum-cost limit.")]
     public Task<string> StartExpensiveSessionAsync(
         [Description("Parking id (from find_parking)")] int parkingId,
-        [Description("Registered license plate, e.g. \"ABC 123DE\"")] string licensePlate,
+        [Description(ParkingNameDescription)] string parkingName,
+        [Description("Registered license plate, e.g. \"ABC 123DE\" (see get_registered_cars)")] string licensePlate,
         [Description("Desired duration in minutes. Omit to use the server's default duration. If a free-time promotion applies and this is shorter than the free window, it is rounded up to the full free window so none of the free time is wasted.")] int? durationMinutes = null,
         [Description("The exact cost in PLN you are confirming (from a prior call's quote). Must match the live cost exactly. Omit on the first call.")] decimal? confirmedCostPln = null,
         CancellationToken ct = default)
@@ -215,9 +222,10 @@ public sealed class ApcoaFlowTools(
     });
 
     [McpServerTool(Name = "end_session", Title = "End parking session", Destructive = true, Idempotent = true)]
-    [Description("End an active parking session by its id (from get_active_sessions). Returns the final cost. Always confirm with the user before calling.")]
+    [Description("End an active parking session by its id (from get_active_sessions), passing the session's parking name too. Returns the final cost. Always confirm with the user before calling, naming the parking.")]
     public Task<string> EndSessionAsync(
         [Description("The session id (from get_active_sessions)")] long sessionId,
+        [Description("The session's parking name exactly as get_active_sessions shows it. Shown in the permission prompt so the user can confirm the right session; not sent to the API.")] string parkingName,
         CancellationToken ct = default)
         => ToolErrors.GuardAsync("end_session", logger, async () =>
     {
