@@ -1,5 +1,3 @@
-using System.Globalization;
-using System.Text;
 using ApcoaFlowApiClient.Api;
 using ApcoaFlowApiClient.Models;
 
@@ -13,15 +11,23 @@ public sealed record FoundParking(string Id, string Name, string? Address, strin
     bool Inside, bool FromOutline);
 
 /// <summary>
-/// Finds parkings the way the APCOA Flow app does: <c>search</c> for text, the map's bounding box for a position. Near
-/// a position the ranking is by distance to the parking's outline when it has one (0 inside it), else to its pin.
+/// Finds parkings the way the APCOA Flow app does: <c>search</c> for text (with the position when there is one), the
+/// map's bounding box for a position alone. Near a position the distance is to the parking's outline when it has one
+/// (0 inside it), else to its pin.
 /// </summary>
 public sealed class ParkingFinder(IApcoaFlowApi api)
 {
     public const int MaxResults = 20;
 
-    /// <summary>Parkings within <paramref name="radiusMeters"/> of a position, nearest first, optionally by name.</summary>
-    public async Task<List<FoundParking>> NearAsync(double lat, double lon, double radiusMeters, string? nameContains, CancellationToken ct)
+    /// <summary>
+    /// Where a text search without the user's position is anchored. A position-less <c>search</c> returns parkings
+    /// that aren't on the map (no coordinates, no address — also not in their details; 2026-11-27); with a position
+    /// it returns the mapped ones. So a name-only query searches around the middle of Poland and hides the distance.
+    /// </summary>
+    public static readonly Coordinates SearchAnchor = new(52.0, 19.0);
+
+    /// <summary>Parkings within <paramref name="radiusMeters"/> of a position, nearest first.</summary>
+    public async Task<List<FoundParking>> NearAsync(double lat, double lon, double radiusMeters, CancellationToken ct)
     {
         var (swLat, swLon, neLat, neLon) = Geo.Box(lat, lon, radiusMeters);
         var pins = await api.GetSpacesByBoundingBoxAsync(new BoundingBoxQuery
@@ -29,9 +35,7 @@ public sealed class ParkingFinder(IApcoaFlowApi api)
             SwLatitude = swLat, SwLongitude = swLon, NeLatitude = neLat, NeLongitude = neLon, Zoom = 16, // zoom changes nothing
         }, ct);
 
-        var wanted = Fold(nameContains);
         return pins
-            .Where(p => wanted.Length == 0 || Fold(p.Name).Contains(wanted, StringComparison.Ordinal))
             .Select(p => (Pin: p, Distance: Geo.To(lat, lon, p.Coordinates, p.GeoBorder)))
             .Where(x => x.Distance is { } d && d.Meters <= radiusMeters)
             .OrderBy(x => x.Distance!.Value.Meters)
@@ -42,20 +46,49 @@ public sealed class ParkingFinder(IApcoaFlowApi api)
     }
 
     /// <summary>
-    /// Text search: name, brand, town, postcode or location code. With a position the API ranks nearest first
-    /// (distance from its km value).
+    /// Text search through the API's <c>search</c>: name, brand, town, street, postcode or location code. With a
+    /// position the API ranks nearest first; hits within <paramref name="outlineRadiusMeters"/> are then measured to
+    /// their outline (from the map pins around the position) instead of the API's distance to the pin.
     /// </summary>
-    public async Task<List<FoundParking>> SearchAsync(string query, double? lat, double? lon, CancellationToken ct)
+    public async Task<List<FoundParking>> SearchAsync(string query, double? lat, double? lon, double outlineRadiusMeters, CancellationToken ct)
     {
         var response = await api.SearchAsync(new SearchQuery
         {
-            Query = query, Latitude = lat, Longitude = lon, Size = MaxResults, IsParking = true, IsCharging = false,
+            Query = query, Latitude = lat ?? SearchAnchor.Latitude, Longitude = lon ?? SearchAnchor.Longitude,
+            Size = MaxResults, IsParking = true, IsCharging = false,
         }, ct);
-        return response.Spaces
-            .Take(MaxResults)
-            .Select(s => new FoundParking(s.Id, s.Name, Address(s.Address?.DisplayValue), string.IsNullOrWhiteSpace(s.TariffCode) ? null : s.TariffCode,
-                s.Distance is { } km ? km * 1000 : null, Inside: false, FromOutline: false))
-            .ToList();
+
+        Dictionary<string, MapSpace> pins = [];
+        if (lat is not null && lon is not null && response.Spaces.Count > 0)
+        {
+            var (swLat, swLon, neLat, neLon) = Geo.Box(lat.Value, lon.Value, outlineRadiusMeters);
+            pins = (await api.GetSpacesByBoundingBoxAsync(new BoundingBoxQuery
+            {
+                SwLatitude = swLat, SwLongitude = swLon, NeLatitude = neLat, NeLongitude = neLon, Zoom = 16,
+            }, ct)).GroupBy(p => p.Id).ToDictionary(g => g.Key, g => g.First());
+        }
+
+        var found = response.Spaces.Take(MaxResults).Select(s =>
+        {
+            var code = string.IsNullOrWhiteSpace(s.TariffCode) ? null : s.TariffCode;
+            if (pins.TryGetValue(s.Id, out var pin) && Geo.To(lat!.Value, lon!.Value, pin.Coordinates, pin.GeoBorder) is { } d)
+                return new FoundParking(s.Id, s.Name, Address(s.Address?.DisplayValue), code, d.Meters, d.Inside, d.FromOutline);
+            return new FoundParking(s.Id, s.Name, Address(s.Address?.DisplayValue), code,
+                lat is not null && s.Distance is { } km ? km * 1000 : null, Inside: false, FromOutline: false);
+        }).ToList();
+        return lat is null ? found : found.OrderBy(f => f.DistanceMeters ?? double.MaxValue).ToList();
+    }
+
+    /// <summary>The map pin of one parking (for its outline and type): the pins in a small box around its coordinates.</summary>
+    public async Task<MapSpace?> PinAsync(string spaceId, Coordinates? at, CancellationToken ct)
+    {
+        if (at is null) return null;
+        var (swLat, swLon, neLat, neLon) = Geo.Box(at.Latitude, at.Longitude, 300);
+        var pins = await api.GetSpacesByBoundingBoxAsync(new BoundingBoxQuery
+        {
+            SwLatitude = swLat, SwLongitude = swLon, NeLatitude = neLat, NeLongitude = neLon, Zoom = 16,
+        }, ct);
+        return pins.FirstOrDefault(p => p.Id == spaceId);
     }
 
     // The API pads missing parts: ", Strzegom, Poland".
@@ -63,17 +96,5 @@ public sealed class ParkingFinder(IApcoaFlowApi api)
     {
         var trimmed = display?.Trim().TrimStart(',').Trim();
         return string.IsNullOrEmpty(trimmed) ? null : trimmed;
-    }
-
-    /// <summary>Case- and accent-insensitive form for name matching ("Ostrów" ~ "ostrow").</summary>
-    internal static string Fold(string? text)
-    {
-        if (string.IsNullOrWhiteSpace(text)) return string.Empty;
-        var decomposed = text.Trim().ToLowerInvariant().Replace('ł', 'l').Normalize(NormalizationForm.FormD);
-        var sb = new StringBuilder(decomposed.Length);
-        foreach (var c in decomposed)
-            if (CharUnicodeInfo.GetUnicodeCategory(c) != UnicodeCategory.NonSpacingMark)
-                sb.Append(c);
-        return sb.ToString();
     }
 }

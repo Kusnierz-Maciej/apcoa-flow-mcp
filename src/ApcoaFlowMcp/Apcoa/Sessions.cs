@@ -51,6 +51,11 @@ public sealed class Sessions(IApcoaFlowApi api, Pricing pricing, TimeProvider ti
         var space = await api.GetSpaceAsync(spaceId.Trim(), ct);
         ApcoaTelemetry.Tag(ApcoaTelemetry.Tags.ParkingId, space.Id);
         ApcoaTelemetry.Tag(ApcoaTelemetry.Tags.ParkingName, space.Name);
+        if (space.CtaButtonType is not null && space.CtaButtonType != "startParking")
+            return Refused("not_startable", space.SessionsStartAutomatically
+                ? $"Sessions can't be started at {space.Name}: it recognises plates and starts and ends sessions by itself " +
+                  "when the car enters and leaves (see get_parking_details for its rules and free time)."
+                : $"Sessions can't be started at {space.Name} (not in the APCOA Flow app either).");
 
         var card = await DefaultCardAsync(space.Id, ct);
         if (card.Refusal is { } noCard)

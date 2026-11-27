@@ -81,23 +81,44 @@ public class ReadToolTests
         new() { Id = id, Name = name, Coordinates = new Coordinates(lat, lon), GeoBorder = outline };
 
     [Test]
-    public async Task FindParkings_near_a_position_ranks_by_distance_and_filters_by_name_without_accents()
+    public async Task FindParkings_with_a_name_and_a_position_uses_the_search_and_measures_nearby_outlines()
+    {
+        var api = FakeApi.Create();
+        var square = new GeoBorder { Coordinates = [new(49.9999, 17.9999), new(49.9999, 18.0001), new(50.0001, 18.0001), new(50.0001, 17.9999), new(49.9999, 17.9999)] };
+        api.SearchAsync(Arg.Is<SearchQuery>(q => q!.Query == "Biedronka" && q.Latitude == 50.0 && q.Longitude == 18.0), Arg.Any<CancellationToken>())
+            .Returns(new SearchResponse
+            {
+                Spaces =
+                [
+                    new SearchSpace { Id = "far", Name = "Biedronka Daleka", Distance = 12.3, TariffCode = "111" },
+                    new SearchSpace { Id = "here", Name = "Biedronka Tutaj", Distance = 0.09, TariffCode = "222" },
+                ],
+            });
+        api.GetSpacesByBoundingBoxAsync(Arg.Any<BoundingBoxQuery>(), Arg.Any<CancellationToken>())
+            .Returns([Pin("here", "Biedronka Tutaj", 50.0008, 18.0, square)]);
+
+        var lines = (await FakeApi.Tools(api).FindParkingsAsync("Biedronka", 50.0, 18.0)).Split('\n');
+
+        await Assert.That(lines[0]).IsEqualTo("[here] Biedronka Tutaj - you are inside it (code 222)");
+        await Assert.That(lines[1]).IsEqualTo("[far] Biedronka Daleka - 12.3 km (code 111)");
+    }
+
+    [Test]
+    public async Task FindParkings_near_a_position_alone_lists_the_map_pins_within_the_radius()
     {
         var api = FakeApi.Create();
         api.GetSpacesByBoundingBoxAsync(Arg.Any<BoundingBoxQuery>(), Arg.Any<CancellationToken>()).Returns(
         [
-            Pin("far", "Biedronka Ostrów ul. Daleka", 50.0090, 18.0),
-            Pin("near", "Biedronka Ostrow ul. Bliska", 50.0010, 18.0),
-            Pin("other", "Lidl Ostrów", 50.0005, 18.0),
-            Pin("outside", "Biedronka Poza", 50.0300, 18.0), // ~3.3 km: outside 2 km
+            Pin("far", "Parking Daleki", 50.0090, 18.0),
+            Pin("near", "Parking Bliski", 50.0010, 18.0),
+            Pin("outside", "Parking Poza", 50.0300, 18.0), // ~3.3 km: outside 2 km
         ]);
 
-        var text = await FakeApi.Tools(api).FindParkingsAsync("biedronka OSTRÓW", 50.0, 18.0);
+        var lines = (await FakeApi.Tools(api).FindParkingsAsync(latitude: 50.0, longitude: 18.0)).Split('\n');
 
-        var lines = text.Split('\n');
         await Assert.That(lines.Length).IsEqualTo(2);
-        await Assert.That(lines[0]).StartsWith("[near] Biedronka Ostrow ul. Bliska - 111 m");
-        await Assert.That(lines[1]).StartsWith("[far] Biedronka Ostrów ul. Daleka - 1.0 km");
+        await Assert.That(lines[0]).IsEqualTo("[near] Parking Bliski - 111 m");
+        await Assert.That(lines[1]).IsEqualTo("[far] Parking Daleki - 1.0 km");
     }
 
     [Test]
@@ -133,7 +154,7 @@ public class ReadToolTests
 
     [Test]
     public async Task FindParkings_needs_a_query_or_a_position() =>
-        await Assert.That(await FakeApi.Tools(FakeApi.Create()).FindParkingsAsync()).StartsWith("Give a text to search for");
+        await Assert.That(await FakeApi.Tools(FakeApi.Create()).FindParkingsAsync()).StartsWith("Give a name or text to search for");
 
     [Test]
     public async Task GetPrice_reports_the_quote_and_the_free_window_from_the_parkings_hint()
@@ -217,31 +238,50 @@ public class ReadToolTests
     }
 
     [Test]
-    public async Task GetParking_lists_the_tariff_table_including_notes_without_a_price()
+    public async Task GetParkingDetails_gives_location_sessions_pricing_and_amenities()
     {
         var api = FakeApi.Create();
-        api.GetSpaceAsync("c9a5", Arg.Any<CancellationToken>()).Returns(new SpaceDetails
+        api.GetSpaceAsync("lidl", Arg.Any<CancellationToken>()).Returns(new SpaceDetails
         {
-            Id = "c9a5", Name = "Targowiska Miejskie Ostrów Wlkp. III", TariffCode = "22941",
-            Address = new SpaceAddress { DisplayValue = "ul. Grabowska 29a, Ostrów Wielkopolski, 63-400 Poland" },
-            ParkingOverview = [new SpaceOverviewItem { Title = "Open" }],
+            Id = "lidl", Name = "Lidl Poznań ul. Fabryczna 23", TariffCode = "12345",
+            Coordinates = new Coordinates(52.4, 16.95),
+            Address = new SpaceAddress { DisplayValue = "ul. Fabryczna 23, Poznań, 61-000 Poland" },
+            ParkingOverview = [new SpaceOverviewItem { Title = "Open" }, new SpaceOverviewItem { Title = "AutoPay" }],
+            CtaButtonType = "startParking", SessionsStartAutomatically = true, DefaultLengthOfStayInMinutes = 90, MaxDuration = 1440,
+            HasAvailableContracts = true, CanStartCharging = true, AllowedPSPs = ["stripe"],
             Prices =
             [
                 new SpacePriceSection { SectionName = "Parking", Prices = [new PriceItem { Label = "Up to 1 hour", Price = "PLN 0.00" }],
-                    Description = "Parking płatny w sobotę w godzinach 06.00 - 15.00" },
+                    Description = "1,5 godziny parkowania za darmo" },
                 new SpacePriceSection { SectionName = "Parking fees", Prices = [new PriceItem { Label = "Prices include convenience fees", Price = "" }] },
             ],
         });
+        api.GetSpacesByBoundingBoxAsync(Arg.Any<BoundingBoxQuery>(), Arg.Any<CancellationToken>()).Returns(
+        [
+            Pin("lidl", "Lidl Poznań ul. Fabryczna 23", 52.4, 16.95,
+                new GeoBorder { Coordinates = [new(52.4, 16.95), new(52.401, 16.95), new(52.401, 16.951), new(52.4, 16.95)] }),
+        ]);
 
-        var text = await FakeApi.Tools(api).GetParkingAsync("c9a5");
+        var text = await FakeApi.Tools(api).GetParkingDetailsAsync("lidl");
 
         await Assert.That(text).IsEqualTo(
-            "[c9a5] Targowiska Miejskie Ostrów Wlkp. III (code 22941)\n" +
-            "Address: ul. Grabowska 29a, Ostrów Wielkopolski, 63-400 Poland\n" +
-            "Status: Open\n" +
-            "Parking: Up to 1 hour: 0.00 PLN\n" +
-            "  Parking płatny w sobotę w godzinach 06.00 - 15.00\n" +
-            "Parking fees: Prices include convenience fees");
+            "[lidl] Lidl Poznań ul. Fabryczna 23 (location code 12345)\n" +
+            "Location:\n" +
+            "  Address: ul. Fabryczna 23, Poznań, 61-000 Poland\n" +
+            "  Coordinates: 52.4, 16.95\n" +
+            "  Outline on the map: yes (4 points; distances are measured to its edge)\n" +
+            "Sessions:\n" +
+            "  Status: Open, AutoPay\n" +
+            "  You start and end a session (start_session / start_free_session, or in the APCOA Flow app).\n" +
+            "  Plate recognition: sessions start and end automatically when the car enters and leaves.\n" +
+            "  Usual stay: 1 h 30 min\n" +
+            "  Longest stay: 1 day\n" +
+            "Pricing:\n" +
+            "  Parking: Up to 1 hour: 0.00 PLN\n" +
+            "    1,5 godziny parkowania za darmo\n" +
+            "  Parking fees: Prices include convenience fees\n" +
+            "Amenities: EV charging, season tickets\n" +
+            "Payment: card (Stripe)");
     }
 
     [Test]

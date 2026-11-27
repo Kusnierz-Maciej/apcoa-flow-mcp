@@ -1,6 +1,5 @@
 using System.Net;
 using ApcoaFlowApiClient.Api;
-using ApcoaFlowApiClient.Http;
 using ApcoaFlowApiClient.Models;
 using Refit;
 
@@ -17,7 +16,6 @@ namespace ApcoaFlowApiClient.Tests.Live;
 [NotInParallel(LiveApi.Serial)]
 public class SessionContractTests
 {
-    private const string Ostrow = "c9a52a81-3c6f-4ddc-9879-21a9ad0e4cc8";
     private const int Minutes = 15;
 
     [Before(HookType.Class)]
@@ -34,7 +32,7 @@ public class SessionContractTests
     {
         var api = LiveApi.Api;
         var vehicle = LiveApi.FirstRegisteredCar(await api.GetVehiclesAsync());
-        var spaceId = await FreeParkingAsync(api, vehicle);
+        var spaceId = await LiveApi.FindFreeParkingAsync(api, vehicle, 2 * Minutes); // covers the extend too
         if (spaceId is null)
             Skip.Test("No free parking right now (Ostrów is paid on Saturday 06–15 and no Biedronka quotes 0.00).");
 
@@ -97,23 +95,5 @@ public class SessionContractTests
         }
         await Assert.That(details!.IsSessionActive).IsFalse();
         await Assert.That(Money.Parse(details.TotalPrice).IsZero).IsTrue().Because("the session was quoted free");
-    }
-
-    /// <summary>Ostrów if its dated quote is 0.00 for the vehicle, else the first Biedronka that is; null if none.</summary>
-    private static async Task<string?> FreeParkingAsync(IApcoaFlowApi api, Vehicle vehicle)
-    {
-        async Task<bool> Free(string spaceId) => (await api.GetPriceAsync(new PriceQuery
-        {
-            SpaceId = spaceId, LicensePlateId = vehicle.Id, Duration = 2 * Minutes * 60, // covers the extend too
-            StartDate = UtcMillisecondsConverter.ToWire(DateTimeOffset.UtcNow),
-        })).Total.IsZero;
-
-        if (await Free(Ostrow))
-            return Ostrow;
-        var biedronkas = (await api.SearchAsync(new SearchQuery { Query = "Biedronka", Size = 20, IsParking = true, IsCharging = false })).Spaces;
-        foreach (var b in biedronkas.Take(8))
-            if (await Free(b.Id))
-                return b.Id;
-        return null;
     }
 }

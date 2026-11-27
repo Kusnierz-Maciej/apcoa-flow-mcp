@@ -20,7 +20,7 @@ public class ToolAnnotationTests
     [Test]
     [Arguments("get_vehicles")]
     [Arguments("find_parkings")]
-    [Arguments("get_parking")]
+    [Arguments("get_parking_details")]
     [Arguments("get_price")]
     [Arguments("get_active_sessions")]
     [Arguments("get_session_history")]

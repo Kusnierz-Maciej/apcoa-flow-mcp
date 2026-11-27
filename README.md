@@ -14,8 +14,8 @@ now:
 | Tool | Description |
 |---|---|
 | `get_vehicles` | The vehicles (license plates) on the account, with the default flagged and the user's description. |
-| `find_parkings` | Parkings by text (name, brand, town, location code) and/or near a position; near a position nearest first, measured to the parking's outline when it has one. |
-| `get_parking` | One parking's tariff table, rules, status and longest stay. |
+| `find_parkings` | Parkings by name or text (brand like "Biedronka", town, street, postcode, location code) and/or near a position, through APCOA's own search; near a position nearest first, measured to the parking's outline when it has one. |
+| `get_parking_details` | Everything about one parking: location (address, coordinates, outline), status, how sessions work there (app or plate recognition), usual and longest stay, pricing (tariff table and rules), amenities (EV charging, season tickets, pre-booking). |
 | `get_price` | The price of a stay starting now for one of your vehicles (free time included), and how long it can be free. |
 | `get_active_sessions` | Running sessions with time left. |
 | `get_session_history` | Recent sessions with cost. |

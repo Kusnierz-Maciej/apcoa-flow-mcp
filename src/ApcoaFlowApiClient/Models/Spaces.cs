@@ -93,6 +93,9 @@ public sealed class SpaceAddress
 /// <c>GET /api/v1/spaces/{spaceId}</c>: the space screen. No <c>geoBorder</c> here (only the bbox pins carry it).
 /// <c>prices</c> is the human-readable tariff table, not a quote. Seen 2026-11-27 (Biedronka Opole):
 /// <c>maxDuration: 43200</c> (minutes: 30 days) and <c>defaultLengthOfStayInMinutes: 90</c> (= the free 1.5 h).
+/// Across 45 sampled parkings: <c>parkingOverview</c> titles "Open" (all) and "AutoPay" (plate-recognition parkings,
+/// <c>sessionsStartAutomatically</c>); <c>ctaButtonType</c> "startParking" or "none" (can't start a session in the app);
+/// some pins answer <c>404 FaTariffNotFound</c> ("No tariff available…").
 /// </summary>
 public sealed class SpaceDetails
 {
@@ -125,6 +128,17 @@ public sealed class SpaceDetails
     public bool IsMunicipality { get; set; }
     public string? CountryCode { get; set; }
     public string? Disclaimer { get; set; }
+
+    /// <summary>EV charging can be started here.</summary>
+    public bool CanStartCharging { get; set; }
+
+    /// <summary>Season tickets / contracts can be bought here (18 of 45 sampled, 2026-11-27).</summary>
+    public bool HasAvailableContracts { get; set; }
+
+    public bool HasPrebooking { get; set; }
+    public bool HasFlexiPermits { get; set; }
+    public int? GateFutureEntryAllowedMinutes { get; set; }
+    public string? ParkingIconUrl { get; set; }
 
     [JsonExtensionData] public Dictionary<string, JsonElement>? Extra { get; set; }
 }

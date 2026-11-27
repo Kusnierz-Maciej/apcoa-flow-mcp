@@ -30,6 +30,21 @@ public class WriteToolTests
     }
 
     [Test]
+    public async Task A_plate_recognition_parking_that_cant_be_started_says_so()
+    {
+        var api = ForStarts(_ => 0m);
+        api.GetSpaceAsync(ParkingId, Arg.Any<CancellationToken>()).Returns(new SpaceDetails
+        {
+            Id = ParkingId, Name = "Lidl Poznań ul. Fabryczna 23", CtaButtonType = "none", SessionsStartAutomatically = true,
+        });
+
+        var text = await FakeApi.Tools(api).StartFreeSessionAsync(ParkingId, "Lidl Poznań ul. Fabryczna 23", "ABC12345");
+
+        await Assert.That(text).Contains("recognises plates and starts and ends sessions by itself");
+        await NoStart(api);
+    }
+
+    [Test]
     public async Task Paid_start_first_returns_the_price_and_starts_nothing()
     {
         var api = ForStarts(_ => 5m, prepaymentMode: "none");

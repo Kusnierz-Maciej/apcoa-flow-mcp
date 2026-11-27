@@ -71,15 +71,15 @@ public sealed class ApcoaFlowTools(
     // ── Parkings ───────────────────────────────────────────────────────────────────────────────
 
     [McpServerTool(Name = "find_parkings", Title = "Find APCOA parkings", ReadOnly = true, Idempotent = true)]
-    [Description("Find APCOA Flow parkings by text (name, shop brand like \"Biedronka\", town, postcode or the " +
-                 "parking's location code) and/or near a position. Near a position the nearest come first, measured to " +
-                 "the parking's outline when it has one (\"inside\" when the position is in it), else to its pin. " +
+    [Description("Find APCOA Flow parkings by name or text (shop brand like \"Biedronka\", town, street, postcode or the " +
+                 "parking's location code) and/or near a position. With a position the nearest come first, measured to " +
+                 "the parking's outline when it has one (\"you are inside it\" when the position is in it), else to its pin. " +
                  "Returns one line per parking: \"[parkingId] name - distance - address (code …)\".")]
     public Task<string> FindParkingsAsync(
-        [Description("Text to search for: name, brand, town, postcode or location code. Optional when a position is given.")] string? query = null,
+        [Description("Name or text to search for: brand, town, street, postcode or location code. Optional when a position is given.")] string? query = null,
         [Description("Latitude of the position to search around (decimal degrees). Give it with longitude.")] double? latitude = null,
         [Description("Longitude of the position to search around (decimal degrees).")] double? longitude = null,
-        [Description("Search radius in metres around the position (default 2000). Keep it small for 'near me'.")] double? radiusMeters = null,
+        [Description("Without a query: the radius in metres around the position (default 2000). With a query the nearest matches anywhere are listed.")] double? radiusMeters = null,
         CancellationToken ct = default)
         => ToolErrors.GuardAsync("find_parkings", logger, async () =>
     {
@@ -89,27 +89,13 @@ public sealed class ApcoaFlowTools(
         if (text is null && !hasPosition)
         {
             ApcoaTelemetry.Fail("missing_input", "neither query nor position");
-            return "Give a text to search for (name, brand, town, location code), a position (latitude and longitude), or both.";
+            return "Give a name or text to search for (brand, town, street, location code), a position (latitude and longitude), or both.";
         }
 
         var radius = radiusMeters is > 0 ? radiusMeters.Value : 2000;
-        List<FoundParking> found;
-        var note = "";
-        if (hasPosition)
-        {
-            found = await finder.NearAsync(latitude!.Value, longitude!.Value, radius, text, ct);
-            if (found.Count == 0 && text is not null)
-            {
-                // Nothing by that name in the radius: the nearest matches anywhere, ranked by the API.
-                found = await finder.SearchAsync(text, latitude, longitude, ct);
-                if (found.Count > 0)
-                    note = FormattableString.Invariant($"No \"{text}\" parking within {radius:0} m; the nearest ones:\n");
-            }
-        }
-        else
-        {
-            found = await finder.SearchAsync(text!, null, null, ct);
-        }
+        var found = text is null
+            ? await finder.NearAsync(latitude!.Value, longitude!.Value, radius, ct)
+            : await finder.SearchAsync(text, hasPosition ? latitude : null, hasPosition ? longitude : null, radius, ct);
 
         logger.LogInformation("find_parkings '{Query}' at {Lat},{Lon} r={Radius}: {Count} parking(s)",
             text, latitude, longitude, radius, found.Count);
@@ -117,11 +103,11 @@ public sealed class ApcoaFlowTools(
         ApcoaTelemetry.Tag(ApcoaTelemetry.Tags.ParkingIds, ApcoaTelemetry.Capped(found.Select(p => p.Id)));
         ApcoaTelemetry.Outcome("ok");
         if (found.Count == 0)
-            return hasPosition
-                ? FormattableString.Invariant($"No APCOA Flow parking{(text is null ? "" : $" matching \"{text}\"")} within {radius:0} m.")
+            return text is null
+                ? FormattableString.Invariant($"No APCOA Flow parking within {radius:0} m.")
                 : $"No APCOA Flow parking matches \"{text}\".";
 
-        var sb = new StringBuilder(note);
+        var sb = new StringBuilder();
         foreach (var p in found)
         {
             sb.Append($"[{p.Id}] {p.Name}");
@@ -134,38 +120,69 @@ public sealed class ApcoaFlowTools(
         return sb.ToString().TrimEnd();
     });
 
-    [McpServerTool(Name = "get_parking", Title = "Get parking details", ReadOnly = true, Idempotent = true)]
-    [Description("Details of one parking: address, location code, whether it's open, its tariff table and rules (as " +
-                 "the operator writes them), the longest allowed stay. For the price of a specific stay use get_price.")]
-    public Task<string> GetParkingAsync(
+    [McpServerTool(Name = "get_parking_details", Title = "Get parking details", ReadOnly = true, Idempotent = true)]
+    [Description("Everything about one parking: name and location code, location (address, coordinates, whether it has " +
+                 "an outline on the map), status, how sessions work there (started in the app, or automatically by plate " +
+                 "recognition), the longest and the usual stay, the pricing as the operator writes it (tariff table and " +
+                 "rules), and amenities (EV charging, season tickets, pre-booking, payment). For the price of a specific " +
+                 "stay for your vehicle use get_price.")]
+    public Task<string> GetParkingDetailsAsync(
         [Description("Parking id (from find_parkings)")] string parkingId,
         CancellationToken ct = default)
-        => ToolErrors.GuardAsync("get_parking", logger, async () =>
+        => ToolErrors.GuardAsync("get_parking_details", logger, async () =>
     {
-        using var _ = logger.BeginScope("{Tool}", "get_parking");
+        using var _ = logger.BeginScope("{Tool}", "get_parking_details");
         var p = await api.GetSpaceAsync(parkingId.Trim(), ct);
-        logger.LogInformation("get_parking [{Id}] {Name}", p.Id, p.Name);
+        var pin = await finder.PinAsync(p.Id, p.Coordinates, ct);
+        logger.LogInformation("get_parking_details [{Id}] {Name}", p.Id, p.Name);
         ApcoaTelemetry.Tag(ApcoaTelemetry.Tags.ParkingId, p.Id);
         ApcoaTelemetry.Tag(ApcoaTelemetry.Tags.ParkingName, p.Name);
         ApcoaTelemetry.Outcome("ok");
 
         var sb = new StringBuilder($"[{p.Id}] {p.Name}");
-        if (!string.IsNullOrWhiteSpace(p.TariffCode)) sb.Append($" (code {p.TariffCode})");
+        if (!string.IsNullOrWhiteSpace(p.TariffCode)) sb.Append($" (location code {p.TariffCode})");
         sb.AppendLine();
-        if (!string.IsNullOrWhiteSpace(p.Address?.DisplayValue)) sb.AppendLine($"Address: {p.Address.DisplayValue.Trim().TrimStart(',').Trim()}");
+
+        sb.AppendLine("Location:");
+        if (!string.IsNullOrWhiteSpace(p.Address?.DisplayValue)) sb.AppendLine($"  Address: {p.Address.DisplayValue.Trim().TrimStart(',').Trim()}");
+        if (p.Coordinates is { } c) sb.AppendLine(FormattableString.Invariant($"  Coordinates: {c.Latitude:0.######}, {c.Longitude:0.######}"));
+        if (pin is not null)
+            sb.AppendLine(pin.GeoBorder is { Coordinates.Count: >= 3 } outline
+                ? $"  Outline on the map: yes ({outline.Coordinates.Count} points; distances are measured to its edge)"
+                : "  Outline on the map: no (distances are measured to its pin)");
+
+        sb.AppendLine("Sessions:");
         var status = string.Join(", ", p.ParkingOverview.Select(o => o.Title).Where(t => !string.IsNullOrWhiteSpace(t)));
-        if (status.Length > 0) sb.AppendLine($"Status: {status}");
-        if (p.MaxDuration is > 0) sb.AppendLine($"Longest stay: {Text.Duration(p.MaxDuration.Value)}");
+        if (status.Length > 0) sb.AppendLine($"  Status: {status}");
+        sb.AppendLine(p.CtaButtonType == "startParking"
+            ? "  You start and end a session (start_session / start_free_session, or in the APCOA Flow app)."
+            : "  Sessions can't be started here (not in the APCOA Flow app either).");
+        if (p.SessionsStartAutomatically || pin?.ParkingType == "anpr")
+            sb.AppendLine("  Plate recognition: sessions start and end automatically when the car enters and leaves.");
+        if (p.DefaultLengthOfStayInMinutes is > 0) sb.AppendLine($"  Usual stay: {Text.Duration(p.DefaultLengthOfStayInMinutes.Value)}");
+        if (p.MaxDuration is > 0) sb.AppendLine($"  Longest stay: {Text.Duration(p.MaxDuration.Value)}");
+
+        sb.AppendLine("Pricing:");
         foreach (var section in p.Prices)
         {
             // Items can be a note without a price ("Prices include convenience fees").
             var items = string.Join(", ", section.Prices
                 .Where(i => !string.IsNullOrWhiteSpace(i.Label) || !string.IsNullOrWhiteSpace(i.Price))
                 .Select(i => string.IsNullOrWhiteSpace(i.Price) ? i.Label!.Trim() : $"{i.Label?.Trim()}: {Pln(i.Price)}"));
-            sb.AppendLine(items.Length > 0 ? $"{section.SectionName}: {items}" : $"{section.SectionName}");
-            if (!string.IsNullOrWhiteSpace(section.Description)) sb.AppendLine($"  {section.Description.Trim()}");
+            sb.AppendLine(items.Length > 0 ? $"  {section.SectionName}: {items}" : $"  {section.SectionName}");
+            if (!string.IsNullOrWhiteSpace(section.Description)) sb.AppendLine($"    {section.Description.Trim()}");
         }
-        if (!string.IsNullOrWhiteSpace(p.Disclaimer)) sb.AppendLine(p.Disclaimer.Trim());
+
+        var amenities = new List<string>();
+        if (p.CanStartCharging) amenities.Add("EV charging");
+        if (p.HasAvailableContracts) amenities.Add("season tickets");
+        if (p.HasPrebooking) amenities.Add("pre-booking");
+        if (p.HasFlexiPermits) amenities.Add("flexi permits");
+        if (p.IsMunicipality || pin?.IsMunicipality == true) amenities.Add("municipal parking");
+        sb.AppendLine($"Amenities: {(amenities.Count > 0 ? string.Join(", ", amenities) : "none listed")}");
+        if (p.AllowedPSPs.Count > 0)
+            sb.AppendLine($"Payment: card ({string.Join(", ", p.AllowedPSPs.Select(psp => psp.Length > 0 ? char.ToUpperInvariant(psp[0]) + psp[1..] : psp))})");
+        if (!string.IsNullOrWhiteSpace(p.Disclaimer)) sb.AppendLine($"Note: {p.Disclaimer.Trim()}");
         return sb.ToString().TrimEnd();
     });
 
@@ -386,7 +403,7 @@ public sealed class ApcoaFlowTools(
     {
         var radius = radiusMeters is > 0 ? radiusMeters.Value : _options.CurrentLocationRadiusMeters;
         ApcoaTelemetry.Tag(ApcoaTelemetry.Tags.RadiusMeters, radius);
-        var near = await finder.NearAsync(latitude, longitude, radius, null, ct);
+        var near = await finder.NearAsync(latitude, longitude, radius, ct);
         if (near.Count == 0)
         {
             ApcoaTelemetry.Fail("no_parking_nearby", "nothing within the radius");

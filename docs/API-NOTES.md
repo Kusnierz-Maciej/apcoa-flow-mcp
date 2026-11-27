@@ -67,8 +67,10 @@ Parking places are **spaces**, with GUID ids. There's no offline dataset: the ap
     parkingIconUrl, countryCode, isUserCountry}`. `tariffCode` is the space's **location code** (what users type);
     searching for it returns exactly that space.
   - With a position: nearest first, `distance` in **km**; 20 hits by default, `size=50` gave 30 (2026-11-27).
-  - Without a position: arbitrary order, and the same names came back with **different ids** than with a position.
-    Both ids are real spaces with identical details, and both quote (2026-11-27).
+  - Without a position: arbitrary order, and **parkings that aren't on the map**: other ids than with a position, no
+    coordinates and no address (in the hit and in their details), though they quote. With a position every hit is a
+    mapped parking with an address (pinned by `FreeOptionsContractTests`). So the server always searches with a
+    position (the user's, else the middle of Poland).
   - `places` are geocoded streets/towns, not spaces.
 - `GET /api/v1/spaces/getByBoundingBox?NELatitude&NELongitude&SWLatitude&SWLongitude&Zoom` → map pins `[{id, name,
   coordinates, parkingType: "startStop" | "anpr", chargingType, mapPinImage, geoBorder, isMunicipality}]`
@@ -80,7 +82,11 @@ Parking places are **spaces**, with GUID ids. There's no offline dataset: the ap
 - `GET /api/v1/spaces/{spaceId}` → `{id, name, tariffCode, maxDuration, defaultLengthOfStayInMinutes, coordinates,
   address, parkingOverview: [{title, imageUrl}], sessionsStartAutomatically, prices: [{sectionName, prices: [{label,
   price}], description}], allowedPSPs, hasLengthOfStayPreset, ctaButtonType: "startParking", isMunicipality,
-  countryCode, disclaimer, …}`. `prices` is the readable tariff table, not a quote. Biedronka spaces:
+  countryCode, disclaimer, canStartCharging, hasAvailableContracts, hasPrebooking, hasFlexiPermits, …}`. `prices` is
+  the readable tariff table, not a quote. Across 45 sampled parkings: `parkingOverview` titles "Open" and "AutoPay"
+  (plate recognition, `sessionsStartAutomatically: true`); `ctaButtonType: "none"` where sessions can't be started (e.g.
+  Lidl Poznań ul. Fabryczna 23: "1.5 h free without starting a session"); season tickets on 18; some pins answer
+  `404 {"code":"FaTariffNotFound","message":"No tariff available…"}`. Biedronka spaces:
   `defaultLengthOfStayInMinutes: 90` (= their free window) and `maxDuration: 43200` (**minutes**: 30 days; quotes
   don't enforce it, a 31-day quote still comes back).
 
@@ -128,8 +134,8 @@ Amounts are strings: `"PLN 5.00"` (currency, space, invariant decimal); large am
 - **Stop**: `POST /api/v1/sessions/stopParking/{id}` → **204**. Stopping it again is 204 too (silent); an unknown id
   is `404 SessionNotFound`.
 - Post-pay sessions stopped after 17–19 s were billed PLN 0.00 although quoted PLN 1.00 and 5.00 (two operators,
-  2026-11-27): a short grace period, shown nowhere; its length is unknown. Pre-pay sessions are charged at start
-  and **not refunded** on an early stop.
+  2026-11-27). **Nothing relies on this**: assume there is no grace period — a paid start costs its quote. Pre-pay
+  sessions are charged at start and **not refunded** on an early stop.
 
 ## History
 
@@ -143,13 +149,14 @@ Amounts are strings: `"PLN 5.00"` (currency, space, invariant decimal); large am
 
 ## Test spaces
 
-Write tests (start / extend / stop) only where a **dated** quote for the test car says PLN 0.00 right before the
-start, and end the session within minutes.
+Tests focus on **free options**; no test relies on paid behaviour or a grace period. Write tests (start / extend /
+stop) only where a **dated** quote for the test car says PLN 0.00 right before the start, and end the session within
+minutes.
 
 | Space | Id | Location code | Free when |
 |---|---|---|---|
 | Targowiska Miejskie Ostrów Wlkp. III, ul. Grabowska 29a, Ostrów Wielkopolski | `c9a52a81-3c6f-4ddc-9879-21a9ad0e4cc8` | `22941` | Always, **except Saturday 06:00–15:00** (Europe/Warsaw). Pre-pay. |
-| Any "Biedronka" space (find with `search?query=Biedronka`) | — | — | The first 1.5 h, **once per 4 h per space**: rotate between several. Pre-pay. |
+| Any parking found with the query **"Biedronka"** (shop parkings that come with free time; search with a position) | — | — | The first 1.5 h (= its usual stay), **once per 4 h per parking**: rotate. Pre-pay. Never hard-code one. |
 
 ## Contracts guarded by live tests
 
@@ -168,6 +175,18 @@ here.
 | The default payment method is a saved card (`flow: saved`, no action needed) | `The_default_payment_method_is_a_saved_card` |
 | Sessions and history are lists | `Sessions_and_history_are_lists` |
 | Stopping an unknown session is `404 SessionNotFound` | `Stopping_an_unknown_session_is_404_SessionNotFound` |
+
+Free options, read-only (`FreeOptionsContractTests`):
+
+| Behaviour | Test |
+|---|---|
+| Searching "Biedronka" (shop parkings with free time) returns matching parkings with location codes | `Searching_the_free_time_query_returns_matching_parkings_with_location_codes` |
+| A free-time parking's dated quote is 0.00 up to its usual stay (`defaultLengthOfStayInMinutes`) and paid one minute later | `Free_time_is_in_the_quote_exactly_up_to_the_parkings_usual_stay` (skipped when no Biedronka has free time left) |
+| Details of a free-time parking carry its tariff table, coordinates and `ctaButtonType: startParking` | `Details_of_a_free_time_parking_carry_its_tariff_and_say_it_can_be_started` |
+| A search with a position returns mapped parkings; without one, unmapped ones | `A_search_with_a_position_returns_mapped_parkings_without_one_unmapped` |
+| The test parking quotes 0.00 outside Saturday 06–15 | `The_test_parking_is_free_outside_Saturday_06_to_15` |
+| A location-code search returns exactly that parking | `A_location_code_search_returns_exactly_that_parking` |
+| Map pins carry closed outlines | `Map_pins_carry_closed_outlines` |
 
 One free cycle per run (`SessionContractTests.Free_session_lifecycle`, on Ostrów or a Biedronka with a dated 0.00
 quote; skipped when none is free):
@@ -191,6 +210,6 @@ Behaviours relied on without a live test, because testing them costs money or ca
 | A paid post-pay start with a saved card runs at once, no interactive step | 2026-11-27, Czarny Dunajec, stopped after 19 s |
 | A paid pre-pay start with a saved card is pending, then `completed`; the card is charged at start (PLN 1.00, visa, history `status: paid`, `state: billed`) | 2026-11-27, Markinvest Warszawa al. Wilanowska 363 |
 | A pre-pay session stopped early is **not** refunded (stopped after ~30 s, billed the full PLN 1.00) | 2026-11-27, same session |
-| A post-pay session stopped within seconds is billed PLN 0.00 (a short grace, shown nowhere) | 2026-11-27: Czarny Dunajec (19 s, quoted PLN 1.00) and Katowice ul. Sobieskiego 23 (17 s, quoted PLN 5.00) |
+| (Observed, not relied on: assume no grace) A post-pay session stopped within seconds was billed PLN 0.00 | 2026-11-27: Czarny Dunajec (19 s, quoted PLN 1.00) and Katowice ul. Sobieskiego 23 (17 s, quoted PLN 5.00) |
 | Right after a post-pay stop, `sessionsHistory/{id}` can lack a parseable `totalPrice` for a moment; it then shows the real stop time and `state: billed` | 2026-11-27, Sobieskiego 23 |
 | Biedronka free time is once per 4 h per space, and shows in the quote | 2026-11-27, Biedronka Żyrardów |

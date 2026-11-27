@@ -5,7 +5,8 @@ public static class McpInstructions
     public const string Text =
         """
         APCOA Flow parking. A parking is the place, a session is parking there. Typical flow:
-        find_parkings → start_session (or start_free_session) → end_session.
+        find_parkings (by name, brand like "Biedronka", town, location code and/or position) → get_parking_details
+        or get_price when needed → start_session (or start_free_session) → end_session.
         - Always confirm the parking and the license plate with the user before starting a session.
         - Free-only tools (start_free_session*) never charge. Paid starts and extensions return the price first;
           call again with confirmedCostPln only after the user agreed to that price. Use start_expensive_session

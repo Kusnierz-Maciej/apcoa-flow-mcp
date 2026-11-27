@@ -27,43 +27,63 @@ With no vehicles: `No vehicles on the account.`
 
 ## `find_parkings`
 
-Find parkings by text and/or near a position. Read-only, idempotent.
+Find parkings by name or text and/or near a position. Read-only, idempotent.
 
 | Input | |
 |---|---|
-| `query` | Name, shop brand ("Biedronka"), town, postcode or the parking's location code. Optional when a position is given. |
+| `query` | Name or text: shop brand ("Biedronka" — shop parkings that come with free time), town, street, postcode or the parking's location code. Optional when a position is given. |
 | `latitude`, `longitude` | Position to search around. |
-| `radiusMeters` | Around the position; default 2000. |
+| `radiusMeters` | Without a query: the radius around the position (default 2000). |
 
-- **Near a position**: every parking within the radius (filtered by `query` when given, case- and accent-insensitive),
-  nearest first. The distance is to the parking's **outline** when it has one ("you are inside it" when the position
-  is in it), else to its pin. If nothing matches `query` within the radius, the nearest matches anywhere are listed
-  instead, with a note.
-- **Text only**: the API's search (20 results at most).
-
-```
-[3f6f0269-d77a-4ff6-bc88-8ac41c7b7e3f] SPP Czarny Dunajec - you are inside it
-[7138743d-7fe6-4c6a-a328-6280601d04f6] SPP Czarny Dunajec Abonamentowy - 23 m (to its edge)
-[7acd8ec5-4e5e-4662-ae8b-a8be2a60d6ba] SPP Czarny Dunajec - parking w pasie ruchu drogowe - 84 m
-```
+- **With a query** (with or without a position): APCOA's own search, which also matches addresses, towns and location
+  codes. With a position the nearest come first (any distance); without one the distance is left out. Hits near the
+  position are measured to the parking's **outline** when it has one ("you are inside it", "… (to its edge)").
+- **Position only**: every parking on the map within the radius, nearest first, by outline or pin.
+- Results are always parkings on the map: a position-less API search returns unmapped duplicates (no coordinates, no
+  address), so a name-only query is searched around the middle of Poland.
 
 ```
-[c9a52a81-3c6f-4ddc-9879-21a9ad0e4cc8] Targowiska Miejskie Ostrów Wlkp. III - ul. Grabowska 29a, Ostrów Wielkopolski, 63-400 Poland (code 22941)
+[3f6f0269-d77a-4ff6-bc88-8ac41c7b7e3f] SPP Czarny Dunajec - you are inside it - Czarny Dunajec, 34-470 Poland (code 26397)
+[7138743d-7fe6-4c6a-a328-6280601d04f6] SPP Czarny Dunajec Abonamentowy - 23 m (to its edge) - Czarny Dunajec, 34-470 Poland
+[7acd8ec5-4e5e-4662-ae8b-a8be2a60d6ba] SPP Czarny Dunajec - parking w pasie ruchu drogowe - 84 m - Czarny Dunajec, 34-470 Poland (code 29086)
 ```
 
-## `get_parking`
+```
+[c78e0ce2-64af-4592-b01b-4372e341f687] Biedronka Jelenia Góra ul. Sobieskiego 58 - ul. Sobieskiego 58, Jelenia Góra, 58-500 Poland (code 25898)
+```
 
-One parking's details: address, location code, status, the tariff table and rules as the operator writes them, the
-longest allowed stay. Read-only, idempotent. Input: `parkingId`.
+## `get_parking_details`
+
+Everything about one parking. Read-only, idempotent. Input: `parkingId`.
+
+- **Location**: address, coordinates, whether it has an outline on the map (distances are then measured to its edge).
+- **Sessions**: status ("Open", "AutoPay"), whether you start sessions (in this server or the app) or the parking
+  recognises plates and starts and ends them by itself, the usual stay (shop parkings: their free window) and the
+  longest stay.
+- **Pricing**: the tariff table and rules as the operator writes them. For the price of a specific stay for your
+  vehicle, use `get_price`.
+- **Amenities**: EV charging, season tickets, pre-booking, flexi permits, municipal parking; payment (card, Stripe).
 
 ```
-[c9a52a81-3c6f-4ddc-9879-21a9ad0e4cc8] Targowiska Miejskie Ostrów Wlkp. III (code 22941)
-Address: ul. Grabowska 29a, Ostrów Wielkopolski, 63-400 Poland
-Status: Open
-Parking: Up to 1 hour: 0.00 PLN, Up to 2 hours: 0.00 PLN, Max day price: 0.00 PLN
-  Parking płatny w sobotę w godzinach 06.00 - 15.00 3 PLN za pierwszą rozpoczętą godzinę parkowania. 5 PLN opłata dzienna (06:00 – 15:00).
-Parking fees: Prices include convenience fees
+[3f6f0269-d77a-4ff6-bc88-8ac41c7b7e3f] SPP Czarny Dunajec (location code 26397)
+Location:
+  Address: Czarny Dunajec, 34-470 Poland
+  Coordinates: 49.44096, 19.855513
+  Outline on the map: yes (10 points; distances are measured to its edge)
+Sessions:
+  Status: Open
+  You start and end a session (start_session / start_free_session, or in the APCOA Flow app).
+Pricing:
+  Parking: Up to 1 hour: 0.00 PLN, Up to 2 hours: 0.00 PLN, Max day price: 22.00 PLN
+    Parking dostępny 24h. Płatny: Poniedziałek - Piątek 8:00 - 16:00. Sobota 8:00 - 13:00. 1 PLN za pierwszą rozpoczętą godzinę. …
+  Parking fees: Prices include convenience fees
+Amenities: season tickets
+Payment: card (Stripe)
 ```
+
+A plate-recognition parking (e.g. Lidl Poznań ul. Fabryczna 23) says `Sessions can't be started here …` and
+`Plate recognition: sessions start and end automatically when the car enters and leaves.`; the start tools refuse
+there.
 
 ## `get_price`
 
@@ -129,7 +149,7 @@ duration is tried first, else a short search of up to a day).
 | `extend_session` | `sessionId`, `parkingName`, `minutes`, `confirmedCostPln?` | Quotes the extension; free → extends at once, paid → price first, then with `confirmedCostPln`. Same cost limit. |
 | `end_session` | `sessionId`, `parkingName` | Stops the session, then reads the final cost from the history. |
 
-Refusals are normal results (not errors): unknown plate, a running session for that plate (it's named, with its
+Refusals are normal results (not errors): a parking where sessions can't be started (plate recognition), unknown plate, a running session for that plate (it's named, with its
 id), not free, over the free window, over the cost limit, price changed since the quote, default payment method not
 a saved card, longer than the parking allows, no parking nearby, too close to call. If a paid start ever comes back
 needing an interactive payment step (3-D Secure), the session is ended at once and the tool says so.
