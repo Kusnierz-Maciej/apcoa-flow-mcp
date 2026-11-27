@@ -3,7 +3,7 @@
 #
 #   tools/inspector-check.sh            offline: fake APCOA credentials (no APCOA call is made) — CI-able
 #   tools/inspector-check.sh --live     also calls get_vehicles with the live tests' account (user-secrets
-#                                        apcoa-flow-api-tests, or APCOAFLOW_EMAIL / APCOAFLOW_PASSWORD)
+#                                        apcoa-flow-api-tests, or env ApcoaFlow__Email / ApcoaFlow__Password)
 #
 # Checks: tools/list --strict is clean (schema portability: exit 0, empty stderr), the expected tool and prompt names,
 # every tool has a title. Starts the HTTP host on a free port with throwaway dev settings and stops it afterwards.
@@ -16,15 +16,24 @@ live=false; [ "${1:-}" = "--live" ] && live=true
 work=$(mktemp -d); trap 'kill $host 2>/dev/null || true; rm -rf "$work"' EXIT
 
 port=$(python3 -c 'import socket; s=socket.socket(); s.bind(("127.0.0.1",0)); print(s.getsockname()[1])')
-dotnet build src/ApcoaFlowMcp -v q -nologo >/dev/null
+dotnet build src/ApcoaFlowMcp -v q -nologo -o "$work/bin" >/dev/null
+# The built app itself (not `dotnet run`, whose child would outlive a kill of its PID).
 env ASPNETCORE_URLS="http://127.0.0.1:$port" Security__AllowedApiKeys__0=check-key \
     Security__TokenSecret=inspector-check-secret-at-least-32-chars \
-    dotnet run --project src/ApcoaFlowMcp --no-build --no-launch-profile >"$work/host.log" 2>&1 &
+    dotnet "$work/bin/ApcoaFlowMcp.dll" >"$work/host.log" 2>&1 &
 host=$!
-for _ in $(seq 1 60); do curl -s -o /dev/null "http://127.0.0.1:$port/.well-known/oauth-authorization-server" && break; sleep 1; done
+ready=false
+for _ in $(seq 1 60); do
+  curl -s -o /dev/null "http://127.0.0.1:$port/.well-known/oauth-authorization-server" && { ready=true; break; }
+  kill -0 $host 2>/dev/null || break
+  sleep 1
+done
+$ready || { echo "FAIL the host didn't start:"; tail -20 "$work/host.log"; exit 1; }
 
 if $live; then
-  basic=$( { if [ -n "${APCOAFLOW_EMAIL:-}" ]; then printf 'ApcoaFlow:Email = %s\nApcoaFlow:Password = %s\n' "$APCOAFLOW_EMAIL" "$APCOAFLOW_PASSWORD";
+  email=$(printenv ApcoaFlow__Email || true); password=$(printenv ApcoaFlow__Password || true)
+  if [ -n "$email" ] && [ -z "$password" ]; then echo "FAIL ApcoaFlow__Email is set but ApcoaFlow__Password isn't"; exit 1; fi
+  basic=$( { if [ -n "$email" ]; then printf 'ApcoaFlow:Email = %s\nApcoaFlow:Password = %s\n' "$email" "$password";
              else dotnet user-secrets list --id apcoa-flow-api-tests; fi; } | python3 -c 'import sys,base64
 d=dict(l.rstrip("\n").split(" = ",1) for l in sys.stdin if " = " in l)
 print(base64.b64encode((d["ApcoaFlow:Email"]+":"+d["ApcoaFlow:Password"]).encode()).decode())')
@@ -62,4 +71,4 @@ print(("ok  " if ok else "FAIL") + " get_vehicles (live)")
 sys.exit(0 if ok else 1)
 PY
 fi
-[ $fail -eq 0 ] && echo "inspector-check: all good" || { echo "inspector-check: FAILED (host log: $work/host.log)"; trap - EXIT; kill $host 2>/dev/null; exit 1; }
+if [ $fail -eq 0 ]; then echo "inspector-check: all good"; else echo "inspector-check: FAILED; host log:"; tail -20 "$work/host.log"; exit 1; fi

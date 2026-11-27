@@ -134,6 +134,26 @@ public class ReadToolTests
     }
 
     [Test]
+    public async Task FindParkings_keeps_free_now_when_the_window_check_cant_run_and_lists_results_for_an_unknown_plate()
+    {
+        var api = FakeApi.Create();
+        api.SearchAsync(Arg.Any<SearchQuery>(), Arg.Any<CancellationToken>()).Returns(new SearchResponse
+        {
+            Spaces = [new SearchSpace { Id = "free", Name = "Biedronka A" }],
+        });
+        // Usual stay = longest stay: no "one minute past" quote is possible.
+        api.GetSpaceAsync("free", Arg.Any<CancellationToken>()).Returns(new SpaceDetails { Id = "free", Name = "Biedronka A", DefaultLengthOfStayInMinutes = 90, MaxDuration = 90 });
+        api.GetPriceAsync(Arg.Any<PriceQuery>(), Arg.Any<CancellationToken>()).Returns(new PriceQuote { TotalPrice = "PLN 0.00" });
+
+        var withPlate = await FakeApi.Tools(api).FindParkingsAsync("Biedronka", licensePlate: "ABC12345");
+        var typo = await FakeApi.Tools(api).FindParkingsAsync("Biedronka", licensePlate: "XYZ999");
+
+        await Assert.That(withPlate).IsEqualTo("[free] Biedronka A - free now (get_price says for how long)");
+        await Assert.That(typo).Contains("isn't one of the account's vehicles, so free time wasn't checked");
+        await Assert.That(typo).Contains("[free] Biedronka A");
+    }
+
+    [Test]
     public async Task FindParkings_near_a_position_alone_lists_the_map_pins_within_the_radius()
     {
         var api = FakeApi.Create();

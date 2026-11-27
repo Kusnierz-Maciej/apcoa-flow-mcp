@@ -110,15 +110,19 @@ public sealed class ApcoaFlowTools(
                 : $"No APCOA Flow parking matches \"{text}\".";
 
         Dictionary<string, string> freeNotes = [];
+        var sb = new StringBuilder();
         if (!string.IsNullOrWhiteSpace(licensePlate))
         {
             var vehicle = Plates.Find(await api.GetVehiclesAsync(ct), licensePlate);
             if (vehicle is null)
-                return $"\"{licensePlate}\" isn't one of the account's vehicles. Call get_vehicles for the plates.";
-            freeNotes = await FreeNotesAsync(found.Take(FreeCheckCount), vehicle.Id, ct);
+            {
+                ApcoaTelemetry.Fail("plate_not_registered", "free-time check: unknown plate");
+                sb.AppendLine($"(\"{licensePlate}\" isn't one of the account's vehicles, so free time wasn't checked; see get_vehicles.)");
+            }
+            else
+                freeNotes = await FreeNotesAsync(found.Take(FreeCheckCount), vehicle.Id, ct);
         }
 
-        var sb = new StringBuilder();
         foreach (var p in found)
         {
             sb.Append($"[{p.Id}] {p.Name}");
@@ -151,12 +155,13 @@ public sealed class ApcoaFlowTools(
                     notes[p.Id] = "paid now";
                     continue;
                 }
-                var hint = (await api.GetSpaceAsync(p.Id, ct)).DefaultLengthOfStayInMinutes;
-                var window = hint is > 1
+                notes[p.Id] = "free now (get_price says for how long)"; // kept if the window check below fails
+                var details = await api.GetSpaceAsync(p.Id, ct);
+                var hint = details.DefaultLengthOfStayInMinutes;
+                if (hint is > 1 && (details.MaxDuration is null or <= 0 || hint < details.MaxDuration)
                     && (await pricing.QuoteAsync(p.Id, vehicleId, hint.Value, ct)).Total.IsZero
-                    && !(await pricing.QuoteAsync(p.Id, vehicleId, hint.Value + 1, ct)).Total.IsZero
-                    ? hint : null;
-                notes[p.Id] = window is { } w ? $"free now for up to {Text.Duration(w)}" : "free now (get_price says for how long)";
+                    && !(await pricing.QuoteAsync(p.Id, vehicleId, hint.Value + 1, ct)).Total.IsZero)
+                    notes[p.Id] = $"free now for up to {Text.Duration(hint.Value)}";
             }
             catch (Exception ex) when (ex is not OperationCanceledException && ToolErrors.Map(ex) is not null)
             {

@@ -64,9 +64,25 @@ public class WriteToolTests
 
         var text = await FakeApi.Tools(api).StartSessionAsync(ParkingId, ParkingName, "ABC12345", 60);
 
-        await Assert.That(text).Contains("For the same 4.00 PLN the stay can last up to 4 h (until 19:00)");
+        await Assert.That(text).Contains("For the same 4.00 PLN the stay can last up to 4 h (until about 19:00 if started now)");
         await Assert.That(text).Contains("durationMinutes=60 (or 240 for the longer stay at the same price) and confirmedCostPln=4.00");
         await NoStart(api);
+    }
+
+    [Test]
+    public async Task The_same_price_search_is_bounded_and_a_failure_only_drops_the_suggestion()
+    {
+        var api = ForStarts(minutes => minutes <= 240 ? 4m : 6m);
+        await FakeApi.Tools(api).StartSessionAsync(ParkingId, ParkingName, "ABC12345", 60);
+        var quotes = api.ReceivedCalls().Count(c => c.GetMethodInfo().Name == nameof(IApcoaFlowApi.GetPriceAsync));
+        await Assert.That(quotes).IsLessThanOrEqualTo(12).Because("the quote itself, the probe, the cap and a bounded search");
+
+        var failing = ForStarts(_ => 4m);
+        failing.GetPriceAsync(Arg.Is<PriceQuery>(q => q!.Duration > 60 * 60), Arg.Any<CancellationToken>())
+            .ThrowsAsync(new HttpRequestException("429"));
+        var text = await FakeApi.Tools(failing).StartSessionAsync(ParkingId, ParkingName, "ABC12345", 60);
+        await Assert.That(text).Contains("costs 4.00 PLN");
+        await Assert.That(text).DoesNotContain("For the same");
     }
 
     [Test]
@@ -410,6 +426,59 @@ public class WriteToolTests
 
         await Assert.That(text).Contains("accepted extending the session");
         await Assert.That(text).Contains("Don't extend again");
+    }
+
+    [Test]
+    public async Task A_one_minute_extension_that_never_applies_isnt_reported_as_extended()
+    {
+        var api = ForStarts(_ => 0m);
+        var end = Now.AddMinutes(30);
+        api.GetSessionsAsync(Arg.Any<CancellationToken>()).Returns(
+        [
+            new Session { Id = "s1", StartDate = Now, EndDate = end, SessionCanBeExtended = true, Space = new SessionSpace { Id = ParkingId, Name = ParkingName } },
+        ]);
+        api.GetUpdatedPriceAsync("s1", 60, Arg.Any<CancellationToken>()).Returns(new PriceQuote { TotalPrice = "PLN 0.00", EndDate = end.AddMinutes(1) });
+
+        var text = await FakeApi.Tools(api).ExtendSessionAsync("s1", ParkingName, 1);
+
+        await Assert.That(text).Contains("isn't showing yet");
+    }
+
+    [Test]
+    public async Task A_paid_extension_whose_pending_payment_fails_says_so()
+    {
+        var api = ForStarts(_ => 0m);
+        api.GetSessionsAsync(Arg.Any<CancellationToken>()).Returns(
+        [
+            new Session { Id = "s1", StartDate = Now, EndDate = Now.AddMinutes(30), SessionCanBeExtended = true, Space = new SessionSpace { Id = ParkingId, Name = ParkingName } },
+        ]);
+        api.GetUpdatedPriceAsync("s1", 900, Arg.Any<CancellationToken>()).Returns(new PriceQuote { TotalPrice = "PLN 0.40", EndDate = Now.AddMinutes(45) });
+        api.UpdateParkingDurationAsync(Arg.Any<UpdateParkingDurationRequest>(), Arg.Any<CancellationToken>())
+            .Returns(ExtendAnswer(new UpdateParkingDurationResponse { Status = "awaitingPayment", PendingId = "p1" }));
+        api.GetPendingStartAsync("p1", Arg.Any<CancellationToken>()).Returns(new PendingStartStatus { Status = "failed", FailureReason = "card declined" });
+
+        var text = await FakeApi.Tools(api).ExtendSessionAsync("s1", ParkingName, 15, confirmedCostPln: 0.40m);
+
+        await Assert.That(text).Contains("didn't extend the session");
+        await Assert.That(text).Contains("card declined");
+    }
+
+    [Test]
+    public async Task A_paid_extension_awaiting_payment_is_reported_once_the_new_end_shows()
+    {
+        var api = ForStarts(_ => 0m);
+        Session S(int minutes) => new() { Id = "s1", StartDate = Now, EndDate = Now.AddMinutes(minutes), SessionCanBeExtended = true,
+            Space = new SessionSpace { Id = ParkingId, Name = ParkingName } };
+        api.GetSessionsAsync(Arg.Any<CancellationToken>()).Returns([S(30)], [S(30)], [S(45)]);
+        api.GetUpdatedPriceAsync("s1", 900, Arg.Any<CancellationToken>()).Returns(new PriceQuote { TotalPrice = "PLN 0.40", EndDate = Now.AddMinutes(45) });
+        api.UpdateParkingDurationAsync(Arg.Any<UpdateParkingDurationRequest>(), Arg.Any<CancellationToken>())
+            .Returns(ExtendAnswer(new UpdateParkingDurationResponse { Status = "awaitingPayment", PendingId = "p1" }));
+        api.GetPendingStartAsync("p1", Arg.Any<CancellationToken>()).Returns(new PendingStartStatus { Status = "completed", SessionId = "s1" });
+
+        var text = await FakeApi.Tools(api).ExtendSessionAsync("s1", ParkingName, 15, confirmedCostPln: 0.40m);
+
+        await Assert.That(text).StartsWith("Extended:");
+        await Assert.That(text).Contains("until 15:45");
     }
 
     [Test]

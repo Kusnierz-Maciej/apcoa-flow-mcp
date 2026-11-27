@@ -24,10 +24,14 @@ public sealed class Pricing(IApcoaFlowApi api, TimeProvider time)
     /// <summary>The longest stay checked for "same price, longer stay": one day.</summary>
     public const int SamePriceCapMinutes = 24 * 60;
 
+    /// <summary>How fine the same-price search goes: tariffs step in 15-minute blocks or more.</summary>
+    public const int SamePriceResolutionMinutes = 15;
+
     /// <summary>
     /// The longest stay (up to <see cref="SamePriceCapMinutes"/> and the parking's limit) that costs the same as
-    /// <paramref name="minutes"/> did (<paramref name="price"/>), assuming prices only grow with time; null when no
-    /// longer stay costs the same. A binary search: ~11 quotes.
+    /// <paramref name="minutes"/> did (<paramref name="price"/>), assuming prices only grow with time; null when a
+    /// minute more already costs more. Bounded: at most ~9 quotes (one probe, the cap, then a 15-minute-resolution
+    /// binary search), so a paid quote stays quick under the rate limit.
     /// </summary>
     public async Task<int?> LongestAtSamePriceAsync(string parkingId, string vehicleId, int minutes, Money price, int? maxMinutes, CancellationToken ct)
     {
@@ -38,12 +42,15 @@ public sealed class Pricing(IApcoaFlowApi api, TimeProvider time)
         if (!await Same(minutes + 1)) return null;
         if (await Same(cap)) return cap;
         int lo = minutes + 1, hi = cap; // same at lo, more at hi
-        while (hi - lo > 1)
+        while (hi - lo > SamePriceResolutionMinutes)
         {
             var mid = lo + (hi - lo) / 2;
             if (await Same(mid)) lo = mid;
             else hi = mid;
         }
+        // Tariffs step at whole blocks of stay: the 15-minute mark just below the boundary is the round answer.
+        var mark = (hi - 1) / SamePriceResolutionMinutes * SamePriceResolutionMinutes;
+        if (mark > lo && await Same(mark)) lo = mark;
         return lo;
     }
 

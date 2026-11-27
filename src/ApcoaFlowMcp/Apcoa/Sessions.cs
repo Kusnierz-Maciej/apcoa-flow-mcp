@@ -101,15 +101,24 @@ public sealed class Sessions(IApcoaFlowApi api, Pricing pricing, TimeProvider ti
             if (confirmedCostPln is null)
             {
                 // Same price, longer stay? Suggest it (the user picks; never stretched silently).
-                var longest = await Phase("apcoa.same_price", () =>
-                    pricing.LongestAtSamePriceAsync(parking.Id, vehicle.Id, duration.Value, cost, parking.MaxDuration, ct));
+                int? longest = null;
+                try
+                {
+                    longest = await Phase("apcoa.same_price", () =>
+                        pricing.LongestAtSamePriceAsync(parking.Id, vehicle.Id, duration.Value, cost, parking.MaxDuration, ct));
+                }
+                catch (Exception ex) when (ex is not OperationCanceledException)
+                {
+                    // A suggestion only: the quote itself must still come back.
+                    logger.LogInformation("same-price search at {Parking} failed ({Error}); quoting without it", parking.Id, ex.Message);
+                }
                 var amount = cost.Amount.ToString("0.00", CultureInfo.InvariantCulture);
                 return new SessionResult(
                     $"{Text.Duration(duration.Value)} at {parking.Name} for {vehicle.LicensePlate} costs {cost}, " +
                     $"{(quote.PrepaymentMode == "autoCharge" ? "charged at start" : "charged at the end")} to {card.Method!.Type} {card.Method.Identifier}." +
                     (window is { Minutes: > 0 } w ? $" (Free for up to {Text.Duration(w.Minutes)}.)" : "") +
                     (longest is { } l
-                        ? $" For the same {cost} the stay can last up to {Text.Duration(l)} (until {Text.LocalTime(time.GetUtcNow().AddMinutes(l), time)}) — ask the user which they want."
+                        ? $" For the same {cost} the stay can last up to {Text.Duration(l)} (until about {Text.LocalTime(Minute(time.GetUtcNow()).AddMinutes(l), time)} if started now) — ask the user which they want."
                         : "") +
                     $" Nothing was started yet: confirm with the user, then call again with durationMinutes={duration}" +
                     (longest is { } l2 ? $" (or {l2} for the longer stay at the same price)" : "") +
@@ -255,14 +264,27 @@ public sealed class Sessions(IApcoaFlowApi api, Pricing pricing, TimeProvider ti
             return Refused("payment_action_required",
                 $"The card payment for extending the session at {session.Space?.Name} needs a confirmation step (e.g. 3-D " +
                 "Secure) that this server can't do. Check get_active_sessions: the session keeps its old end unless it shows otherwise.");
-        if (!string.IsNullOrEmpty(body?.FailureReason))
-            return Refused("extend_failed", $"APCOA didn't extend the session at {session.Space?.Name} ({body.FailureReason}).");
+        if (!string.IsNullOrEmpty(body?.FailureReason) || IsFailedStatus(body?.Status))
+            return Refused("extend_failed", $"APCOA didn't extend the session at {session.Space?.Name} ({body!.FailureReason ?? body.Status}).");
+        if (!string.IsNullOrEmpty(body?.PendingId))
+        {
+            // A paid extension answers {status: awaitingPayment, pendingId}; sessions/pending/{id} settles it (2026-11-27).
+            PendingStartStatus? pending = null;
+            try { pending = await Phase("apcoa.pending", () => WaitForPendingAsync(body.PendingId!, ct)); }
+            catch (Exception ex) when (ex is not OperationCanceledException)
+            {
+                logger.LogWarning(ex, "pending extension {Pending} not readable", body.PendingId);
+            }
+            if (pending?.IsFailed == true)
+                return Refused("extend_failed",
+                    $"APCOA didn't extend the session at {session.Space?.Name} ({pending.FailureReason ?? pending.Status}). It keeps its old end.");
+        }
 
         // Accepted (possibly processed asynchronously, like paid starts): report it only once the new end shows.
         Session? updated = null;
         try
         {
-            updated = await Phase("apcoa.readback", () => WaitForEndAsync(session.Id, newEnd, ct));
+            updated = await Phase("apcoa.readback", () => WaitForEndAsync(session.Id, session.EndDate, newEnd, minutes, ct));
         }
         catch (Exception ex) when (ex is not OperationCanceledException)
         {
@@ -276,18 +298,33 @@ public sealed class Sessions(IApcoaFlowApi api, Pricing pricing, TimeProvider ti
             SessionId: session.Id, CostPln: cost.Amount, DurationMinutes: minutes);
     }
 
-    /// <summary>The running session once its end has reached <paramref name="newEnd"/> (a minute's slack); null after ~20 s.</summary>
-    private async Task<Session?> WaitForEndAsync(string sessionId, DateTimeOffset newEnd, CancellationToken ct)
+    /// <summary>
+    /// The running session once its end has moved past <paramref name="oldEnd"/> and reached <paramref name="newEnd"/>
+    /// (with a few seconds' slack, never more than half the extension); null after ~20 s. Each read is retried on its own.
+    /// </summary>
+    private async Task<Session?> WaitForEndAsync(string sessionId, DateTimeOffset? oldEnd, DateTimeOffset newEnd, int minutes, CancellationToken ct)
     {
+        var slack = TimeSpan.FromSeconds(Math.Min(30, minutes * 30));
         for (var attempt = 0; attempt < 10; attempt++)
         {
             if (attempt > 0) await Task.Delay(TimeSpan.FromSeconds(2), time, ct);
-            var current = (await api.GetSessionsAsync(ct)).FirstOrDefault(s => s.Id == sessionId);
-            if (current?.EndDate is { } end && end >= newEnd.AddMinutes(-1))
-                return current;
+            try
+            {
+                var current = (await api.GetSessionsAsync(ct)).FirstOrDefault(s => s.Id == sessionId);
+                if (current?.EndDate is { } end && (oldEnd is null || end > oldEnd.Value) && end >= newEnd - slack)
+                    return current;
+            }
+            catch (Exception ex) when (ex is not OperationCanceledException)
+            {
+                logger.LogInformation("re-reading session {Session} failed ({Error}); retrying", sessionId, ex.Message);
+            }
         }
         return null;
     }
+
+    private static bool IsFailedStatus(string? status) => status is { } s &&
+        (s.Contains("fail", StringComparison.OrdinalIgnoreCase) || s.Contains("reject", StringComparison.OrdinalIgnoreCase) ||
+         s.Contains("cancel", StringComparison.OrdinalIgnoreCase) || s.Contains("declin", StringComparison.OrdinalIgnoreCase));
 
     public async Task<SessionResult> EndAsync(string sessionId, CancellationToken ct)
     {
