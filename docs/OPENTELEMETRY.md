@@ -131,6 +131,12 @@ don't (`none`) get one trace per tool call; group those by `user.email` and time
 
 Claude Code also sends `claudecode/toolUseId` in `_meta`: an id per tool call, not per conversation.
 
+Over HTTP the server runs **stateless** (the SDK's default session mode), so there is no initialize handshake to
+fall back on per request: `client.name` / `client.version` are set only when the client sends `_meta`
+`io.modelcontextprotocol/clientInfo` (2026-07-28 stateless protocol) — older clients show none (log line says
+`from unknown`; verified 2026-11-27 with the Inspector CLI and the Aspire dashboard). In stdio mode they come from
+the handshake.
+
 Useful TraceQL:
 
 ```
