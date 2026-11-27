@@ -33,8 +33,14 @@ public interface IApcoaFlowApi
     [Get("/api/v1/spaces/getByBoundingBox")]
     Task<List<MapSpace>> GetSpacesByBoundingBoxAsync([Query] BoundingBoxQuery query, CancellationToken ct = default);
 
+    /// <param name="priceOptions">
+    /// Whole hours (repeated <c>priceOptions=1&amp;priceOptions=2…</c>): the tariff table then lists "Up to N hours" for
+    /// each, the price of a stay of up to N hours <b>starting now</b> (2026-11-28; commas and fractions are refused, 0 →
+    /// an empty table). Without it: hours 1 and 2 plus "Max day price" (the general day cap, not dated).
+    /// </param>
     [Get("/api/v1/spaces/{spaceId}")]
-    Task<SpaceDetails> GetSpaceAsync(string spaceId, CancellationToken ct = default);
+    Task<SpaceDetails> GetSpaceAsync(string spaceId,
+        [Query(CollectionFormat.Multi), AliasAs("priceOptions")] IEnumerable<int>? priceOptions = null, CancellationToken ct = default);
 
     // ── Prices ─────────────────────────────────────────────────────────────────────────────────
 

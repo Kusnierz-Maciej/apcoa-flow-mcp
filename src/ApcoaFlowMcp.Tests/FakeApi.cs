@@ -57,7 +57,7 @@ internal static class FakeApi
     public static IApcoaFlowApi ForStarts(Func<int, decimal> price, string prepaymentMode = "autoCharge", PaymentMethod? defaultMethod = null)
     {
         var api = Create();
-        api.GetSpaceAsync(ParkingId, Arg.Any<CancellationToken>()).Returns(new SpaceDetails { Id = ParkingId, Name = ParkingName });
+        api.GetSpaceAsync(ParkingId, Arg.Any<IEnumerable<int>?>(), Arg.Any<CancellationToken>()).Returns(new SpaceDetails { Id = ParkingId, Name = ParkingName });
         api.GetPaymentMethodsAsync(Arg.Any<string?>(), Arg.Any<CancellationToken>()).Returns(
         [
             defaultMethod ?? new PaymentMethod { Id = CardId, Type = "visa", Identifier = "****1234", IsDefault = true, Flow = "saved", RequiredAction = "none", Availability = "available" },

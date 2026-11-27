@@ -49,7 +49,8 @@ public sealed class Sessions(IApcoaFlowApi api, Pricing pricing, TimeProvider ti
                 $"{vehicle.LicensePlate} already has a running session: {Describe(running)}. End it with end_session (or " +
                 "extend it with extend_session) before starting another one.", running.Id);
 
-        var parking = await Phase("apcoa.parking", () => api.GetSpaceAsync(parkingId.Trim(), ct));
+        // The details with the hourly price curve: name, rules, usual/longest stay and the prices of a stay starting now.
+        var parking = await Phase("apcoa.parking", () => pricing.DetailsWithCurveAsync(parkingId.Trim(), ct));
         ApcoaTelemetry.Tag(ApcoaTelemetry.Tags.ParkingId, parking.Id);
         ApcoaTelemetry.Tag(ApcoaTelemetry.Tags.ParkingName, parking.Name);
         if (parking.CtaButtonType is not null && parking.CtaButtonType != "startParking")

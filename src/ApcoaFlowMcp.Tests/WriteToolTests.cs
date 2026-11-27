@@ -17,7 +17,8 @@ public class WriteToolTests
     public async Task Free_start_uses_the_default_card_the_minute_and_the_whole_free_window()
     {
         var api = ForStarts(minutes => minutes <= 90 ? 0m : 2m);
-        api.GetSpaceAsync(ParkingId, Arg.Any<CancellationToken>()).Returns(new SpaceDetails { Id = ParkingId, Name = ParkingName, DefaultLengthOfStayInMinutes = 90 });
+        api.GetSpaceAsync(ParkingId, Arg.Any<IEnumerable<int>?>(), Arg.Any<CancellationToken>())
+            .Returns(ReadToolTests.Curve(ParkingId, ParkingName, [0m, 2m, 6m], hint: 90));
 
         var text = await FakeApi.Tools(api).StartFreeSessionAsync(ParkingId, ParkingName, "abc 12345");
 
@@ -33,7 +34,7 @@ public class WriteToolTests
     public async Task A_plate_recognition_parking_that_cant_be_started_says_so()
     {
         var api = ForStarts(_ => 0m);
-        api.GetSpaceAsync(ParkingId, Arg.Any<CancellationToken>()).Returns(new SpaceDetails
+        api.GetSpaceAsync(ParkingId, Arg.Any<IEnumerable<int>?>(), Arg.Any<CancellationToken>()).Returns(new SpaceDetails
         {
             Id = ParkingId, Name = "Lidl Poznań ul. Fabryczna 23", CtaButtonType = "none", SessionsStartAutomatically = true,
         });
@@ -61,7 +62,7 @@ public class WriteToolTests
     {
         // The table: up to 1 h 0.40, up to 2 h 0.80, day 5.00 (Przy Ratuszu-like: 0.40 per started hour).
         var api = ForStarts(minutes => minutes <= 60 ? 0.40m : minutes <= 120 ? 0.80m : 5m);
-        api.GetSpaceAsync(ParkingId, Arg.Any<CancellationToken>()).Returns(ReadToolTests.Tariff(ParkingId, 0.40m, 0.80m, 5m));
+        api.GetSpaceAsync(ParkingId, Arg.Any<IEnumerable<int>?>(), Arg.Any<CancellationToken>()).Returns(ReadToolTests.Curve(ParkingId, ParkingName, [0.40m, 0.80m, 1.20m]));
 
         var text = await FakeApi.Tools(api).StartSessionAsync(ParkingId, ParkingName, "ABC12345", 15);
 
@@ -74,13 +75,13 @@ public class WriteToolTests
     public async Task The_same_price_search_is_bounded_and_a_failure_only_drops_the_suggestion()
     {
         var api = ForStarts(minutes => minutes <= 60 ? 0.40m : 0.80m);
-        api.GetSpaceAsync(ParkingId, Arg.Any<CancellationToken>()).Returns(ReadToolTests.Tariff(ParkingId, 0.40m, 0.80m, 5m));
+        api.GetSpaceAsync(ParkingId, Arg.Any<IEnumerable<int>?>(), Arg.Any<CancellationToken>()).Returns(ReadToolTests.Curve(ParkingId, ParkingName, [0.40m, 0.80m, 1.20m]));
         await FakeApi.Tools(api).StartSessionAsync(ParkingId, ParkingName, "ABC12345", 15);
         var quotes = api.ReceivedCalls().Count(c => c.GetMethodInfo().Name == nameof(IApcoaFlowApi.GetPriceAsync));
         await Assert.That(quotes).IsLessThanOrEqualTo(2).Because("the quote itself and ONE check of the table's answer — no searching");
 
         var failing = ForStarts(_ => 4m);
-        failing.GetSpaceAsync(ParkingId, Arg.Any<CancellationToken>()).Returns(ReadToolTests.Tariff(ParkingId, 4m, 4m, 10m));
+        failing.GetSpaceAsync(ParkingId, Arg.Any<IEnumerable<int>?>(), Arg.Any<CancellationToken>()).Returns(ReadToolTests.Curve(ParkingId, ParkingName, [4m, 4m, 10m]));
         failing.GetPriceAsync(Arg.Is<PriceQuery>(q => q!.Duration > 60 * 60), Arg.Any<CancellationToken>())
             .ThrowsAsync(new HttpRequestException("429"));
         var text = await FakeApi.Tools(failing).StartSessionAsync(ParkingId, ParkingName, "ABC12345", 60);
@@ -148,7 +149,8 @@ public class WriteToolTests
     public async Task Free_only_longer_than_the_free_window_starts_nothing()
     {
         var api = ForStarts(minutes => minutes <= 90 ? 0m : 2m);
-        api.GetSpaceAsync(ParkingId, Arg.Any<CancellationToken>()).Returns(new SpaceDetails { Id = ParkingId, Name = ParkingName, DefaultLengthOfStayInMinutes = 90 });
+        api.GetSpaceAsync(ParkingId, Arg.Any<IEnumerable<int>?>(), Arg.Any<CancellationToken>())
+            .Returns(ReadToolTests.Curve(ParkingId, ParkingName, [0m, 2m, 6m], hint: 90));
 
         var text = await FakeApi.Tools(api).StartFreeSessionAsync(ParkingId, ParkingName, "ABC12345", 120);
 

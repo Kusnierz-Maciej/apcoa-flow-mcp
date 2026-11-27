@@ -106,7 +106,7 @@ public sealed class FindParkingsScenario : IScenario
 
         foreach (var id in seenIds.Distinct().Take(4))
         {
-            var space = await api.GetSpaceAsync(id, ct);
+            var space = await api.GetSpaceAsync(id, ct: ct);
             run.Log($"space {space.Id} '{space.Name}': code={space.TariffCode} maxDuration={space.MaxDuration?.ToString() ?? "none"} min, " +
                     $"cta={space.CtaButtonType}, autoStart={space.SessionsStartAutomatically}, defaultStay={space.DefaultLengthOfStayInMinutes} min, " +
                     $"price sections={space.Prices.Count}, address={space.Address?.DisplayValue}, extra=[{Keys(space.Extra)}]");

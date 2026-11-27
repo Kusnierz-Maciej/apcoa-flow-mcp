@@ -24,46 +24,52 @@ public sealed class Pricing(IApcoaFlowApi api, TimeProvider time)
     public readonly record struct FreeWindow(int Minutes, bool AtLeast);
 
     /// <summary>
+    /// A parking's details WITH its price curve (the next day, hour by hour, starting now): one call that serves as the
+    /// details too (same fields). Pass the result to <see cref="FreeWindowAsync"/> and <see cref="LongestAtSamePriceAsync"/>.
+    /// </summary>
+    public Task<SpaceDetails> DetailsWithCurveAsync(string parkingId, CancellationToken ct) =>
+        api.GetSpaceAsync(parkingId, TariffTable.CurveHours, ct);
+
+    /// <summary>
     /// The longest stay starting now that costs the same as <paramref name="minutes"/> did (<paramref name="price"/>),
-    /// deduced from the parking's tariff table and verified with ONE quote; null when the table doesn't show a longer stay
-    /// at that price, or the quote disagrees. No searching.
+    /// read off the parking's hourly price curve (<paramref name="parking"/> from <see cref="DetailsWithCurveAsync"/>) and verified with ONE quote (the curve isn't plate-specific); null when
+    /// the curve shows no longer stay at that price, or the quote disagrees. No searching.
     /// </summary>
     public async Task<int?> LongestAtSamePriceAsync(SpaceDetails parking, string vehicleId, int minutes, Money price, CancellationToken ct)
     {
-        var longest = TariffTable.LongestAtPrice(TariffTable.Marks(parking), minutes, price);
-        if (longest is not { } candidate || candidate <= minutes) return null;
+        if (TariffTable.LongestAtPrice(TariffTable.Marks(parking), minutes, price) is not { } candidate) return null;
         if (parking.MaxDuration is > 0 && candidate > parking.MaxDuration) candidate = parking.MaxDuration.Value;
         if (candidate <= minutes) return null;
         return (await QuoteAsync(parking.Id, vehicleId, candidate, ct)).Total.Amount == price.Amount ? candidate : null;
     }
 
     /// <summary>
-    /// How long a stay starting now is free, from what the parking says about itself, verified with quotes — no searching:
-    /// <list type="number">
-    /// <item>1 min free? (1 quote) If not: not free.</item>
-    /// <item>The parking's preselected duration (shops: their free window, e.g. Biedronka 90 min): free, and a minute more
-    /// isn't? Then that's exactly the window (2 quotes).</item>
-    /// <item>Else the longest mark the tariff table shows as 0.00 (1 h, 2 h, a day), verified with a quote: free for at
-    /// least that long.</item>
-    /// <item>Else: free for at least 1 minute (length unknown).</item>
-    /// </list>
+    /// How long a stay starting now is free, read off the parking's own data and verified with one quote — no searching:
+    /// the hourly price curve gives the free run (e.g. free up to 5 h, paid by 6 h); the parking's preselected duration
+    /// (shops: their free window, e.g. Biedronka 90 min) pins it down when it falls inside that last hour. The quote
+    /// checks it for this vehicle (a shop's free time can be used up for a plate). Within the last hour only the lower
+    /// bound is known, unless the preselected duration says so.
     /// </summary>
     public async Task<FreeWindow> FreeWindowAsync(SpaceDetails parking, string vehicleId, CancellationToken ct)
     {
         async Task<bool> Free(int minutes) => (await QuoteAsync(parking.Id, vehicleId, minutes, ct)).Total.IsZero;
-        int? Capped(int m) => parking.MaxDuration is > 0 && m > parking.MaxDuration ? null : m;
+        int Capped(int m) => parking.MaxDuration is > 0 && m > parking.MaxDuration ? parking.MaxDuration.Value : m;
 
-        if (!await Free(1))
-            return new FreeWindow(0, AtLeast: false);
+        var (lastFree, firstPaid) = TariffTable.FreeRun(TariffTable.Marks(parking));
+        var hint = parking.DefaultLengthOfStayInMinutes;
+        int? candidate = null;
+        var exact = false;
+        if (hint is > 0 && hint > (lastFree ?? 0) && (firstPaid is null || hint < firstPaid))
+        {
+            candidate = hint; exact = firstPaid is not null; // the parking's own free window, inside the last free hour
+        }
+        else if (lastFree is { } free)
+            candidate = free;
 
-        if (parking.DefaultLengthOfStayInMinutes is { } hint && hint > 1 && Capped(hint + 1) is not null
-            && await Free(hint) && !await Free(hint + 1))
-            return new FreeWindow(hint, AtLeast: false);
+        if (candidate is { } c && await Free(Capped(c)))
+            return new FreeWindow(Capped(c), AtLeast: !exact);
 
-        foreach (var mark in TariffTable.Marks(parking).Where(m => m.Price.IsZero).OrderByDescending(m => m.Minutes))
-            if (Capped(mark.Minutes) is { } m && m > 1 && await Free(m))
-                return new FreeWindow(m, AtLeast: true);
-
-        return new FreeWindow(1, AtLeast: true);
+        // The curve says paid (or the free time is used up for this vehicle): free right now at all?
+        return await Free(1) ? new FreeWindow(1, AtLeast: true) : new FreeWindow(0, AtLeast: false);
     }
 }

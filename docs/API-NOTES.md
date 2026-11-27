@@ -85,7 +85,14 @@ Parking places are **spaces**, with GUID ids. There's no offline dataset: the ap
   address, parkingOverview: [{title, imageUrl}], sessionsStartAutomatically, prices: [{sectionName, prices: [{label,
   price}], description}], allowedPSPs, hasLengthOfStayPreset, ctaButtonType: "startParking", isMunicipality,
   countryCode, disclaimer, canStartCharging, hasAvailableContracts, hasPrebooking, hasFlexiPermits, …}`. `prices` is
-  the readable tariff table, not a quote. Across 45 sampled parkings: `parkingOverview` titles "Open" and "AutoPay"
+  the readable tariff table: "Up to 1 hour", "Up to 2 hours" (dated: a stay of that length starting now) and "Max day
+  price" (the general day cap, **not** dated: Ostrów says 0.00 while a dated Saturday day costs 5.00).
+  **`priceOptions`** (2026-11-28, from the app code; sandbox `parking-pricing`): whole hours, repeated
+  (`?priceOptions=1&priceOptions=2…`), replace the rows with one "Up to N hours" row per hour asked — the dated price
+  curve, e.g. Przy Ratuszu at night +0.40/h until 08:00 then +1.30/h; Ostrów on Saturday 00:08 free up to 5 h, 3.00
+  at 6 h. With 24 hours the last row becomes "Max day price". Not plate-specific (a shop's free time used up for a
+  plate isn't shown), so a deduction gets one verifying quote. `true`/words, `1,2,3`, `1.5` → 400; `0` → empty
+  table. Pricing uses hours 1–24 for the free window and the longest stay at the same price; no searching. Across 45 sampled parkings: `parkingOverview` titles "Open" and "AutoPay"
   (plate recognition, `sessionsStartAutomatically: true`); `ctaButtonType: "none"` where sessions can't be started (e.g.
   Lidl Poznań ul. Fabryczna 23: "1.5 h free without starting a session"); season tickets on 18; some pins answer
   `404 {"code":"FaTariffNotFound","message":"No tariff available…"}`. Biedronka spaces:
@@ -193,6 +200,7 @@ Free options, read-only (`FreeOptionsContractTests`):
 | A location-code search returns exactly that parking | `A_location_code_search_returns_exactly_that_parking` |
 | Map pins carry closed outlines | `Map_pins_carry_closed_outlines` |
 | Search `distance` is in kilometres | `Search_distance_is_in_kilometres` |
+| `spaces/{id}?priceOptions=1&priceOptions=2…` lists "Up to N hours" per hour asked, dated (= the quote for that stay) | `Price_options_give_the_price_curve_hour_by_hour` |
 
 One free cycle per run (`SessionContractTests.Free_session_lifecycle`, on Ostrów or a Biedronka with a dated 0.00
 quote; skipped when none is free):

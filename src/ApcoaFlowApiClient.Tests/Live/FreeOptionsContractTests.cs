@@ -127,4 +127,26 @@ public class FreeOptionsContractTests
         await Assert.That(outlines.Count).IsGreaterThan(0);
         await Assert.That(outlines.All(ring => ring[0] == ring[^1])).IsTrue().Because("an outline is a closed ring");
     }
+
+    [Test]
+    public async Task Price_options_give_the_price_curve_hour_by_hour()
+    {
+        // Whole hours, repeated: one "Up to N hour(s)" row each — the price of a stay of up to N hours starting now
+        // (2026-11-28). Pricing reads the free window and the longest stay at the same price off this curve.
+        var api = LiveApi.Api;
+        var details = await api.GetSpaceAsync(LiveApi.Ostrow, [1, 2, 3, 5, 8]);
+        var labels = details.Prices.Where(s => s.SectionName == "Parking").SelectMany(s => s.Prices).Select(i => i.Label).ToList();
+
+        await Assert.That(labels).Contains("Up to 1 hour");
+        foreach (var hours in new[] { 2, 3, 5, 8 })
+            await Assert.That(labels).Contains($"Up to {hours} hours");
+        await Assert.That(details.Prices.SelectMany(s => s.Prices).Where(i => i.Label!.StartsWith("Up to"))
+            .All(i => Money.TryParse(i.Price, out _))).IsTrue().Because("every row is a parseable PLN price");
+
+        // A dated row agrees with the quote for the same stay.
+        var car = LiveApi.FirstRegisteredCar(await api.GetVehiclesAsync());
+        var threeHours = details.Prices.SelectMany(s => s.Prices).Single(i => i.Label == "Up to 3 hours");
+        var quote = await LiveApi.QuoteAsync(api, LiveApi.Ostrow, car.Id, 180);
+        await Assert.That(Money.Parse(threeHours.Price!).Amount).IsEqualTo(quote.Amount);
+    }
 }

@@ -62,8 +62,9 @@ Everything about one parking. Read-only, idempotent. Input: `parkingId`.
 - **Sessions**: status ("Open", "AutoPay"), whether you start sessions (in this server or the app) or the parking
   recognises plates and starts and ends them by itself, the usual stay (shop parkings: their free window) and the
   longest stay.
-- **Pricing**: the tariff table and rules as the operator writes them. For the price of a specific stay for your
-  vehicle, use `get_price`.
+- **Pricing**: what a stay starting now costs, hour by hour for the next day (from the parking's own price curve, the
+  same for every vehicle), and the rules as the operator writes them. For your vehicle (a shop's free time may be used
+  up), use `get_price`.
 - **Amenities**: EV charging, season tickets, pre-booking, flexi permits, municipal parking; payment (card, Stripe).
 
 ```
@@ -76,8 +77,8 @@ Sessions:
   Status: Open
   You start and end a session (start_session / start_free_session, or in the APCOA Flow app).
 Pricing:
-  Parking: Up to 1 hour: 0.00 PLN, Up to 2 hours: 0.00 PLN, Max day price: 22.00 PLN
-    Parking dostępny 24h. Płatny: Poniedziałek - Piątek 8:00 - 16:00. Sobota 8:00 - 13:00. 1 PLN za pierwszą rozpoczętą godzinę. …
+  Price if you start now (any vehicle; get_price checks yours): up to 1 h: 0.00 PLN, 2 h: 1.00 PLN, 3 h–23 h: 2.00 PLN
+  Rules: Parking dostępny 24h. Płatny: Poniedziałek - Piątek 8:00 - 16:00. Sobota 8:00 - 13:00. 1 PLN za pierwszą rozpoczętą godzinę. …
   Parking fees: Prices include convenience fees
 Amenities: season tickets
 Payment: card (Stripe)
@@ -139,11 +140,13 @@ otherwise the tool refuses before starting and says to set a saved card as the d
 starts and extensions work with any default method (its id is sent, as the app does; nothing is charged).
 
 **Free** means the dated quote for this vehicle is 0.00 — whatever the reason (a free tariff, a shop's free time, a
-one-time free period). The **free window** comes from what the parking says about itself, verified with quotes and
-never searched for: its preselected duration (shop parkings: their free window, e.g. Biedronka's 90 min — exact if a
-minute more costs money), else the longest mark its tariff table shows as free (1 h, 2 h, a day — "free for at least …").
-If neither tells, the stay is only known to be free right now; a free start without a duration then uses the parking's
-usual duration (or 60 min) and still starts only if that quote is 0.00.
+one-time free period). The **free window** and the **longest stay at the same price** are read off the parking's
+own price curve (its details with hours 1–24: what a stay of up to N hours starting now costs) and verified with one
+quote for the vehicle — never searched for. The curve has whole hours, so within the last free hour the parking's
+preselected duration decides (shop parkings: their free window, e.g. Biedronka's 90 min → "free for up to 1 h 30
+min"); without one it says "free for at least N h". If the curve shows no free time for the vehicle, the stay is only
+known to be free right now; a free start without a duration then uses the parking's usual duration (or 60 min) and
+still starts only if that quote is 0.00.
 
 | Tool | Inputs | Does |
 |---|---|---|

@@ -61,7 +61,7 @@ public sealed class QuotesScenario : IScenario
 
         async Task Space(string spaceId)
         {
-            var s = await api.GetSpaceAsync(spaceId, ct);
+            var s = await api.GetSpaceAsync(spaceId, ct: ct);
             run.Log($"space '{s.Name}' code={s.TariffCode} maxDuration={s.MaxDuration} defaultStay={s.DefaultLengthOfStayInMinutes} min; " +
                     $"tariff: {string.Join(" | ", s.Prices.Select(p => $"{p.SectionName}: {string.Join(", ", p.Prices.Select(i => $"{i.Label} {i.Price}"))} — {p.Description}"))}");
         }

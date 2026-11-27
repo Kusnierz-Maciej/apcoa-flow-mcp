@@ -150,18 +150,14 @@ public sealed class ApcoaFlowTools(
         {
             try
             {
-                if (!(await pricing.QuoteAsync(p.Id, vehicleId, 1, ct)).Total.IsZero)
+                var window = await pricing.FreeWindowAsync(await pricing.DetailsWithCurveAsync(p.Id, ct), vehicleId, ct);
+                notes[p.Id] = window switch
                 {
-                    notes[p.Id] = "paid now";
-                    continue;
-                }
-                notes[p.Id] = "free now (get_price says for how long)"; // kept if the window check below fails
-                var details = await api.GetSpaceAsync(p.Id, ct);
-                var hint = details.DefaultLengthOfStayInMinutes;
-                if (hint is > 1 && (details.MaxDuration is null or <= 0 || hint < details.MaxDuration)
-                    && (await pricing.QuoteAsync(p.Id, vehicleId, hint.Value, ct)).Total.IsZero
-                    && !(await pricing.QuoteAsync(p.Id, vehicleId, hint.Value + 1, ct)).Total.IsZero)
-                    notes[p.Id] = $"free now for up to {Text.Duration(hint.Value)}";
+                    { Minutes: 0 } => "paid now",
+                    { AtLeast: false } => $"free now for up to {Text.Duration(window.Minutes)}",
+                    { Minutes: > 1 } => $"free now for at least {Text.Duration(window.Minutes)}",
+                    _ => "free now (get_price says for how long)",
+                };
             }
             catch (Exception ex) when (ex is not OperationCanceledException && ToolErrors.Map(ex) is not null)
             {
@@ -183,7 +179,7 @@ public sealed class ApcoaFlowTools(
         => ToolErrors.GuardAsync("get_parking_details", logger, async () =>
     {
         using var _ = logger.BeginScope("{Tool}", "get_parking_details");
-        var p = await api.GetSpaceAsync(parkingId.Trim(), ct);
+        var p = await pricing.DetailsWithCurveAsync(parkingId.Trim(), ct);
         var pin = await finder.PinAsync(p.Id, p.Coordinates, ct);
         logger.LogInformation("get_parking_details [{Id}] {Name}", p.Id, p.Name);
         ApcoaTelemetry.Tag(ApcoaTelemetry.Tags.ParkingId, p.Id);
@@ -214,14 +210,15 @@ public sealed class ApcoaFlowTools(
         if (p.MaxDuration is > 0) sb.AppendLine($"  Longest stay: {Text.Duration(p.MaxDuration.Value)}");
 
         sb.AppendLine("Pricing:");
+        var curve = TariffTable.Marks(p);
+        if (curve.Count > 0)
+            sb.AppendLine($"  Price if you start now (any vehicle; get_price checks yours): {Curve(curve)}");
         foreach (var section in p.Prices)
         {
-            // Items can be a note without a price ("Prices include convenience fees").
-            var items = string.Join(", ", section.Prices
-                .Where(i => !string.IsNullOrWhiteSpace(i.Label) || !string.IsNullOrWhiteSpace(i.Price))
-                .Select(i => string.IsNullOrWhiteSpace(i.Price) ? i.Label!.Trim() : $"{i.Label?.Trim()}: {Pln(i.Price)}"));
-            sb.AppendLine(items.Length > 0 ? $"  {section.SectionName}: {items}" : $"  {section.SectionName}");
-            if (!string.IsNullOrWhiteSpace(section.Description)) sb.AppendLine($"    {section.Description.Trim()}");
+            if (!string.IsNullOrWhiteSpace(section.Description))
+                sb.AppendLine($"  Rules: {section.Description.Trim()}");
+            else if (section.Prices.FirstOrDefault(i => string.IsNullOrWhiteSpace(i.Price) && !string.IsNullOrWhiteSpace(i.Label)) is { } note)
+                sb.AppendLine($"  {section.SectionName}: {note.Label!.Trim()}"); // e.g. "Prices include convenience fees"
         }
 
         var amenities = new List<string>();
@@ -263,7 +260,7 @@ public sealed class ApcoaFlowTools(
         }
         ApcoaTelemetry.Tag(ApcoaTelemetry.Tags.LicensePlate, vehicle.LicensePlate);
 
-        var parking = await api.GetSpaceAsync(parkingId.Trim(), ct);
+        var parking = await pricing.DetailsWithCurveAsync(parkingId.Trim(), ct);
         var quote = await pricing.QuoteAsync(parking.Id, vehicle.Id, durationMinutes, ct);
         var total = quote.Total;
         ApcoaTelemetry.Tag(ApcoaTelemetry.Tags.CostPln, (double)total.Amount);
@@ -505,6 +502,22 @@ public sealed class ApcoaFlowTools(
         if (!s.SessionCanBeExtended) sb.Append(", can't be extended");
         if (!s.SessionCanBeStopped) sb.Append(", can't be stopped early");
         return sb.ToString();
+    }
+
+    /// <summary>"up to 5 h: 0.00 PLN, 6 h: 3.00 PLN, 7–24 h: 5.00 PLN" — runs of hours at the same price.</summary>
+    internal static string Curve(List<TariffTable.Mark> marks)
+    {
+        var parts = new List<string>();
+        for (var i = 0; i < marks.Count;)
+        {
+            var j = i;
+            while (j + 1 < marks.Count && marks[j + 1].Price.Amount == marks[i].Price.Amount) j++;
+            string Hours(TariffTable.Mark m) => Text.Duration(m.Minutes);
+            var span = i == 0 ? $"up to {Hours(marks[j])}" : i == j ? Hours(marks[i]) : $"{Text.Duration(marks[i].Minutes)}–{Hours(marks[j])}";
+            parts.Add($"{span}: {marks[i].Price}");
+            i = j + 1;
+        }
+        return string.Join(", ", parts);
     }
 
     private static string Pln(string? apiPrice) => Money.TryParse(apiPrice, out var money) ? money.ToString() : apiPrice ?? "?";
