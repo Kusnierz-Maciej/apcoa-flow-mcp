@@ -2,7 +2,7 @@ namespace ApcoaFlowApiClient.Models;
 
 /// <summary>
 /// <c>GET /api/v1/vehicles</c> item. <see cref="Id"/> is the <c>licensePlateId</c> that <c>prices</c> and
-/// <c>sessions/startParking</c> take. Plates come without spaces (<c>"STA0521F"</c>).
+/// <c>sessions/startParking</c> take. Plates come without spaces (<c>"ABC12345"</c>).
 /// </summary>
 public sealed class Vehicle
 {

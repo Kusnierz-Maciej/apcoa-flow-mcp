@@ -60,7 +60,7 @@ internal static class FakeApi
         api.GetSpaceAsync(ParkingId, Arg.Any<CancellationToken>()).Returns(new SpaceDetails { Id = ParkingId, Name = ParkingName });
         api.GetPaymentMethodsAsync(Arg.Any<string?>(), Arg.Any<CancellationToken>()).Returns(
         [
-            defaultMethod ?? new PaymentMethod { Id = CardId, Type = "visa", Identifier = "****4412", IsDefault = true, Flow = "saved", RequiredAction = "none", Availability = "available" },
+            defaultMethod ?? new PaymentMethod { Id = CardId, Type = "visa", Identifier = "****1234", IsDefault = true, Flow = "saved", RequiredAction = "none", Availability = "available" },
             new PaymentMethod { Id = "hosted-checkout", Type = "unknown", Flow = "hostedCheckout", RequiredAction = "none", Availability = "available" },
         ]);
         // No session before the start; the new one is listed after it.

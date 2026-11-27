@@ -51,7 +51,7 @@ public class WriteToolTests
 
         var text = await FakeApi.Tools(api).StartSessionAsync(ParkingId, ParkingName, "ABC12345", 60);
 
-        await Assert.That(text).Contains("1 h at Targowiska Miejskie Ostrów Wlkp. III for ABC12345 costs 5.00 PLN, charged at the end to visa ****4412.");
+        await Assert.That(text).Contains("1 h at Targowiska Miejskie Ostrów Wlkp. III for ABC12345 costs 5.00 PLN, charged at the end to visa ****1234.");
         await Assert.That(text).Contains("durationMinutes=60 and confirmedCostPln=5.00");
         await NoStart(api);
     }

@@ -163,7 +163,7 @@ Started: [046ca4c0-fc81-4506-bb9f-d387b48e3ca8] Targowiska Miejskie Ostrów Wlkp
 ```
 
 ```
-1 h at Czarny Dunajec for ABC12345 costs 1.00 PLN, charged at the end to visa ****4412. Nothing was started yet:
+1 h at Czarny Dunajec for ABC12345 costs 1.00 PLN, charged at the end to visa ****1234. Nothing was started yet:
 confirm with the user, then call again with durationMinutes=60 and confirmedCostPln=1.00.
 ```
 

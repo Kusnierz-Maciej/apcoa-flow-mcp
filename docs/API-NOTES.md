@@ -55,7 +55,7 @@ Business errors are `{"code": "...", "message": "..."}`; validation errors are A
 - `GET /api/v1/vehicles` → `[{id, countryCode, licensePlate, description, isDefault, isAnprAutoPaymentEnabled,
   validUntil, companyName, …}]`. `id` is the `licensePlateId` that prices and starts take. **Plates come without
   spaces** (`"ABC12345"`); `description` is the user's own label.
-- `GET /api/v1/paymentMethods[?spaceId=]` → `[{id, type, identifier: "****4412", expiration, status, isDefault, psp:
+- `GET /api/v1/paymentMethods[?spaceId=]` → `[{id, type, identifier: "****1234", expiration, status, isDefault, psp:
   "stripe", flow, requiredAction, availability}]`. `flow: "saved"` methods are charged without any interaction;
   there's also a pseudo-method `{id: "hosted-checkout", type: "unknown", flow: "hostedCheckout"}` (an interactive
   payment page). With `spaceId`, only what that space accepts.
