@@ -109,5 +109,19 @@ Useful TraceQL:
 > That is intended for a self-hosted stack — don't point `Telemetry:OtlpEndpoint` at a shared or
 > third-party backend without revisiting this.
 
+### Why URI query-string redaction is off
+
+The framework default is to keep .NET's redaction of query strings in `System.Net.Http` span URLs
+(`url.full`). This server deliberately turns it off (`System.Net.Http.DisableUriRedaction`, set in
+`Program.cs` only when telemetry is enabled) because APCOA puts the request's meaning in the query string:
+the tariff breakdown carries `parkingLotId`, `tariffId`, the plate (`vehicleNumbwe`), check-in/out times and
+the promotion; session lists carry `status` and paging; parking calls carry the lot id. With redaction on
+every outbound span reads `…/tariffBreakDownV2?*` and a wrong quote can't be traced back to its inputs.
+
+What makes this acceptable: no secrets travel in query strings — credentials go in the login body, the
+bearer token in a header, and neither is recorded. What it costs: plates and ids end up in the trace
+backend, which is why telemetry is for a self-hosted stack only (see the personal-data note above). If
+that ever changes, remove the switch and rely on the business tags instead.
+
 Telemetry off (`Telemetry:Enabled=false`) costs effectively nothing: with no listener,
 `StartActivity` returns `null` and every tag call is a null check.
