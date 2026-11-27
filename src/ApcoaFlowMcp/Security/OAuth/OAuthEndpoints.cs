@@ -111,35 +111,40 @@ public static class OAuthEndpoints
         var email = F("apcoa_email");
         var password = F("apcoa_password");
 
+        // The page's script submits in the background (Accept: application/json) and gets JSON back: an error
+        // message it shows above the untouched form, or the redirect URL it navigates to. Nothing typed is ever
+        // sent back. A plain form POST (JavaScript off) gets the HTML form again, with only the email kept.
+        var wantsJson = ctx.Request.Headers.Accept.Any(a => a?.Contains("application/json", StringComparison.OrdinalIgnoreCase) == true);
+
+        IResult Fail(string message, int status) => wantsJson
+            ? Results.Json(new Dictionary<string, string> { ["error"] = message }, statusCode: status)
+            : Html(RenderForm(clientId, redirectUri!, state, codeChallenge!, allowlist.RequireApiKey, message, email), status);
+
         if (string.IsNullOrWhiteSpace(redirectUri) || string.IsNullOrWhiteSpace(codeChallenge))
-            return Results.BadRequest("Missing authorization parameters.");
+            return wantsJson
+                ? Results.Json(new Dictionary<string, string> { ["error"] = "Missing authorization parameters." }, statusCode: StatusCodes.Status400BadRequest)
+                : Results.BadRequest("Missing authorization parameters.");
 
         // 1. API-key allowlist gate (auto-passes when RequireMcpApiKey is off).
         if (!allowlist.IsAllowed(apiKey))
         {
             logger.LogWarning("OAuth authorize denied: API key not in allowlist.");
-            return Html(RenderForm(clientId, redirectUri, state, codeChallenge, allowlist.RequireApiKey,
-                "Invalid API key."), StatusCodes.Status401Unauthorized);
+            return Fail("Invalid API key.", StatusCodes.Status401Unauthorized);
         }
 
         // 2. Validate the APCOA credentials by a real login — classify bad-creds vs API error.
         if (string.IsNullOrWhiteSpace(email) || string.IsNullOrWhiteSpace(password))
-            return Html(RenderForm(clientId, redirectUri, state, codeChallenge, allowlist.RequireApiKey,
-                "APCOA email and password are required."), StatusCodes.Status400BadRequest);
+            return Fail("APCOA email and password are required.", StatusCodes.Status400BadRequest);
 
         var outcome = await loginValidator.ValidateAsync(email, password, ct);
         switch (outcome.Kind)
         {
             case LoginOutcomeKind.BadCredentials:
                 logger.LogInformation("OAuth authorize: APCOA credentials rejected.");
-                return Html(RenderForm(clientId, redirectUri, state, codeChallenge, allowlist.RequireApiKey,
-                    "APCOA rejected these credentials. Check your email and password."),
-                    StatusCodes.Status401Unauthorized);
+                return Fail("APCOA rejected these credentials. Check your email and password.", StatusCodes.Status401Unauthorized);
             case LoginOutcomeKind.ApiError:
                 logger.LogWarning("OAuth authorize: APCOA API error during validation ({Detail}).", outcome.Detail);
-                return Html(RenderForm(clientId, redirectUri, state, codeChallenge, allowlist.RequireApiKey,
-                    "APCOA service is temporarily unavailable. Please try again."),
-                    StatusCodes.Status503ServiceUnavailable);
+                return Fail("APCOA service is temporarily unavailable. Please try again.", StatusCodes.Status503ServiceUnavailable);
         }
 
         // 3. Mint a single-use, short-lived authorization code binding the creds + PKCE + redirect.
@@ -156,7 +161,10 @@ public static class OAuthEndpoints
         var location = $"{redirectUri}{sep}code={Uri.EscapeDataString(code)}";
         if (!string.IsNullOrEmpty(state))
             location += $"&state={Uri.EscapeDataString(state)}";
-        return Results.Redirect(location);
+        // fetch() would follow a 302 itself, so the script gets the URL and navigates the page to it.
+        return wantsJson
+            ? Results.Json(new Dictionary<string, string> { ["redirect"] = location })
+            : Results.Redirect(location);
     }
 
     private static async Task<IResult> Token(
@@ -264,14 +272,33 @@ public static class OAuthEndpoints
         return $"{req.Scheme}://{req.Host}{req.PathBase}";
     }
 
-    private static IResult Html(string html, int statusCode = StatusCodes.Status200OK) =>
-        Results.Content(html, "text/html; charset=utf-8", Encoding.UTF8, statusCode);
+    /// <summary>
+    /// HTML response marked <c>Cache-Control: no-store</c>: after a failed sign-in the form carries what the user
+    /// typed (password and API key included), so the page must never be cached or restored from disk.
+    /// </summary>
+    private static IResult Html(string html, int statusCode = StatusCodes.Status200OK) => new NoStoreHtml(html, statusCode);
 
+    private sealed class NoStoreHtml(string html, int statusCode) : IResult
+    {
+        public Task ExecuteAsync(HttpContext context)
+        {
+            context.Response.Headers.CacheControl = "no-store";
+            context.Response.Headers.Pragma = "no-cache";
+            return Results.Content(html, "text/html; charset=utf-8", Encoding.UTF8, statusCode).ExecuteAsync(context);
+        }
+    }
+
+    /// <param name="email">
+    /// Kept in the no-JavaScript fallback after a failed sign-in. Secrets (password, API key) are never echoed:
+    /// with JavaScript the form isn't re-rendered at all, so what the user typed simply stays in the fields.
+    /// </param>
     private static string RenderForm(
-        string? clientId, string redirectUri, string? state, string codeChallenge, bool requireApiKey, string? error)
+        string? clientId, string redirectUri, string? state, string codeChallenge, bool requireApiKey, string? error,
+        string? email = null)
     {
         string H(string? v) => WebUtility.HtmlEncode(v ?? string.Empty);
-        var errorBlock = error is null ? "" : $"<p class=\"error\">{H(error)}</p>";
+        // Always present so the script can show errors in place; hidden while there is none.
+        var errorBlock = $"<p class=\"error\" id=\"error\" role=\"alert\" tabindex=\"-1\"{(error is null ? " hidden" : "")}>{H(error)}</p>";
 
         var apiKeyBlock = requireApiKey
             ? """
@@ -318,6 +345,7 @@ public static class OAuthEndpoints
                             color:var(--brand-text);border-radius:6px}
               button.reveal:hover{background:var(--brand-tint)}
               button.reveal:focus-visible{outline:2px solid var(--brand);outline-offset:1px}
+              .error[hidden]{display:none}
               .error{background:#fde8e8;color:#9b1c1c;padding:.6rem .75rem;border-radius:8px;font-size:.85rem}
               .field-hint{color:#667085;font-size:.72rem;margin:.3rem 0 0}
               .hint{color:#667085;font-size:.78rem;margin-top:1rem}
@@ -341,7 +369,7 @@ public static class OAuthEndpoints
                 <input type="hidden" name="code_challenge" value="{{H(codeChallenge)}}">
 
                 <label for="apcoa_email">APCOA account email</label>
-                <input id="apcoa_email" name="apcoa_email" type="email"
+                <input id="apcoa_email" name="apcoa_email" type="email" value="{{H(email)}}"
                        autocomplete="username" autocapitalize="none" spellcheck="false" required>
 
                 <label for="apcoa_password">APCOA account password</label>
@@ -358,10 +386,19 @@ public static class OAuthEndpoints
               inside your encrypted session token — never on the server.</p>
             </div>
             <script>
+              // Sign-in runs in the background: the form is posted with fetch and the page is never replaced on
+              // failure, so everything typed (password included) stays in the fields and is never sent back by
+              // the server. Without JavaScript the plain form POST still works.
               // Loading state: lock the form while the APCOA login runs (it can take a few seconds).
-              // Inputs go read-only, not disabled — disabled fields would be left out of the POST.
+              // Inputs go read-only, not disabled — disabled fields would be left out of the request.
               const form = document.getElementById('login');
               const button = document.getElementById('submit');
+              const errorBox = document.getElementById('error');
+              const showError = message => {
+                errorBox.textContent = message;
+                errorBox.hidden = false;
+                errorBox.focus();
+              };
               const fields = form.querySelectorAll('input:not([type=hidden])');
               const reveals = form.querySelectorAll('button.reveal');
 
@@ -385,10 +422,30 @@ public static class OAuthEndpoints
                 button.textContent = busy ? 'Signing in…' : 'Sign in';
                 form.setAttribute('aria-busy', String(busy));
               };
-              form.addEventListener('submit', e => {
-                if (button.disabled) { e.preventDefault(); return; } // swallow double submits
-                reveals.forEach(t => setRevealed(t, false)); // never submit / cache secrets as plain text
+              form.addEventListener('submit', async e => {
+                e.preventDefault();
+                if (button.disabled) return; // swallow double submits
+                reveals.forEach(t => setRevealed(t, false)); // never leave secrets shown as plain text
+                const body = new URLSearchParams(new FormData(form));
+                errorBox.hidden = true;
                 setBusy(true);
+                try {
+                  const response = await fetch(form.action, {
+                    method: 'POST', body, cache: 'no-store', credentials: 'same-origin',
+                    headers: { 'Accept': 'application/json' },
+                  });
+                  let data = null;
+                  try { data = await response.json(); } catch { /* not JSON */ }
+                  if (response.ok && data && data.redirect) {
+                    button.textContent = 'Redirecting…';
+                    window.location.assign(data.redirect); // hand the code back to the MCP client
+                    return; // stay locked while the browser navigates
+                  }
+                  showError((data && data.error) || `Sign-in failed (HTTP ${response.status}). Please try again.`);
+                } catch {
+                  showError('Could not reach the server. Check your connection and try again.');
+                }
+                setBusy(false);
               });
               // Back/forward cache restores the locked page — unlock it.
               window.addEventListener('pageshow', e => { if (e.persisted) setBusy(false); });
