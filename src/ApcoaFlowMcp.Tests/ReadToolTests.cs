@@ -252,5 +252,5 @@ public class ReadToolTests
     [Arguments(1440, "1 day")]
     [Arguments(43200, "30 days")]
     public async Task Durations_read_naturally(int minutes, string expected) =>
-        await Assert.That(ApcoaFlowMcp.Tools.ApcoaFlowTools.Duration(minutes)).IsEqualTo(expected);
+        await Assert.That(Text.Duration(minutes)).IsEqualTo(expected);
 }

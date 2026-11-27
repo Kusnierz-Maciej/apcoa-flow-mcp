@@ -31,6 +31,11 @@ public static class ApcoaTelemetry
         public const string SessionId = "apcoa.session.id";
         public const string SessionIds = "apcoa.session.ids";
         public const string CostPln = "apcoa.cost_pln";
+        public const string ConfirmedCostPln = "apcoa.confirmed_cost_pln";
+        public const string DurationMinutes = "apcoa.duration_min";
+        public const string StartMode = "apcoa.start.mode";
+        public const string DistanceMeters = "apcoa.distance_m";
+        public const string RadiusMeters = "apcoa.radius_m";
     }
 
     /// <summary>Longest list attribute we record (ids, plates); a count tag carries the full size.</summary>

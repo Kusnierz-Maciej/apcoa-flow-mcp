@@ -20,11 +20,23 @@ public sealed class ApcoaFlowTools(
     IApcoaFlowApi api,
     ParkingFinder finder,
     Pricing pricing,
+    Sessions sessions,
     IOptions<ApcoaFlowToolsOptions> options,
     TimeProvider time,
     ILogger<ApcoaFlowTools> logger)
 {
     private readonly ApcoaFlowToolsOptions _options = options.Value;
+
+    private const string ParkingNameDescription =
+        "The parking's name exactly as find_parkings shows it. Shown in the permission prompt so the user can confirm " +
+        "the right parking; not sent to the API.";
+
+    private const string ConfirmedCostDescription =
+        "For a PAID stay: the exact cost in PLN from this tool's previous answer, after the user agreed to it. Omit on the " +
+        "first call; a free stay never needs it.";
+
+    /// <summary>Two parkings whose distances differ by less than this are too close to call from a phone's GPS.</summary>
+    public const double GpsToleranceMeters = 30;
 
     private const string LicensePlateDescription = "License plate of one of the account's vehicles (see get_vehicles), e.g. \"ABC12345\"; spaces and case don't matter.";
 
@@ -114,7 +126,7 @@ public sealed class ApcoaFlowTools(
         {
             sb.Append($"[{p.Id}] {p.Name}");
             if (p.DistanceMeters is { } m)
-                sb.Append(p.Inside ? " - you are inside it" : $" - {Meters(m)}{(p.FromOutline ? " (to its edge)" : "")}");
+                sb.Append(p.Inside ? " - you are inside it" : $" - {Text.Meters(m)}{(p.FromOutline ? " (to its edge)" : "")}");
             if (p.Address is not null) sb.Append($" - {p.Address}");
             if (p.Code is not null) sb.Append($" (code {p.Code})");
             sb.AppendLine();
@@ -143,7 +155,7 @@ public sealed class ApcoaFlowTools(
         if (!string.IsNullOrWhiteSpace(p.Address?.DisplayValue)) sb.AppendLine($"Address: {p.Address.DisplayValue.Trim().TrimStart(',').Trim()}");
         var status = string.Join(", ", p.ParkingOverview.Select(o => o.Title).Where(t => !string.IsNullOrWhiteSpace(t)));
         if (status.Length > 0) sb.AppendLine($"Status: {status}");
-        if (p.MaxDuration is > 0) sb.AppendLine($"Longest stay: {Duration(p.MaxDuration.Value)}");
+        if (p.MaxDuration is > 0) sb.AppendLine($"Longest stay: {Text.Duration(p.MaxDuration.Value)}");
         foreach (var section in p.Prices)
         {
             // Items can be a note without a price ("Prices include convenience fees").
@@ -188,16 +200,16 @@ public sealed class ApcoaFlowTools(
         var total = quote.Total;
         ApcoaTelemetry.Tag(ApcoaTelemetry.Tags.CostPln, (double)total.Amount);
 
-        var sb = new StringBuilder($"{space.Name}, {vehicle.LicensePlate}, {Duration(durationMinutes)} from now: {total}");
+        var sb = new StringBuilder($"{space.Name}, {vehicle.LicensePlate}, {Text.Duration(durationMinutes)} from now: {total}");
         sb.Append(quote.PrepaymentMode == "autoCharge" ? " (charged at start)" : " (charged at the end)");
         sb.AppendLine(".");
         var window = await pricing.FreeWindowAsync(space.Id, vehicle.Id, space.DefaultLengthOfStayInMinutes, space.MaxDuration, ct);
         if (window.Minutes > 0)
             sb.AppendLine(window.AtLeast
-                ? $"Free for at least {Duration(window.Minutes)} for this vehicle right now."
-                : $"Free for up to {Duration(window.Minutes)} for this vehicle right now; longer stays cost money.");
+                ? $"Free for at least {Text.Duration(window.Minutes)} for this vehicle right now."
+                : $"Free for up to {Text.Duration(window.Minutes)} for this vehicle right now; longer stays cost money.");
         if (space.MaxDuration is > 0 && durationMinutes > space.MaxDuration)
-            sb.AppendLine($"Note: the longest allowed stay here is {Duration(space.MaxDuration.Value)}.");
+            sb.AppendLine($"Note: the longest allowed stay here is {Text.Duration(space.MaxDuration.Value)}.");
 
         logger.LogInformation("get_price [{Id}] {Name}: {Plate}, {Minutes} min → {Total}; free window {Free} min",
             space.Id, space.Name, vehicle.LicensePlate, durationMinutes, total, window.Minutes);
@@ -247,23 +259,171 @@ public sealed class ApcoaFlowTools(
         var sb = new StringBuilder();
         foreach (var h in history)
         {
-            var ended = h.EndDate is { } end ? $"ended {LocalTime(end)}" : "end time unknown";
+            var ended = h.EndDate is { } end ? $"ended {Text.LocalTime(end, time)}" : "end time unknown";
             var state = h.State is null or "billed" ? "" : $", {h.State}";
             sb.AppendLine($"{h.SpaceName} - {h.LicensePlate}, {ended}, {Pln(h.TotalPrice)}{state}");
         }
         return sb.ToString().TrimEnd();
     });
 
+    // ── Starting, extending, ending ────────────────────────────────────────────────────────────
+
+    [McpServerTool(Name = "start_session", Title = "Start parking session", ReadOnly = false, Destructive = false, Idempotent = false)]
+    [Description("Start parking at a parking (from find_parkings) for one of the account's vehicles. MAY COST MONEY. " +
+                 "Free (as APCOA quotes it, free time included) → starts at once. Paid → the first call only returns the " +
+                 "price; after the user agrees, call again with the same durationMinutes and confirmedCostPln. Paid stays " +
+                 "are charged to the account's default saved card, up to this server's cost limit. Always confirm the " +
+                 "parking and plate with the user first.")]
+    public Task<string> StartSessionAsync(
+        [Description("Parking id (from find_parkings)")] string parkingId,
+        [Description(ParkingNameDescription)] string parkingName,
+        [Description(LicensePlateDescription)] string licensePlate,
+        [Description("Length of the stay in minutes. Omit to use the whole free time when the parking is free, else the parking's usual duration.")] int? durationMinutes = null,
+        [Description(ConfirmedCostDescription)] decimal? confirmedCostPln = null,
+        CancellationToken ct = default)
+        => RunAsync("start_session", parkingName, () =>
+            sessions.StartAsync(parkingId, licensePlate, durationMinutes, confirmedCostPln, StartMode.Normal, _options.MaxSessionCostPln, ct), confirmedCostPln);
+
+    [McpServerTool(Name = "start_free_session", Title = "Start free parking session", ReadOnly = false, Destructive = false, Idempotent = false)]
+    [Description("Start parking at a parking only if it's free for the vehicle right now (as APCOA quotes it: a free tariff, " +
+                 "a shop's free time, any free period). Never charges: if it would cost anything, nothing starts and the " +
+                 "price is returned. Without a duration it uses the whole free time.")]
+    public Task<string> StartFreeSessionAsync(
+        [Description("Parking id (from find_parkings)")] string parkingId,
+        [Description(ParkingNameDescription)] string parkingName,
+        [Description(LicensePlateDescription)] string licensePlate,
+        [Description("Length of the stay in minutes. Omit to use the whole free time.")] int? durationMinutes = null,
+        CancellationToken ct = default)
+        => RunAsync("start_free_session", parkingName, () =>
+            sessions.StartAsync(parkingId, licensePlate, durationMinutes, null, StartMode.FreeOnly, _options.MaxSessionCostPln, ct), null);
+
+    [McpServerTool(Name = "start_expensive_session", Title = "Start parking session above the cost limit", ReadOnly = false, Destructive = true, Idempotent = false)]
+    [Description("Does the same as start_session but without this server's cost limit. Use it only when the user explicitly " +
+                 "accepts a cost above the limit.")]
+    public Task<string> StartExpensiveSessionAsync(
+        [Description("Parking id (from find_parkings)")] string parkingId,
+        [Description(ParkingNameDescription)] string parkingName,
+        [Description(LicensePlateDescription)] string licensePlate,
+        [Description("Length of the stay in minutes. Omit to use the parking's usual duration.")] int? durationMinutes = null,
+        [Description(ConfirmedCostDescription)] decimal? confirmedCostPln = null,
+        CancellationToken ct = default)
+        => RunAsync("start_expensive_session", parkingName, () =>
+            sessions.StartAsync(parkingId, licensePlate, durationMinutes, confirmedCostPln, StartMode.BypassCap, _options.MaxSessionCostPln, ct), confirmedCostPln);
+
+    [McpServerTool(Name = "start_session_here", Title = "Start parking session here", ReadOnly = false, Destructive = false, Idempotent = false)]
+    [Description("Like start_session (MAY COST MONEY), at the parking you're at: the nearest within the radius, measured to " +
+                 "the parking's outline when it has one. If two parkings are too close to tell apart by GPS, nothing starts " +
+                 "and both are listed: ask the user which, then use start_session.")]
+    public Task<string> StartSessionHereAsync(
+        [Description("Your current latitude (decimal degrees)")] double latitude,
+        [Description("Your current longitude (decimal degrees)")] double longitude,
+        [Description(LicensePlateDescription)] string licensePlate,
+        [Description("Length of the stay in minutes. Omit to use the whole free time when free, else the parking's usual duration.")] int? durationMinutes = null,
+        [Description(ConfirmedCostDescription)] decimal? confirmedCostPln = null,
+        [Description("Search radius in metres. Omit to use the server's default.")] double? radiusMeters = null,
+        CancellationToken ct = default)
+        => HereAsync("start_session_here", latitude, longitude, radiusMeters, (id, name) => RunAsync("start_session_here", name, () =>
+            sessions.StartAsync(id, licensePlate, durationMinutes, confirmedCostPln, StartMode.Normal, _options.MaxSessionCostPln, ct), confirmedCostPln), ct);
+
+    [McpServerTool(Name = "start_free_session_here", Title = "Start free parking session here", ReadOnly = false, Destructive = false, Idempotent = false)]
+    [Description("Like start_free_session (never charges), at the parking you're at: the nearest within the radius, " +
+                 "measured to the parking's outline when it has one. Too close to call → lists the candidates instead.")]
+    public Task<string> StartFreeSessionHereAsync(
+        [Description("Your current latitude (decimal degrees)")] double latitude,
+        [Description("Your current longitude (decimal degrees)")] double longitude,
+        [Description(LicensePlateDescription)] string licensePlate,
+        [Description("Length of the stay in minutes. Omit to use the whole free time.")] int? durationMinutes = null,
+        [Description("Search radius in metres. Omit to use the server's default.")] double? radiusMeters = null,
+        CancellationToken ct = default)
+        => HereAsync("start_free_session_here", latitude, longitude, radiusMeters, (id, name) => RunAsync("start_free_session_here", name, () =>
+            sessions.StartAsync(id, licensePlate, durationMinutes, null, StartMode.FreeOnly, _options.MaxSessionCostPln, ct), null), ct);
+
+    [McpServerTool(Name = "extend_session", Title = "Extend parking session", ReadOnly = false, Destructive = false, Idempotent = false)]
+    [Description("Make a running session longer (session id from get_active_sessions). MAY COST MONEY: free extensions " +
+                 "happen at once; a paid one first returns the price, then call again with confirmedCostPln after the " +
+                 "user agrees. Charged to the default saved card, up to this server's cost limit.")]
+    public Task<string> ExtendSessionAsync(
+        [Description("The session id (from get_active_sessions)")] string sessionId,
+        [Description("The session's parking name as get_active_sessions shows it. Shown in the permission prompt; not sent to the API.")] string parkingName,
+        [Description("How many minutes to add.")] int minutes,
+        [Description(ConfirmedCostDescription)] decimal? confirmedCostPln = null,
+        CancellationToken ct = default)
+        => RunAsync("extend_session", parkingName, () =>
+            sessions.ExtendAsync(sessionId, minutes, confirmedCostPln, _options.MaxSessionCostPln, ct), confirmedCostPln);
+
+    [McpServerTool(Name = "end_session", Title = "End parking session", ReadOnly = false, Destructive = true, Idempotent = true)]
+    [Description("End a running session (session id from get_active_sessions) and report the final cost. Always confirm " +
+                 "with the user first.")]
+    public Task<string> EndSessionAsync(
+        [Description("The session id (from get_active_sessions)")] string sessionId,
+        [Description("The session's parking name as get_active_sessions shows it. Shown in the permission prompt; not sent to the API.")] string parkingName,
+        CancellationToken ct = default)
+        => RunAsync("end_session", parkingName, () => sessions.EndAsync(sessionId, ct), null);
+
+    /// <summary>One log line and the span outcome per write call; soft failures mark the span Error.</summary>
+    private Task<string> RunAsync(string tool, string? parkingName, Func<Task<SessionResult>> body, decimal? confirmedCostPln)
+        => ToolErrors.GuardAsync(tool, logger, async () =>
+    {
+        using var _ = logger.BeginScope("{Tool}", tool);
+        ApcoaTelemetry.Tag(ApcoaTelemetry.Tags.ConfirmedCostPln, confirmedCostPln is null ? null : (double)confirmedCostPln.Value);
+        var result = await body();
+        if (result.Error) ApcoaTelemetry.Fail(result.Outcome, result.Text);
+        else ApcoaTelemetry.Outcome(result.Outcome);
+        logger.LogInformation("{Tool} {ParkingName}: {Outcome}; session {SessionId}, {Minutes} min, {Cost} PLN (confirmed {Confirmed})",
+            tool, parkingName, result.Outcome, result.SessionId ?? "-", result.DurationMinutes?.ToString() ?? "-",
+            result.CostPln?.ToString("0.00", CultureInfo.InvariantCulture) ?? "-",
+            confirmedCostPln?.ToString("0.00", CultureInfo.InvariantCulture) ?? "-");
+        return result.Text;
+    });
+
+    /// <summary>
+    /// The parking at a position: the nearest within the radius; when two are within <see cref="GpsToleranceMeters"/>
+    /// of each other (and the position isn't inside exactly one of them), the candidates are listed instead.
+    /// </summary>
+    private Task<string> HereAsync(string tool, double latitude, double longitude, double? radiusMeters,
+        Func<string, string, Task<string>> start, CancellationToken ct)
+        => ToolErrors.GuardAsync(tool, logger, async () =>
+    {
+        var radius = radiusMeters is > 0 ? radiusMeters.Value : _options.CurrentLocationRadiusMeters;
+        ApcoaTelemetry.Tag(ApcoaTelemetry.Tags.RadiusMeters, radius);
+        var near = await finder.NearAsync(latitude, longitude, radius, null, ct);
+        if (near.Count == 0)
+        {
+            ApcoaTelemetry.Fail("no_parking_nearby", "nothing within the radius");
+            logger.LogInformation("{Tool}: no parking within {Radius} m of {Lat},{Lon}", tool, radius, latitude, longitude);
+            return FormattableString.Invariant($"No APCOA Flow parking within {radius:0} m of that position. Use find_parkings with a larger radius or a name.");
+        }
+
+        var first = near[0];
+        var insideCount = near.Count(p => p.Inside);
+        var clear = near.Count == 1
+                    || (first.Inside && insideCount == 1)
+                    || (!first.Inside && near[1].DistanceMeters - first.DistanceMeters >= GpsToleranceMeters);
+        if (!clear)
+        {
+            var candidates = near.TakeWhile(p => p.Inside || p.DistanceMeters - first.DistanceMeters < GpsToleranceMeters).ToList();
+            ApcoaTelemetry.Fail("ambiguous_location", $"{candidates.Count} parkings within GPS tolerance");
+            logger.LogInformation("{Tool}: {Count} parkings too close to call at {Lat},{Lon}", tool, candidates.Count, latitude, longitude);
+            return "More than one parking is right here, too close to tell apart by GPS. Nothing was started. Ask the user " +
+                   "which one, then use start_session (or start_free_session) with its id:\n" +
+                   string.Join("\n", candidates.Select(p => $"[{p.Id}] {p.Name} - {(p.Inside ? "you are inside it" : Text.Meters(p.DistanceMeters!.Value))}"));
+        }
+
+        ApcoaTelemetry.Tag(ApcoaTelemetry.Tags.DistanceMeters, first.DistanceMeters);
+        var note = first.Inside ? "" : $" ({Text.Meters(first.DistanceMeters!.Value)} away)";
+        return $"Nearest parking: {first.Name}{note}.\n" + await start(first.Id, first.Name);
+    });
+
     // ── Formatting ─────────────────────────────────────────────────────────────────────────────
 
     internal string DescribeSession(Session s, DateTimeOffset now)
     {
-        var sb = new StringBuilder($"[{s.Id}] {s.Space?.Name ?? "unknown parking"} - {s.Vehicle?.LicensePlate}, from {LocalTime(s.StartDate)}");
+        var sb = new StringBuilder($"[{s.Id}] {s.Space?.Name ?? "unknown parking"} - {s.Vehicle?.LicensePlate}, from {Text.LocalTime(s.StartDate, time)}");
         if (s.EndDate is { } end)
         {
             var left = end - now;
-            sb.Append($" until {LocalTime(end)}");
-            sb.Append(left > TimeSpan.Zero ? $" ({Duration((int)Math.Ceiling(left.TotalMinutes))} left)" : " (overdue)");
+            sb.Append($" until {Text.LocalTime(end, time)}");
+            sb.Append(left > TimeSpan.Zero ? $" ({Text.Duration((int)Math.Ceiling(left.TotalMinutes))} left)" : " (overdue)");
         }
         sb.Append(s.PaymentFlow switch
         {
@@ -275,26 +435,6 @@ public sealed class ApcoaFlowTools(
         if (!s.SessionCanBeStopped) sb.Append(", can't be stopped early");
         return sb.ToString();
     }
-
-    private string LocalTime(DateTimeOffset utc)
-    {
-        var local = TimeZoneInfo.ConvertTime(utc, ApcoaFlowEndpoints.AppTimeZone);
-        var today = TimeZoneInfo.ConvertTime(time.GetUtcNow(), ApcoaFlowEndpoints.AppTimeZone).Date;
-        return local.Date == today
-            ? local.ToString("HH:mm", CultureInfo.InvariantCulture)
-            : local.ToString("yyyy-MM-dd HH:mm", CultureInfo.InvariantCulture);
-    }
-
-    internal static string Duration(int minutes) => minutes switch
-    {
-        < 60 => $"{minutes} min",
-        _ when minutes % (24 * 60) == 0 => minutes == 24 * 60 ? "1 day" : $"{minutes / (24 * 60)} days",
-        _ when minutes % 60 == 0 => minutes == 60 ? "1 h" : $"{minutes / 60} h",
-        _ => $"{minutes / 60} h {minutes % 60} min",
-    };
-
-    private static string Meters(double m) =>
-        m < 1000 ? FormattableString.Invariant($"{m:0} m") : FormattableString.Invariant($"{m / 1000:0.0} km");
 
     private static string Pln(string? apiPrice) => Money.TryParse(apiPrice, out var money) ? money.ToString() : apiPrice ?? "?";
 }

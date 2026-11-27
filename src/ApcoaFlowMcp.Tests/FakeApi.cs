@@ -31,7 +31,8 @@ internal static class FakeApi
     public static ApcoaFlowTools Tools(IApcoaFlowApi api, DateTimeOffset? now = null)
     {
         var time = new FixedTime(now ?? Now);
-        return new ApcoaFlowTools(api, new ParkingFinder(api), new Pricing(api, time),
+        var pricing = new Pricing(api, time);
+        return new ApcoaFlowTools(api, new ParkingFinder(api), pricing, new Sessions(api, pricing, time, NullLogger<Sessions>.Instance),
             Options.Create(new ApcoaFlowToolsOptions()), time, NullLogger<ApcoaFlowTools>.Instance);
     }
 
@@ -46,6 +47,27 @@ internal static class FakeApi
                 PrepaymentMode = prepaymentMode,
             };
         });
+
+    public const string CardId = "card-visa";
+    public const string ParkingId = "c9a5";
+    public const string ParkingName = "Targowiska Miejskie Ostrów Wlkp. III";
+
+    /// <summary>A parking, the default saved card, no running session, and quotes from <paramref name="price"/>.</summary>
+    public static IApcoaFlowApi ForStarts(Func<int, decimal> price, string prepaymentMode = "autoCharge", PaymentMethod? defaultMethod = null)
+    {
+        var api = Create();
+        api.GetSpaceAsync(ParkingId, Arg.Any<CancellationToken>()).Returns(new SpaceDetails { Id = ParkingId, Name = ParkingName });
+        api.GetPaymentMethodsAsync(Arg.Any<string?>(), Arg.Any<CancellationToken>()).Returns(
+        [
+            defaultMethod ?? new PaymentMethod { Id = CardId, Type = "visa", Identifier = "****4412", IsDefault = true, Flow = "saved", RequiredAction = "none", Availability = "available" },
+            new PaymentMethod { Id = "hosted-checkout", Type = "unknown", Flow = "hostedCheckout", RequiredAction = "none", Availability = "available" },
+        ]);
+        api.GetSessionsAsync(Arg.Any<CancellationToken>()).Returns([]);
+        Quotes(api, price, prepaymentMode);
+        api.StartParkingAsync(Arg.Any<StartParkingRequest>(), Arg.Any<string>(), Arg.Any<CancellationToken>())
+            .Returns(new StartParkingResponse { Id = "new-session" });
+        return api;
+    }
 
     public sealed class FixedTime(DateTimeOffset now) : TimeProvider
     {

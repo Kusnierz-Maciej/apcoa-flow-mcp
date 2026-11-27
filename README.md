@@ -19,9 +19,19 @@ now:
 | `get_price` | The price of a stay starting now for one of your vehicles (free time included), and how long it can be free. |
 | `get_active_sessions` | Running sessions with time left. |
 | `get_session_history` | Recent sessions with cost. |
+| `start_session` | Start a session. **May cost money**: free starts at once; paid returns the price first and starts on a second call with the exact `confirmedCostPln`. Under a cost limit; paid only with the account's default saved card. |
+| `start_free_session` | Start only if free for the vehicle right now (any free time included); never charges. Defaults to the whole free time. |
+| `start_expensive_session` | `start_session` without the cost limit (its own tool so it can be permissioned separately). |
+| `start_session_here` / `start_free_session_here` | The same at the parking you're at (nearest by outline or pin); lists the candidates when GPS can't tell two apart. |
+| `extend_session` | Make a running session longer; same price confirmation and limit. |
+| `end_session` | End a running session and report the final cost. |
 
-Coming next: starting free and paid sessions (paid ones only with the account's default saved card), starting at
-the parking you're at, extending and ending a session, and prompts.
+Tools that act on a parking or session id also take the parking's name (`parkingName`). It isn't sent to APCOA — it
+makes the client's permission prompt show *which* parking. Paid sessions are only ever charged to the account's
+**default** payment method, and only when that's a saved card (a known limitation: no 3-D Secure, Apple Pay or
+payment pages).
+
+Coming next: prompts.
 
 Cost, duration and distance are user-facing in PLN, minutes and metres respectively.
 
@@ -264,7 +274,7 @@ Set in the compose file (or `.env` for secrets) using the `Section__Key` convent
 | `Security__TokenSecret` | — | Required (secret). ≥ 32 chars, stable; secures OAuth tokens. |
 | `Security__RequireMcpApiKey` | `true` | `false` drops the API-key gate (APCOA email + password still required). |
 | `OAuth__AuthorizationCodeLifetime` / `__AccessTokenLifetime` / `__RefreshTokenLifetime` | `00:01:00` / `01:00:00` / `365.00:00:00` | Code: how long the client has to swap the one-time code it gets after a successful sign-in for tokens (done automatically within a second; the sign-in form itself has no time limit). Access: lifetime of the token sent on every call (renewed silently). Refresh: how long a client may stay idle before signing in again. |
-| `ApcoaFlow__MaxSessionCostPln` | `100` | Most a single session may cost without the user explicitly accepting more. |
+| `ApcoaFlow__MaxSessionCostPln` | `100` | Most a single start or extension may cost; `start_expensive_session` bypasses it. |
 | `ApcoaFlow__CurrentLocationRadiusMeters` | `300` | Default search radius for the current-location tools. |
 | `ApcoaFlow__Email` / `ApcoaFlow__Password` | — | stdio mode only (required there). |
 | `RateLimit__TokenLimit` / `RateLimit__ReplenishmentPeriod` | `10` / `00:00:01` | Client-side limit on APCOA calls: a burst, then one call per period (extra calls wait). Loosen at your own risk. |

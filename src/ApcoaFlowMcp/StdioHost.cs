@@ -28,6 +28,7 @@ public static class StdioHost
             rateLimit: builder.Configuration.GetSection(ApcoaFlowRateLimitOptions.Section));
         builder.Services.AddScoped<ParkingFinder>();
         builder.Services.AddScoped<Pricing>();
+        builder.Services.AddScoped<Sessions>();
         builder.Services.AddOptions<ApcoaFlowToolsOptions>()
             .Bind(builder.Configuration.GetSection("ApcoaFlow"))
             .ValidateDataAnnotations()

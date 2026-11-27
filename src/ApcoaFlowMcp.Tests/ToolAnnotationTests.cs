@@ -31,6 +31,33 @@ public class ToolAnnotationTests
     }
 
     [Test]
+    [Arguments("start_session")]
+    [Arguments("start_free_session")]
+    [Arguments("start_session_here")]
+    [Arguments("start_free_session_here")]
+    [Arguments("extend_session")]
+    public async Task Starts_and_extends_are_writes_not_destructive_not_idempotent(string name)
+    {
+        await Assert.That(Tool(name).ReadOnly).IsFalse();
+        await Assert.That(Tool(name).Destructive).IsFalse();
+        await Assert.That(Tool(name).Idempotent).IsFalse();
+    }
+
+    [Test]
+    public async Task ExpensiveStart_is_destructive_so_clients_always_confirm()
+    {
+        await Assert.That(Tool("start_expensive_session").Destructive).IsTrue();
+        await Assert.That(Tool("start_expensive_session").Idempotent).IsFalse();
+    }
+
+    [Test]
+    public async Task EndSession_is_destructive_and_idempotent()
+    {
+        await Assert.That(Tool("end_session").Destructive).IsTrue();
+        await Assert.That(Tool("end_session").Idempotent).IsTrue();
+    }
+
+    [Test]
     public async Task EveryTool_HasATitle() =>
         await Assert.That(All().All(a => !string.IsNullOrWhiteSpace(a.Title))).IsTrue();
 }
