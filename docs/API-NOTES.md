@@ -44,6 +44,7 @@ recovery), after each class, and after every session test. Sessions are only eve
 | Offline S3 tiles decrypt with the app-config key and index near a coordinate | `find_parking`, `*_current_location` | `PublicParkingEndpoints_SucceedWithoutBearer` |
 | Free quote → start → ACTIVE list → extend → stop → COMPLETED with amount 0 | `start_*`, `get_active_sessions`, `end_session`, `get_session_history` | `FreeSession_Discover_Start_List_Extend_End_Lifecycle` |
 | Second start while one is active → 424 `LIMIT_EXCEEDED` / 5012 | already-active handling in `start_*` | `DuplicateSession_AtSameParking_LogsApiResponse` |
+| Right after a stop, a new start can briefly still get 424 although nothing is listed ACTIVE (slot release lag, observed 2026-11-27) | live tests only (`LiveApi.StartWhenSlotFreeAsync` retries); the server reports it as "no active session was found, try again" | exercised by the session tests running back to back |
 | Stop of an unknown or already-ended id → 422 `PARKING_SESSION_NOT_FOUND` (no silent 200) | `end_session` error message | `StopSession_UnknownId_Is422_SessionNotFound_NotA200` |
 
 **Trusted, not tested** (deliberate — a live test would need a paid start or a one-use coupon):

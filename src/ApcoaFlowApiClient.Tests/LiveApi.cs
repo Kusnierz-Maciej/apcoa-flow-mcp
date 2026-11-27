@@ -20,6 +20,31 @@ internal static class LiveApi
     /// </summary>
     public const int FreeParkingId = 616319;
 
+    /// <summary>
+    /// Starts a session, retrying while APCOA still holds the account's one-session slot for a session that was
+    /// just ended: right after a stop, a start can get 424 LIMIT_EXCEEDED for a moment although no session is
+    /// listed ACTIVE any more (observed 2026-11-27). Retries only in that case — a 424 with a session really
+    /// ACTIVE is returned to the caller.
+    /// </summary>
+    public static async Task<T> StartWhenSlotFreeAsync<T>(IApcoaFlowApi api, Func<Task<T>> start)
+    {
+        for (var attempt = 1; ; attempt++)
+        {
+            try
+            {
+                return await start();
+            }
+            catch (ApiException ex) when ((int)ex.StatusCode == 424 && attempt < 6)
+            {
+                var active = await api.GetParkingSessionsAsync(new ParkingSessionV2Query { Status = "ACTIVE", PageSize = 5 });
+                if (active.Count > 0)
+                    throw;
+                Console.Error.WriteLine($"[live] start got 424 with nothing ACTIVE (slot not released yet); retry {attempt}…");
+                await Task.Delay(TimeSpan.FromSeconds(2));
+            }
+        }
+    }
+
     private static readonly Lazy<Task> StartSweep = new(() => EndActiveSessionsAsync("start-of-run"));
 
     /// <summary>

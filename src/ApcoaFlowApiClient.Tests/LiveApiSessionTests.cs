@@ -253,7 +253,7 @@ public class LiveApiSessionTests
 
         // 2. Start.
         Log($"starting session: parking {c.ParkingId}, {c.Start.TotalMinutes:0} min, check-out {checkOut:u}…");
-        var start = await api.StartParkingSessionAsync(new StartParkingSessionRequest
+        var start = await LiveApi.StartWhenSlotFreeAsync(api, () => api.StartParkingSessionAsync(new StartParkingSessionRequest
         {
             TariffId = c.TariffId,
             ParkingId = c.ParkingId,
@@ -269,7 +269,7 @@ public class LiveApiSessionTests
             PromotionId = c.Promo?.Id,
             OfferDiscountType = c.Promo is null ? null : "PROMOTION",
             IsAutoApplyPromotion = c.Promo is not null,
-        });
+        }));
         await Assert.That(start.IsActive).IsTrue()
             .Because("the started session should report ACTIVE status");
         var sessionId = start.SessionId;
@@ -368,7 +368,7 @@ public class LiveApiSessionTests
         StartSessionResponse first;
         try
         {
-            first = await api.StartParkingSessionAsync(new StartParkingSessionRequest
+            first = await LiveApi.StartWhenSlotFreeAsync(api, () => api.StartParkingSessionAsync(new StartParkingSessionRequest
             {
                 TariffId = c.TariffId,
                 ParkingId = c.ParkingId,
@@ -384,7 +384,7 @@ public class LiveApiSessionTests
                 PromotionId = c.Promo?.Id,
                 OfferDiscountType = c.Promo is null ? null : "PROMOTION",
                 IsAutoApplyPromotion = c.Promo is not null,
-            });
+            }));
         }
         catch (ApiException ex)
         {
