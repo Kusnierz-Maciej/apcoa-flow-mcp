@@ -136,8 +136,9 @@ public sealed class PendingStartStatus
 }
 
 /// <summary>
-/// <c>updateParkingDuration</c> answer when it has a body (the app reads these fields; a free extension's body was
-/// empty, 2026-11-27). Values of <see cref="Status"/> not seen yet.
+/// <c>updateParkingDuration</c> answer when it has a body. A free extension's body was empty; a paid pre-pay one
+/// answered <c>{"status":"awaitingPayment","pendingId":…,"failureReason":null}</c> and went through within seconds
+/// (2026-11-27): processed asynchronously, so confirm by the session's new end.
 /// </summary>
 public sealed class UpdateParkingDurationResponse
 {

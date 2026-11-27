@@ -131,8 +131,11 @@ Amounts are strings: `"PLN 5.00"` (currency, space, invariant decimal); large am
   sessionCanBeStopped, sessionCanBeExtended, space: {id, name, tariffCode, countryCode, …}, vehicle: {id,
   licensePlate, …}, details: [{title: "Total", subTitle: "0", footer: "PLN"}], extensionType: "flexible", promoCode,
   canApplyPromoCode, paymentFlow: "prePay" | "postPay"}]`; `[]` when none. There is no `GET sessions/{id}` (404).
-- **Extend**: `POST /api/v1/sessions/updateParkingDuration {sessionId, newEnd, paymentMethodId, promoCode}` → 200,
-  empty body; the same session continues with the new end.
+- **Extend**: `POST /api/v1/sessions/updateParkingDuration {sessionId, newEnd, paymentMethodId, promoCode}`; the
+  same session continues with the new end. A **free** extension answers 200 with an empty body; a **paid** one (pre-pay,
+  2026-11-27) answers `200 {"status":"awaitingPayment","pendingId":…,"failureReason":null}` — processed
+  asynchronously like a paid start; the new end showed in `sessions` within seconds. The server reports "Extended"
+  only once the new end shows.
 - **Stop**: `POST /api/v1/sessions/stopParking/{id}` → **204**. Stopping it again is 204 too (silent); an unknown id
   is `404 SessionNotFound`.
 - Post-pay sessions stopped after 17–19 s were billed PLN 0.00 although quoted PLN 1.00 and 5.00 (two operators,
@@ -213,6 +216,7 @@ Behaviours relied on without a live test, because testing them costs money or ca
 | An expired access token gets the same `403 Unauthenticated` as no token (needs > 1 h, so not in the nightly run) | 2026-11-27, sandbox `expired-token` |
 | A paid post-pay start with a saved card runs at once, no interactive step | 2026-11-27, Czarny Dunajec, stopped after 19 s |
 | A paid pre-pay start with a saved card is pending, then `completed`; the card is charged at start (PLN 1.00, visa, history `status: paid`, `state: billed`) | 2026-11-27, Markinvest Warszawa al. Wilanowska 363 |
+| A paid (pre-pay) extension answers `{status: "awaitingPayment", pendingId}` and is charged; the new end shows in `sessions` within seconds (PLN 0.40 start + 0.40 extension = 0.80 billed) | 2026-11-27, Przy Ratuszu Warszawa, through `start_session` + `extend_session` |
 | A pre-pay session stopped early is **not** refunded (stopped after ~30 s, billed the full PLN 1.00) | 2026-11-27, same session |
 | (Observed, not relied on: assume no grace) A post-pay session stopped within seconds was billed PLN 0.00 | 2026-11-27: Czarny Dunajec (19 s, quoted PLN 1.00) and Katowice ul. Sobieskiego 23 (17 s, quoted PLN 5.00) |
 | `sessionsHistory/{id}` of a **running post-pay** session is `404 SessionNotFound` (end_session treats any failed history read after a stop as "cost not available yet") | 2026-11-27, Czarny Dunajec |
