@@ -189,6 +189,7 @@ Free options, read-only (`FreeOptionsContractTests`):
 | The test parking quotes 0.00 outside Saturday 06–15 | `The_test_parking_is_free_outside_Saturday_06_to_15` |
 | A location-code search returns exactly that parking | `A_location_code_search_returns_exactly_that_parking` |
 | Map pins carry closed outlines | `Map_pins_carry_closed_outlines` |
+| Search `distance` is in kilometres | `Search_distance_is_in_kilometres` |
 
 One free cycle per run (`SessionContractTests.Free_session_lifecycle`, on Ostrów or a Biedronka with a dated 0.00
 quote; skipped when none is free):
@@ -214,5 +215,6 @@ Behaviours relied on without a live test, because testing them costs money or ca
 | A paid pre-pay start with a saved card is pending, then `completed`; the card is charged at start (PLN 1.00, visa, history `status: paid`, `state: billed`) | 2026-11-27, Markinvest Warszawa al. Wilanowska 363 |
 | A pre-pay session stopped early is **not** refunded (stopped after ~30 s, billed the full PLN 1.00) | 2026-11-27, same session |
 | (Observed, not relied on: assume no grace) A post-pay session stopped within seconds was billed PLN 0.00 | 2026-11-27: Czarny Dunajec (19 s, quoted PLN 1.00) and Katowice ul. Sobieskiego 23 (17 s, quoted PLN 5.00) |
+| `sessionsHistory/{id}` of a **running post-pay** session is `404 SessionNotFound` (end_session treats any failed history read after a stop as "cost not available yet") | 2026-11-27, Czarny Dunajec |
 | Right after a post-pay stop, `sessionsHistory/{id}` can lack a parseable `totalPrice` for a moment; it then shows the real stop time and `state: billed` | 2026-11-27, Sobieskiego 23 |
 | Biedronka free time is once per 4 h per space, and shows in the quote | 2026-11-27, Biedronka Żyrardów |

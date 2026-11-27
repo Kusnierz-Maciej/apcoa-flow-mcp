@@ -102,6 +102,19 @@ public class FreeOptionsContractTests
     }
 
     [Test]
+    public async Task Search_distance_is_in_kilometres()
+    {
+        // From 1 km south of the test parking (0.009° latitude ≈ 1.0 km).
+        var hit = (await LiveApi.Api.SearchAsync(new SearchQuery
+        {
+            Query = "22941", Latitude = 51.651796 - 0.009, Longitude = 17.836953, IsParking = true, IsCharging = false,
+        })).Spaces.Single();
+
+        await Assert.That(hit.Distance).IsNotNull();
+        await Assert.That(hit.Distance!.Value).IsBetween(0.8, 1.2).Because("find_parkings multiplies the API's distance by 1000");
+    }
+
+    [Test]
     public async Task Map_pins_carry_closed_outlines()
     {
         // Czarny Dunajec: 7 of 8 pins have an outline (2026-11-27).

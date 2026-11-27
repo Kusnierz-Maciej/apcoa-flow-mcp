@@ -60,7 +60,8 @@ public static class ServiceCollectionExtensions
         return services;
     }
 
-    // Outermost, so a request waits for a token before any auth work; over-limit requests queue instead of failing.
+    // Added after the auth handler, so it sits inside it: every physical send takes a token (the auth handler's retry
+    // included), and the sign-in client has its own pipeline with the same limiter. Over-limit requests queue.
     private static void AddRateLimit(IHttpClientBuilder builder) =>
         builder.AddResilienceHandler(RateLimitPipeline, (pipeline, context) =>
             pipeline.AddRateLimiter(context.ServiceProvider.GetRequiredService<ApcoaFlowRateLimiter>().Limiter));

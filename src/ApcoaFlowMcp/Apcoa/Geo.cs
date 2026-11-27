@@ -31,8 +31,8 @@ public static class Geo
     /// </summary>
     public static Distance? To(double lat, double lon, Coordinates? pin, GeoBorder? outline)
     {
-        var ring = outline?.Coordinates;
-        if (ring is { Count: >= 3 })
+        var ring = Ring(outline);
+        if (ring.Count >= 3)
         {
             var points = ring.Select(c => Project(lat, lon, c)).ToList();
             if (Contains(points))
@@ -43,6 +43,15 @@ public static class Geo
             return new Distance(nearest, Inside: false, FromOutline: true);
         }
         return pin is null ? null : new Distance(Meters(lat, lon, pin.Latitude, pin.Longitude), Inside: false, FromOutline: false);
+    }
+
+    /// <summary>An outline's distinct corners: the closing point(s) repeating the first are dropped.</summary>
+    public static List<Coordinates> Ring(GeoBorder? outline)
+    {
+        var points = outline?.Coordinates.ToList() ?? [];
+        while (points.Count > 1 && points[^1] == points[0])
+            points.RemoveAt(points.Count - 1);
+        return points;
     }
 
     /// <summary>A bounding box of ±<paramref name="radiusMeters"/> around a position.</summary>

@@ -51,8 +51,8 @@ and [`docs/API-NOTES.md`](docs/API-NOTES.md) for notes on the underlying APCOA F
 
 ### Known limitations
 
-- **Payment**: only the account's **default** payment method, and only when it's a saved card charged without any
-  extra step. No 3-D Secure, Apple Pay or hosted payment page; set a saved card as the default in the APCOA Flow app.
+- **Payment**: paid sessions use only the account's **default** payment method, and only when it's a saved card
+  charged without any extra step. No 3-D Secure, Apple Pay or hosted payment page; set a saved card as the default in the APCOA Flow app.
 - **Sign-in** with e-mail + password needs the e-mail to be verified in the APCOA Flow app.
 - **Pre-pay** parkings charge at start and don't refund an early stop.
 - **Plate-recognition** parkings start and end sessions by themselves; the start tools refuse there.
@@ -294,7 +294,7 @@ Set in the compose file (or `.env` for secrets) using the `Section__Key` convent
 | `Security__TokenSecret` | — | Required (secret). ≥ 32 chars, stable; secures OAuth tokens. |
 | `Security__RequireMcpApiKey` | `true` | `false` drops the API-key gate (APCOA email + password still required). |
 | `OAuth__AuthorizationCodeLifetime` / `__AccessTokenLifetime` / `__RefreshTokenLifetime` | `00:01:00` / `01:00:00` / `365.00:00:00` | Code: how long the client has to swap the one-time code it gets after a successful sign-in for tokens (done automatically within a second; the sign-in form itself has no time limit). Access: lifetime of the token sent on every call (renewed silently). Refresh: how long a client may stay idle before signing in again. |
-| `ApcoaFlow__MaxSessionCostPln` | `100` | Most a single start or extension may cost; `start_expensive_session` bypasses it. |
+| `ApcoaFlow__MaxSessionCostPln` | `100` | Most a session may cost (a start, or the session's cost so far plus an extension); `start_expensive_session` bypasses it for starts. |
 | `ApcoaFlow__CurrentLocationRadiusMeters` | `300` | Default search radius for the current-location tools. |
 | `ApcoaFlow__Email` / `ApcoaFlow__Password` | — | stdio mode only (required there). |
 | `Prompts__Enabled` | `true` | `false` removes the MCP prompts (and their completions). |

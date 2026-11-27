@@ -30,6 +30,9 @@ public class WireFormatTests
     [Arguments("")]
     [Arguments("5.00")]
     [Arguments("PLN five")]
+    [Arguments("PLN 5,00")]   // comma decimal: must not be read as 500
+    [Arguments("5.00 PLN")]
+    [Arguments("PLN 12,34,567.00")]
     public async Task Odd_prices_dont_parse(string? text) => await Assert.That(Money.TryParse(text, out _)).IsFalse();
 
     [Test]

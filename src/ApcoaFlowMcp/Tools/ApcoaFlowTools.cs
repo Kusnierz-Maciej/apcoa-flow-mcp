@@ -147,14 +147,14 @@ public sealed class ApcoaFlowTools(
         if (!string.IsNullOrWhiteSpace(p.Address?.DisplayValue)) sb.AppendLine($"  Address: {p.Address.DisplayValue.Trim().TrimStart(',').Trim()}");
         if (p.Coordinates is { } c) sb.AppendLine(FormattableString.Invariant($"  Coordinates: {c.Latitude:0.######}, {c.Longitude:0.######}"));
         if (pin is not null)
-            sb.AppendLine(pin.GeoBorder is { Coordinates.Count: >= 3 } outline
-                ? $"  Outline on the map: yes ({outline.Coordinates.Count} points; distances are measured to its edge)"
+            sb.AppendLine(Geo.Ring(pin.GeoBorder) is { Count: >= 3 } ring
+                ? $"  Outline on the map: yes ({ring.Count} points; distances are measured to its edge)"
                 : "  Outline on the map: no (distances are measured to its pin)");
 
         sb.AppendLine("Sessions:");
         var status = string.Join(", ", p.ParkingOverview.Select(o => o.Title).Where(t => !string.IsNullOrWhiteSpace(t)));
         if (status.Length > 0) sb.AppendLine($"  Status: {status}");
-        sb.AppendLine(p.CtaButtonType == "startParking"
+        sb.AppendLine(p.CtaButtonType is null or "startParking" // same rule as the start tools
             ? "  You start and end a session (start_session / start_free_session, or in the APCOA Flow app)."
             : "  Sessions can't be started here (not in the APCOA Flow app either).");
         if (p.SessionsStartAutomatically || pin?.ParkingType == "anpr")

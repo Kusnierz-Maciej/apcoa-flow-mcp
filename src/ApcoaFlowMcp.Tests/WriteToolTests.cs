@@ -116,16 +116,66 @@ public class WriteToolTests
     [Test]
     [Arguments("applePay", "saved")]
     [Arguments("visa", "hostedCheckout")]
-    public async Task A_default_that_isnt_a_saved_card_refuses_before_starting(string type, string flow)
+    public async Task A_default_that_isnt_a_saved_card_refuses_a_paid_start(string type, string flow)
     {
-        var api = ForStarts(_ => 0m, defaultMethod: new PaymentMethod
+        var api = ForStarts(_ => 5m, defaultMethod: new PaymentMethod
         {
             Id = "x", Type = type, Identifier = "****1", IsDefault = true, Flow = flow, RequiredAction = "none", Availability = "available",
         });
 
-        var text = await FakeApi.Tools(api).StartSessionAsync(ParkingId, ParkingName, "ABC12345", 30);
+        var text = await FakeApi.Tools(api).StartSessionAsync(ParkingId, ParkingName, "ABC12345", 30, confirmedCostPln: 5m);
 
         await Assert.That(text).Contains("Set a saved card as the default in the APCOA Flow app");
+        await NoStart(api);
+    }
+
+    [Test]
+    public async Task A_free_start_works_with_any_default_method_and_sends_its_id()
+    {
+        var api = ForStarts(_ => 0m, defaultMethod: new PaymentMethod
+        {
+            Id = "apple", Type = "applePay", Identifier = "****1", IsDefault = true, Flow = "saved", RequiredAction = "none", Availability = "available",
+        });
+
+        var text = await FakeApi.Tools(api).StartFreeSessionAsync(ParkingId, ParkingName, "ABC12345", 30);
+
+        await Assert.That(text).StartsWith("Started:");
+        await api.Received(1).StartParkingAsync(Arg.Is<StartParkingRequest>(r => r!.PaymentMethodId == "apple"), Arg.Any<string>(), Arg.Any<CancellationToken>());
+    }
+
+    [Test]
+    public async Task A_free_stay_longer_than_the_searched_day_starts_when_its_quote_is_free()
+    {
+        var api = ForStarts(_ => 0m);
+
+        var text = await FakeApi.Tools(api).StartFreeSessionAsync(ParkingId, ParkingName, "ABC12345", 2000);
+
+        await Assert.That(text).StartsWith("Started:");
+    }
+
+    [Test]
+    public async Task A_start_accepted_but_not_confirmable_says_dont_start_again()
+    {
+        var api = ForStarts(_ => 5m);
+        api.GetSessionsAsync(Arg.Any<CancellationToken>()).Returns(
+            _ => Task.FromResult(new List<Session>()),
+            _ => throw new HttpRequestException("connection reset"));
+
+        var text = await FakeApi.Tools(api).StartSessionAsync(ParkingId, ParkingName, "ABC12345", 60, confirmedCostPln: 5m);
+
+        await Assert.That(text).Contains("couldn't confirm it afterwards. Don't start again");
+        await api.Received(1).StartParkingAsync(Arg.Any<StartParkingRequest>(), Arg.Any<string>(), Arg.Any<CancellationToken>());
+    }
+
+    [Test]
+    public async Task An_unreadable_price_is_a_plain_tool_error()
+    {
+        var api = ForStarts(_ => 0m);
+        api.GetPriceAsync(Arg.Any<PriceQuery>(), Arg.Any<CancellationToken>()).Returns(new PriceQuote { TotalPrice = "PLN 5,00" });
+
+        var ex = await Assert.ThrowsAsync<ModelContextProtocol.McpException>(() => FakeApi.Tools(api).StartSessionAsync(ParkingId, ParkingName, "ABC12345", 60));
+
+        await Assert.That(ex!.Message).Contains("price in a format this server can't read");
         await NoStart(api);
     }
 
@@ -286,6 +336,58 @@ public class WriteToolTests
         await Assert.That(text).StartsWith("Extended:");
         await api.Received(1).UpdateParkingDurationAsync(Arg.Is<UpdateParkingDurationRequest>(r =>
             r!.SessionId == "s1" && r.NewEnd == end.AddMinutes(30) && r.PaymentMethodId == CardId), Arg.Any<CancellationToken>());
+    }
+
+    [Test]
+    public async Task Extend_counts_what_the_session_already_costs_against_the_cap()
+    {
+        var api = ForStarts(_ => 0m);
+        api.GetSessionsAsync(Arg.Any<CancellationToken>()).Returns(
+        [
+            new Session { Id = "s1", StartDate = Now, EndDate = Now.AddMinutes(30), SessionCanBeExtended = true,
+                Space = new SessionSpace { Id = ParkingId, Name = ParkingName },
+                Details = [new SessionDetail { Title = "Total", SubTitle = "90", Footer = "PLN" }] },
+        ]);
+        api.GetUpdatedPriceAsync("s1", 3600, Arg.Any<CancellationToken>()).Returns(new PriceQuote { TotalPrice = "PLN 20.00" });
+
+        var text = await FakeApi.Tools(api).ExtendSessionAsync("s1", ParkingName, 60, confirmedCostPln: 20m);
+
+        await Assert.That(text).Contains("with the 90.00 PLN the session already costs");
+        await api.DidNotReceive().UpdateParkingDurationAsync(Arg.Any<UpdateParkingDurationRequest>(), Arg.Any<CancellationToken>());
+    }
+
+    [Test]
+    public async Task Extend_done_but_not_rereadable_says_dont_extend_again()
+    {
+        var api = ForStarts(_ => 0m);
+        var session = new Session { Id = "s1", StartDate = Now, EndDate = Now.AddMinutes(30), SessionCanBeExtended = true,
+            Space = new SessionSpace { Id = ParkingId, Name = ParkingName } };
+        api.GetSessionsAsync(Arg.Any<CancellationToken>()).Returns(
+            _ => Task.FromResult(new List<Session> { session }),
+            _ => throw new HttpRequestException("502"));
+        api.GetUpdatedPriceAsync("s1", 1800, Arg.Any<CancellationToken>()).Returns(new PriceQuote { TotalPrice = "PLN 0.00", EndDate = Now.AddMinutes(60) });
+
+        var text = await FakeApi.Tools(api).ExtendSessionAsync("s1", ParkingName, 30);
+
+        await Assert.That(text).Contains("Don't extend again");
+        await api.Received(1).UpdateParkingDurationAsync(Arg.Any<UpdateParkingDurationRequest>(), Arg.Any<CancellationToken>());
+    }
+
+    [Test]
+    public async Task End_with_an_unreadable_bill_still_reports_the_session_ended()
+    {
+        var api = ForStarts(_ => 0m);
+        api.GetSessionsAsync(Arg.Any<CancellationToken>()).Returns(
+        [
+            new Session { Id = "s1", StartDate = Now, SessionCanBeStopped = true, Space = new SessionSpace { Name = ParkingName },
+                Vehicle = new SessionVehicle { LicensePlate = "ABC12345" } },
+        ]);
+        api.GetSessionsHistoryDetailsAsync("s1", Arg.Any<CancellationToken>()).ThrowsAsync(new HttpRequestException("500"));
+
+        var text = await FakeApi.Tools(api).EndSessionAsync("s1", ParkingName);
+
+        await Assert.That(text).Contains("Ended the session");
+        await Assert.That(text).Contains("final cost isn't available yet");
     }
 
     [Test]

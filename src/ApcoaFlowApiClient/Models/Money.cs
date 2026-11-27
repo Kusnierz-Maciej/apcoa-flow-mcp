@@ -1,4 +1,5 @@
 using System.Globalization;
+using System.Text.RegularExpressions;
 
 namespace ApcoaFlowApiClient.Models;
 
@@ -9,20 +10,23 @@ namespace ApcoaFlowApiClient.Models;
 /// </summary>
 public readonly record struct Money(string Currency, decimal Amount)
 {
+    // "PLN 5.00", "PLN 2,698.00": a currency code, then digits with optional comma thousands groups and a dot decimal.
+    // Strict on purpose: a lenient parse would read "PLN 5,00" as 500.
+    private static readonly Regex Format = new(@"^(?<cur>[A-Z]{3}) (?<amount>-?\d{1,3}(?:,\d{3})*(?:\.\d+)?|-?\d+(?:\.\d+)?)$", RegexOptions.CultureInvariant);
+
     public static bool TryParse(string? text, out Money money)
     {
         money = default;
-        if (string.IsNullOrWhiteSpace(text))
+        var match = Format.Match(text?.Trim() ?? "");
+        if (!match.Success ||
+            !decimal.TryParse(match.Groups["amount"].Value.Replace(",", ""), NumberStyles.AllowLeadingSign | NumberStyles.AllowDecimalPoint,
+                CultureInfo.InvariantCulture, out var amount))
             return false;
-        var parts = text.Trim().Split(' ', 2, StringSplitOptions.RemoveEmptyEntries);
-        if (parts.Length != 2 ||
-            !decimal.TryParse(parts[1], NumberStyles.Number, CultureInfo.InvariantCulture, out var amount))
-            return false;
-        money = new Money(parts[0], amount);
+        money = new Money(match.Groups["cur"].Value, amount);
         return true;
     }
 
-    /// <exception cref="FormatException">The text isn't "CUR 0.00".</exception>
+    /// <exception cref="FormatException">The text isn't "CUR 0.00" (mapped to a plain tool error).</exception>
     public static Money Parse(string? text) =>
         TryParse(text, out var money) ? money : throw new FormatException($"Unexpected price format: '{text}'.");
 

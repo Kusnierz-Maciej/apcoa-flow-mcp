@@ -113,10 +113,10 @@ passwords, tokens or payloads are recorded. Plates and the account email are per
 | `apcoa.outcome` | Error? |
 |---|---|
 | `ok` (read tools), `started`, `extended`, `stopped`, `quote` (paid, awaiting the user's confirmation), `not_free` (free-only tool at a paid parking) | no |
-| `not_startable`, `plate_not_registered`, `session_already_active`, `no_payment_method`, `default_not_a_card`, `cost_cap_exceeded`, `cost_mismatch`, `exceeds_max_duration`, `bad_duration`, `payment_action_required`, `session_not_found`, `not_extendable`, `not_stoppable`, `no_parking_nearby`, `ambiguous_location`, `missing_input`, `credentials_rejected` | yes |
+| `start_unconfirmed`, `not_startable`, `plate_not_registered`, `session_already_active`, `no_payment_method`, `default_not_a_card`, `cost_cap_exceeded`, `cost_mismatch`, `exceeds_max_duration`, `bad_duration`, `payment_action_required`, `session_not_found`, `not_extendable`, `not_stoppable`, `no_parking_nearby`, `ambiguous_location`, `missing_input`, `credentials_rejected` | yes |
 
 API failures that end a tool with an error (`ToolErrors` in `Tools/ToolErrors.cs`) also mark the span
-**Error** with one of `credentials_rejected`, `session_not_found`, `session_refused`, `not_found`, `forbidden`,
+**Error** with one of `credentials_rejected`, `session_not_found`, `session_refused`, `unreadable_price`, `not_found`, `forbidden`,
 `rate_limited`, `unavailable`, `rejected_request`; the model gets a plain-language message instead of the SDK's opaque
 "An error occurred invoking …".
 

@@ -37,6 +37,14 @@ public class GeoTests
     }
 
     [Test]
+    public async Task A_closed_ring_counts_its_corners_once_and_a_degenerate_one_isnt_an_outline()
+    {
+        await Assert.That(Geo.Ring(CzarnyDunajec).Count).IsEqualTo(8); // 9 points, the last repeats the first
+        var line = new GeoBorder { Coordinates = [new(50.0, 18.0), new(50.001, 18.0), new(50.0, 18.0)] };
+        await Assert.That(Geo.To(50.0005, 18.0, new Coordinates(50.002, 18.0), line)!.Value.FromOutline).IsFalse();
+    }
+
+    [Test]
     public async Task Without_an_outline_the_distance_is_to_the_pin()
     {
         var d = Geo.To(50.0, 18.0, new Coordinates(50.001, 18.0), outline: null)!.Value;
@@ -269,7 +277,7 @@ public class ReadToolTests
             "Location:\n" +
             "  Address: ul. Fabryczna 23, Poznań, 61-000 Poland\n" +
             "  Coordinates: 52.4, 16.95\n" +
-            "  Outline on the map: yes (4 points; distances are measured to its edge)\n" +
+            "  Outline on the map: yes (3 points; distances are measured to its edge)\n" +
             "Sessions:\n" +
             "  Status: Open, AutoPay\n" +
             "  You start and end a session (start_session / start_free_session, or in the APCOA Flow app).\n" +

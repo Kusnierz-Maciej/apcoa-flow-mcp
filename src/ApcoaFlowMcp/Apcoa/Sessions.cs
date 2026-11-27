@@ -57,9 +57,9 @@ public sealed class Sessions(IApcoaFlowApi api, Pricing pricing, TimeProvider ti
                   "when the car enters and leaves (see get_parking_details for its rules and free time)."
                 : $"Sessions can't be started at {parking.Name} (not in the APCOA Flow app either).");
 
-        var card = await DefaultCardAsync(parking.Id, ct);
-        if (card.Refusal is { } noCard)
-            return noCard;
+        var card = await DefaultMethodAsync(parking.Id, ct);
+        if (card.Refusal is { } noMethod)
+            return noMethod;
 
         if (durationMinutes is < 1)
             return Refused("bad_duration", "The duration must be at least 1 minute.");
@@ -78,7 +78,7 @@ public sealed class Sessions(IApcoaFlowApi api, Pricing pricing, TimeProvider ti
             return NotFree($"{parking.Name} isn't free for {vehicle.LicensePlate} right now: {Text.Duration(duration.Value)} costs {price}. " +
                            "Nothing was started; use start_session to park there for a fee.", price.Amount);
         }
-        if (mode == StartMode.FreeOnly && duration > window!.Value.Minutes)
+        if (mode == StartMode.FreeOnly && duration > window!.Value.Minutes && !window.Value.AtLeast)
             return NotFree($"{parking.Name} is free for {vehicle.LicensePlate} only up to {Text.Duration(window.Value.Minutes)} right now, " +
                            $"so {Text.Duration(duration.Value)} would cost money. Nothing was started; start with a shorter duration " +
                            "(or leave it out to use the whole free time).", null);
@@ -88,6 +88,8 @@ public sealed class Sessions(IApcoaFlowApi api, Pricing pricing, TimeProvider ti
         ApcoaTelemetry.Tag(ApcoaTelemetry.Tags.CostPln, (double)cost.Amount);
         if (!cost.IsZero)
         {
+            if (mode != StartMode.FreeOnly && CardRefusal(card.Method!) is { } notACard)
+                return notACard;
             if (mode == StartMode.FreeOnly)
                 return NotFree($"{parking.Name} isn't free for {vehicle.LicensePlate} for {Text.Duration(duration.Value)}: it costs {cost}. Nothing was started.", cost.Amount);
             if (mode == StartMode.Normal && cost.Amount > maxCostPln)
@@ -118,20 +120,32 @@ public sealed class Sessions(IApcoaFlowApi api, Pricing pricing, TimeProvider ti
 
         var sessionId = started.Id;
         string? failure = null;
-        if (started.NeedsPaymentAction)
-            failure = "payment_action_required";
-        else if (started.IsPending)
+        Session? runningNow;
+        try
         {
-            var pending = await WaitForPendingAsync(started.PendingId!, ct);
-            if (pending?.IsCompleted == true) sessionId = pending.SessionId;
-            else if (pending?.IsFailed == true) failure = $"failed: {pending.FailureReason ?? pending.Status}";
-            else failure = "still_pending";
-        }
+            if (started.NeedsPaymentAction)
+                failure = "payment_action_required";
+            else if (started.IsPending)
+            {
+                var pending = await WaitForPendingAsync(started.PendingId!, ct);
+                if (pending?.IsCompleted == true) sessionId = pending.SessionId;
+                else if (pending?.IsFailed == true) failure = $"failed: {pending.FailureReason ?? pending.Status}";
+                else failure = "still_pending";
+            }
 
-        // Whatever the answer said, the running list is the truth: never report "not started" while one runs.
-        var runningNow = (await api.GetSessionsAsync(ct)).FirstOrDefault(s =>
-            (sessionId is not null && s.Id == sessionId) ||
-            (Plates.Normalize(s.Vehicle?.LicensePlate) == Plates.Normalize(vehicle.LicensePlate) && s.Space?.Id == parking.Id));
+            // Whatever the answer said, the running list is the truth: never report "not started" while one runs.
+            runningNow = (await api.GetSessionsAsync(ct)).FirstOrDefault(s =>
+                (sessionId is not null && s.Id == sessionId) ||
+                (Plates.Normalize(s.Vehicle?.LicensePlate) == Plates.Normalize(vehicle.LicensePlate) && s.Space?.Id == parking.Id));
+        }
+        catch (Exception ex) when (ex is not OperationCanceledException)
+        {
+            // The start was sent and accepted: a failed read-back must not look like "try again" (a retry could charge twice).
+            logger.LogWarning(ex, "start at {Parking} was accepted but couldn't be confirmed", parking.Id);
+            return Refused("start_unconfirmed",
+                $"APCOA accepted the start at {parking.Name}, but this server couldn't confirm it afterwards. Don't start " +
+                "again: check get_active_sessions first.", sessionId);
+        }
 
         if (failure == "payment_action_required")
         {
@@ -184,9 +198,9 @@ public sealed class Sessions(IApcoaFlowApi api, Pricing pricing, TimeProvider ti
         if (!session.SessionCanBeExtended)
             return Refused("not_extendable", $"{Describe(session)} can't be extended.");
 
-        var card = await DefaultCardAsync(session.Space?.Id, ct);
-        if (card.Refusal is { } noCard)
-            return noCard;
+        var card = await DefaultMethodAsync(session.Space?.Id, ct);
+        if (card.Refusal is { } noMethod)
+            return noMethod;
 
         var quote = await api.GetUpdatedPriceAsync(session.Id, minutes * 60, ct);
         var cost = quote.Total;
@@ -195,10 +209,15 @@ public sealed class Sessions(IApcoaFlowApi api, Pricing pricing, TimeProvider ti
         var newEnd = quote.EndDate ?? (session.EndDate ?? time.GetUtcNow()).AddMinutes(minutes);
         if (!cost.IsZero)
         {
-            if (cost.Amount > maxCostPln)
+            if (CardRefusal(card.Method!) is { } notACard)
+                return notACard;
+            // The cap is for the whole session: what it already costs plus this extension.
+            var sessionCost = SessionTotal(session);
+            if (sessionCost + cost.Amount > maxCostPln)
                 return Refused("cost_cap_exceeded",
-                    $"Extending by {Text.Duration(minutes)} costs {cost}, more than this server's limit of " +
-                    $"{maxCostPln.ToString("0.00", CultureInfo.InvariantCulture)} PLN. Nothing was changed.");
+                    $"Extending by {Text.Duration(minutes)} costs {cost}; with the {sessionCost.ToString("0.00", CultureInfo.InvariantCulture)} PLN " +
+                    $"the session already costs that's more than this server's limit of " +
+                    $"{maxCostPln.ToString("0.00", CultureInfo.InvariantCulture)} PLN per session. Nothing was changed.");
             if (confirmedCostPln is null)
                 return new SessionResult(
                     $"Extending {Describe(session)} by {Text.Duration(minutes)} (until {Text.LocalTime(newEnd, time)}) costs {cost}. " +
@@ -214,7 +233,16 @@ public sealed class Sessions(IApcoaFlowApi api, Pricing pricing, TimeProvider ti
         {
             SessionId = session.Id, NewEnd = newEnd, PaymentMethodId = card.Method!.Id,
         }, ct);
-        var updated = (await api.GetSessionsAsync(ct)).FirstOrDefault(s => s.Id == session.Id) ?? session;
+        Session updated;
+        try { updated = (await api.GetSessionsAsync(ct)).FirstOrDefault(s => s.Id == session.Id) ?? session; }
+        catch (Exception ex) when (ex is not OperationCanceledException)
+        {
+            // Extended already: don't let a failed read-back invite a second (charged) extension.
+            logger.LogWarning(ex, "extended session {Session} but couldn't re-read it", session.Id);
+            return new SessionResult($"Extended the session at {session.Space?.Name} until about {Text.LocalTime(newEnd, time)} " +
+                $"({(cost.IsZero ? "free" : cost.ToString())}). Don't extend again: check get_active_sessions for the new end.",
+                "extended", SessionId: session.Id, CostPln: cost.Amount, DurationMinutes: minutes);
+        }
         return new SessionResult($"Extended: {Describe(updated)} ({(cost.IsZero ? "free" : cost.ToString())}).", "extended",
             SessionId: session.Id, CostPln: cost.Amount, DurationMinutes: minutes);
     }
@@ -242,7 +270,11 @@ public sealed class Sessions(IApcoaFlowApi api, Pricing pricing, TimeProvider ti
                 if (!details.IsSessionActive && Money.TryParse(details.TotalPrice, out var billed))
                     cost = billed;
             }
-            catch (ApiException ex) when (ex.StatusCode == System.Net.HttpStatusCode.NotFound) { }
+            catch (Exception ex) when (ex is not OperationCanceledException)
+            {
+                // The stop happened; a failed (or 404, post-pay settling) history read only means the cost is unknown yet.
+                logger.LogDebug(ex, "history of stopped session {Session} not readable yet", id);
+            }
         }
         var name = session.Space?.Name ?? "the parking";
         if (cost is not { } final)
@@ -253,20 +285,31 @@ public sealed class Sessions(IApcoaFlowApi api, Pricing pricing, TimeProvider ti
             SessionId: id, CostPln: final.Amount);
     }
 
-    /// <summary>The account's default payment method, if this server can pay with it.</summary>
-    private async Task<(PaymentMethod? Method, SessionResult? Refusal)> DefaultCardAsync(string? parkingId, CancellationToken ct)
+    /// <summary>
+    /// The account's default payment method (the app sends its id even for free starts). Whether this server may
+    /// charge it is <see cref="CardRefusal"/>, checked only when something costs money.
+    /// </summary>
+    private async Task<(PaymentMethod? Method, SessionResult? Refusal)> DefaultMethodAsync(string? parkingId, CancellationToken ct)
     {
         var methods = await api.GetPaymentMethodsAsync(parkingId, ct);
         var def = methods.FirstOrDefault(m => m.IsDefault);
-        if (def is null)
-            return (null, Refused("no_payment_method",
-                "The account has no default payment method this parking accepts. Set a saved card as the default in the APCOA Flow app."));
-        if (!IsSavedCard(def))
-            return (null, Refused("default_not_a_card",
-                $"The account's default payment method is {def.Type} {def.Identifier}, which this server can't charge without you " +
-                "(it needs a saved card that's charged without any extra step). Set a saved card as the default in the APCOA Flow app."));
-        return (def, null);
+        return def is null
+            ? (null, Refused("no_payment_method",
+                "The account has no default payment method this parking accepts. Set a saved card as the default in the APCOA Flow app."))
+            : (def, null);
     }
+
+    /// <summary>Null when the default method is a saved card this server may charge; else the refusal.</summary>
+    private static SessionResult? CardRefusal(PaymentMethod def) => IsSavedCard(def)
+        ? null
+        : Refused("default_not_a_card",
+            $"The account's default payment method is {def.Type} {def.Identifier}, which this server can't charge without you " +
+            "(it needs a saved card that's charged without any extra step). Set a saved card as the default in the APCOA Flow app.");
+
+    /// <summary>What a running session costs so far: its "Total" detail line (<c>{title: "Total", subTitle: "1", footer: "PLN"}</c>).</summary>
+    internal static decimal SessionTotal(Session s) =>
+        s.Details.FirstOrDefault(d => string.Equals(d.Title, "Total", StringComparison.OrdinalIgnoreCase)) is { SubTitle: { } amount } &&
+        decimal.TryParse(amount, NumberStyles.Number, CultureInfo.InvariantCulture, out var total) ? total : 0m;
 
     /// <summary>A card charged without interaction: <c>flow: saved</c>, no action, available, not a wallet.</summary>
     public static bool IsSavedCard(PaymentMethod m) =>

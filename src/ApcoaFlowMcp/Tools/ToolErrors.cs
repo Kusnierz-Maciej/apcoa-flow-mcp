@@ -54,6 +54,11 @@ internal static class ToolErrors
         if (ApcoaFlowAuthErrors.Find<ApiException>(ex) is { } api)
             return FromBody(api) ?? FromStatus(api.StatusCode);
 
+        // A price this server can't read (Money.Parse): say so instead of the SDK's empty error.
+        if (ApcoaFlowAuthErrors.Find<FormatException>(ex) is not null)
+            return new("unreadable_price", "APCOA returned a price in a format this server can't read, so nothing was " +
+                "started or changed. Try again later; if it keeps happening the server needs an update.");
+
         if (ApcoaFlowAuthErrors.Find<HttpRequestException>(ex) is not null)
             return new("unavailable", "APCOA could not be reached right now. Try again in a moment.");
 

@@ -132,10 +132,10 @@ All of these change something and are never idempotent (each start can cost mone
 act on a parking or session id also take **`parkingName`**: it isn't sent to APCOA, it only makes the client's
 permission prompt say *which* parking.
 
-**Payment**: always the account's **default** payment method, and only when it's a saved card charged without any
-extra step (`flow: saved`, no action needed — not Apple Pay, not the hosted checkout page). Otherwise the tool refuses
-before starting and says to set a saved card as the default in the APCOA Flow app. Free starts send the default
-card's id too (the app does the same); nothing is charged.
+**Payment**: always the account's **default** payment method. A **paid** start or extension needs it to be a saved
+card charged without any extra step (`flow: saved`, no action needed — not Apple Pay, not the hosted checkout page);
+otherwise the tool refuses before starting and says to set a saved card as the default in the APCOA Flow app. Free
+starts and extensions work with any default method (its id is sent, as the app does; nothing is charged).
 
 **Free** means the dated quote for this vehicle is 0.00 — whatever the reason (a free tariff, a shop's free time, a
 one-time free period). The **free window** is the longest stay that still quotes 0.00 (the parking's preselected
@@ -147,13 +147,15 @@ duration is tried first, else a short search of up to a day).
 | `start_free_session` | `parkingId`, `parkingName`, `licensePlate`, `durationMinutes?` | Only if free for the whole stay; never charges. Without a duration: the whole free window. |
 | `start_expensive_session` | as `start_session` | `start_session` without the cost limit. |
 | `start_session_here` / `start_free_session_here` | `latitude`, `longitude`, `licensePlate`, `durationMinutes?`, (`confirmedCostPln?`), `radiusMeters?` | The same at the nearest parking within the radius (default `ApcoaFlow__CurrentLocationRadiusMeters`, 300 m), measured to its outline when it has one. If the position is inside exactly one outline, that one. If two parkings are within **30 m** of each other in distance (GPS can't tell them apart), nothing starts and both are listed. |
-| `extend_session` | `sessionId`, `parkingName`, `minutes`, `confirmedCostPln?` | Quotes the extension; free → extends at once, paid → price first, then with `confirmedCostPln`. Same cost limit. |
+| `extend_session` | `sessionId`, `parkingName`, `minutes`, `confirmedCostPln?` | Quotes the extension; free → extends at once, paid → price first, then with `confirmedCostPln`. The cost limit is for the **whole session**: what it already costs plus the extension. |
 | `end_session` | `sessionId`, `parkingName` | Stops the session, then reads the final cost from the history. |
 
 Refusals are normal results (not errors): a parking where sessions can't be started (plate recognition), unknown plate, a running session for that plate (it's named, with its
 id), not free, over the free window, over the cost limit, price changed since the quote, default payment method not
 a saved card, longer than the parking allows, no parking nearby, too close to call. If a paid start ever comes back
-needing an interactive payment step (3-D Secure), the session is ended at once and the tool says so.
+needing an interactive payment step (3-D Secure), the session is ended at once and the tool says so. If APCOA accepted
+a start or an extension but the server couldn't read the result back, the tool says so and that it must **not** be
+repeated (check `get_active_sessions`): a retry could charge twice.
 
 ```
 Started: [046ca4c0-fc81-4506-bb9f-d387b48e3ca8] Targowiska Miejskie Ostrów Wlkp. III - ABC12345, from 21:49 until 22:04 (free).
