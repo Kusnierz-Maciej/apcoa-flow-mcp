@@ -11,6 +11,7 @@ public static class ScenarioRegistry
         new StartFreeAldiScenario(),
         new CaptureCarrefourPaidStartScenario(),
         new DumpTariffScenario(),
+        new LoginProbeScenario(),
     ];
 
     public static IScenario? Find(string name) =>

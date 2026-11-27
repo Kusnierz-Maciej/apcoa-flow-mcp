@@ -35,13 +35,10 @@ public static class ApcoaFlowLogin
                 LocationCode = "PL",
             }, ct);
 
-            if (response.FailedLogin || string.IsNullOrWhiteSpace(response.AuthToken))
-            {
+            var outcome = Classify(response);
+            if (outcome.Kind == LoginOutcomeKind.BadCredentials)
                 logger?.LogInformation("APCOA login rejected the credentials (FailedLogin flag or empty token).");
-                return LoginOutcome.Bad("FailedLogin flag or empty token");
-            }
-
-            return LoginOutcome.Success(response.AuthToken);
+            return outcome;
         }
         catch (ApiException ex) when (IsCredentialRejection(ex.StatusCode))
         {
@@ -60,6 +57,16 @@ public static class ApcoaFlowLogin
             return LoginOutcome.Api("transport error");
         }
     }
+
+    /// <summary>
+    /// Classifies a 2xx login response. APCOA rejects wrong credentials (bad password or unknown email) with
+    /// HTTP 200, <c>failedLogin: true</c>, no <c>authToken</c> and a <c>failedLoginResponse</c> carrying its
+    /// lockout policy (5 attempts per 2 minutes) — observed 2026-11-27, pinned by LiveApiContractTests.
+    /// </summary>
+    public static LoginOutcome Classify(LoginResponse response) =>
+        response.FailedLogin || string.IsNullOrWhiteSpace(response.AuthToken)
+            ? LoginOutcome.Bad("FailedLogin flag or empty token")
+            : LoginOutcome.Success(response.AuthToken);
 
     // A credential rejection is an auth/validation status on the login call itself. 419 is explicitly
     // NOT here: APCOA uses it for invalid/expired token, which is an API condition, not a bad password.

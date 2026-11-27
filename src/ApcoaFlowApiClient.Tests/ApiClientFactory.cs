@@ -7,12 +7,14 @@ internal static class ApiClientFactory
 {
     private sealed class Marker;
 
-    private static readonly Lazy<(IApcoaFlowApi Api, ApcoaFlowClientOptions Options)> _instance = new(Build);
+    private static readonly Lazy<(ServiceProvider Services, ApcoaFlowClientOptions Options)> _instance = new(Build);
 
-    public static IApcoaFlowApi Api => _instance.Value.Api;
+    /// <summary>The DI container behind <see cref="Api"/> (the factory's named clients share its rate limit).</summary>
+    public static IServiceProvider Services => _instance.Value.Services;
+    public static IApcoaFlowApi Api => Services.GetRequiredService<IApcoaFlowApi>();
     public static ApcoaFlowClientOptions Options => _instance.Value.Options;
 
-    private static (IApcoaFlowApi, ApcoaFlowClientOptions) Build()
+    private static (ServiceProvider, ApcoaFlowClientOptions) Build()
     {
         var config = new ConfigurationBuilder()
             .AddUserSecrets<Marker>(optional: true)
@@ -26,7 +28,7 @@ internal static class ApiClientFactory
         var services = new ServiceCollection();
         services.AddSingleton<IApcoaFlowCredentialProvider>(new StaticCredentialProvider(options));
         services.AddApcoaFlowApiClient();
-        return (services.BuildServiceProvider().GetRequiredService<IApcoaFlowApi>(), options);
+        return (services.BuildServiceProvider(), options);
     }
 
     private sealed class StaticCredentialProvider(ApcoaFlowClientOptions options) : IApcoaFlowCredentialProvider
