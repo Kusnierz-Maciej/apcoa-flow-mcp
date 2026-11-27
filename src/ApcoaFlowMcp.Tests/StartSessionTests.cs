@@ -133,6 +133,18 @@ public class StartSessionTests
     }
 
     [Test]
+    public async Task OnlyFree_FreeBaseTariff_WithoutPromo_Starts()
+    {
+        // A 0.00 PLN base tariff (e.g. parking 616319) is free without any promotion.
+        var api = Fake.Api(quote: Fake.Quote(0m));
+        var result = await StartOnlyFree(api);
+
+        await Assert.That(result.Started).IsTrue();
+        await Assert.That(result.CostPln).IsEqualTo(0m);
+        await api.Received(1).StartParkingSessionAsync(Arg.Any<StartParkingSessionRequest>(), Arg.Any<CancellationToken>());
+    }
+
+    [Test]
     public async Task OnlyFree_FreeParking_Starts()
     {
         var api = Fake.Api(quote: Fake.Quote(0m), offers: Fake.Offers(Fake.FreeTimePromo()));

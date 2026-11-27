@@ -233,21 +233,20 @@ public sealed class ApcoaFlowSessionService(
         //    With a usable promo, fill the whole free window (a one-use coupon should not be wasted):
         //    a shorter request rounds UP to it; OnlyFree rejects a longer request. Capped by lot max.
         TimeSpan window;
-        if (mode == StartMode.OnlyFree)
+        if (mode == StartMode.OnlyFree && promo?.FreeWindow is null)
         {
-            if (promo?.FreeWindow is not { } freeWindow)
-            {
-                // No usable free tier: refuse, but INCLUDE pricing + point to the paid tool.
-                var ladder = await BuildPriceLadderAsync(tariffId, lotId, checkIn, vehicle.VehicleNumber, consumer.Id, maxLot, ct);
-                var msg = FormatNoFreeMessage(parkingId, ladder);
-                // Expected answer for start_free_session at a paid parking — not an error.
-                return Tag(Refused(msg, "not_free", isError: false)) with { PriceLadder = ladder, CancelRefundNote = cancelNote };
-            }
+            // No free-time promo: the base tariff itself may be free (e.g. 0.00 PLN street parking). Quote the
+            // requested/default window and let the "OnlyFree must actually be free" check below decide — a paid
+            // parking is refused there with the price ladder.
+            window = requested ?? TimeSpan.FromMinutes(DefaultDurationMinutes);
+            window = window <= maxLot ? window : maxLot;
+        }
+        else if (mode == StartMode.OnlyFree && promo?.FreeWindow is { } promoWindow)
+        {
+            if (requested is { } r && r > promoWindow)
+                return Tag(Refused($"Requested {r.TotalMinutes:0} min exceeds the free window of {promoWindow.TotalMinutes:0} min for this parking.", "exceeds_free_window")) with { CancelRefundNote = cancelNote };
 
-            if (requested is { } r && r > freeWindow)
-                return Tag(Refused($"Requested {r.TotalMinutes:0} min exceeds the free window of {freeWindow.TotalMinutes:0} min for this parking.", "exceeds_free_window")) with { CancelRefundNote = cancelNote };
-
-            window = requested is { } rq && rq > freeWindow ? rq : freeWindow;
+            window = requested is { } rq && rq > promoWindow ? rq : promoWindow;
             window = window <= maxLot ? window : maxLot;
         }
         else
