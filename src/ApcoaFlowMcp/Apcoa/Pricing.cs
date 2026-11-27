@@ -21,6 +21,32 @@ public sealed class Pricing(IApcoaFlowApi api, TimeProvider time)
             StartDate = UtcMillisecondsConverter.ToWire(time.GetUtcNow()),
         }, ct);
 
+    /// <summary>The longest stay checked for "same price, longer stay": one day.</summary>
+    public const int SamePriceCapMinutes = 24 * 60;
+
+    /// <summary>
+    /// The longest stay (up to <see cref="SamePriceCapMinutes"/> and the parking's limit) that costs the same as
+    /// <paramref name="minutes"/> did (<paramref name="price"/>), assuming prices only grow with time; null when no
+    /// longer stay costs the same. A binary search: ~11 quotes.
+    /// </summary>
+    public async Task<int?> LongestAtSamePriceAsync(string parkingId, string vehicleId, int minutes, Money price, int? maxMinutes, CancellationToken ct)
+    {
+        var cap = Math.Min(SamePriceCapMinutes, maxMinutes is > 0 ? maxMinutes.Value : SamePriceCapMinutes);
+        if (cap <= minutes) return null;
+        async Task<bool> Same(int m) => (await QuoteAsync(parkingId, vehicleId, m, ct)).Total.Amount == price.Amount;
+
+        if (!await Same(minutes + 1)) return null;
+        if (await Same(cap)) return cap;
+        int lo = minutes + 1, hi = cap; // same at lo, more at hi
+        while (hi - lo > 1)
+        {
+            var mid = lo + (hi - lo) / 2;
+            if (await Same(mid)) lo = mid;
+            else hi = mid;
+        }
+        return lo;
+    }
+
     /// <summary>How long a free stay can be.</summary>
     /// <param name="Minutes">The longest free stay, in minutes (0 = not free even for a minute).</param>
     /// <param name="AtLeast">True when it's free for the whole <see cref="FreeWindowCapMinutes"/> checked.</param>

@@ -13,12 +13,12 @@ A **parking** is the place; a **session** is parking there.
 | Tool | Description |
 |---|---|
 | `get_vehicles` | The vehicles (license plates) on the account, with the default flagged and the user's description. |
-| `find_parkings` | Parkings by name or text (brand like "Biedronka", town, street, postcode, location code) and/or near a position, through APCOA's own search; near a position nearest first, measured to the parking's outline when it has one. |
+| `find_parkings` | Parkings by name or text (brand like "Biedronka", town, street, postcode, location code) and/or near a position, through APCOA's own search; near a position nearest first, measured to the parking's outline when it has one. With a plate, the first results also say whether they're free for that car right now and for how long. |
 | `get_parking_details` | Everything about one parking: location (address, coordinates, outline), status, how sessions work there (app or plate recognition), usual and longest stay, pricing (tariff table and rules), amenities (EV charging, season tickets, pre-booking). |
 | `get_price` | The price of a stay starting now for one of your vehicles (free time included), and how long it can be free. |
 | `get_active_sessions` | Running sessions with time left. |
 | `get_session_history` | Recent sessions with cost. |
-| `start_session` | Start a session. **May cost money**: free starts at once; paid returns the price first and starts on a second call with the exact `confirmedCostPln`. Under a cost limit; paid only with the account's default saved card. |
+| `start_session` | Start a session. **May cost money**: free starts at once; paid returns the price first (and how long the same price would last) and starts on a second call with the exact `confirmedCostPln`. Under a cost limit; paid only with the account's default saved card. |
 | `start_free_session` | Start only if free for the vehicle right now (any free time included); never charges. Defaults to the whole free time. |
 | `start_expensive_session` | `start_session` without the cost limit (its own tool so it can be permissioned separately). |
 | `start_session_here` / `start_free_session_here` | The same at the parking you're at (nearest by outline or pin); lists the candidates when GPS can't tell two apart. |

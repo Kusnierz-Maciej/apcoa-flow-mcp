@@ -35,6 +35,7 @@ Find parkings by name or text and/or near a position. Read-only, idempotent.
 | `query` | Name or text: shop brand ("Biedronka" — shop parkings that come with free time), town, street, postcode or the parking's location code. Optional when a position is given. |
 | `latitude`, `longitude` | Position to search around. |
 | `radiusMeters` | Without a query: the radius around the position (default 2000). |
+| `licensePlate` | Optional, one of the account's vehicles: the first 5 results then also say `free now for up to …`, `free now (get_price says for how long)` or `paid now` for it. Slower (~20 s: a few quotes per result under the rate limit). |
 
 - **With a query** (with or without a position): APCOA's own search, which also matches addresses, towns and location
   codes. With a position the nearest come first (any distance); without one the distance is left out. Hits near the
@@ -143,7 +144,7 @@ duration is tried first, else a short search of up to a day).
 
 | Tool | Inputs | Does |
 |---|---|---|
-| `start_session` | `parkingId`, `parkingName`, `licensePlate`, `durationMinutes?`, `confirmedCostPln?` | Free → starts at once. Paid → the first call returns the price and starts nothing; call again with the same `durationMinutes` and the exact `confirmedCostPln` after the user agrees. Refuses above `ApcoaFlow__MaxSessionCostPln` (default 100). Without a duration: the whole free window when free, else the parking's usual duration (60 min if it has none). |
+| `start_session` | `parkingId`, `parkingName`, `licensePlate`, `durationMinutes?`, `confirmedCostPln?` | Free → starts at once. Paid → the first call returns the price and starts nothing (and, when a longer stay costs the same — e.g. PLN 0.40 per started hour — says how long the same price lasts, so the user can choose; never stretched by itself); call again with the same `durationMinutes` and the exact `confirmedCostPln` after the user agrees. Refuses above `ApcoaFlow__MaxSessionCostPln` (default 100). Without a duration: the whole free window when free, else the parking's usual duration (60 min if it has none). |
 | `start_free_session` | `parkingId`, `parkingName`, `licensePlate`, `durationMinutes?` | Only if free for the whole stay; never charges. Without a duration: the whole free window. |
 | `start_expensive_session` | as `start_session` | `start_session` without the cost limit. |
 | `start_session_here` / `start_free_session_here` | `latitude`, `longitude`, `licensePlate`, `durationMinutes?`, (`confirmedCostPln?`), `radiusMeters?` | The same at the nearest parking within the radius (default `ApcoaFlow__CurrentLocationRadiusMeters`, 300 m), measured to its outline when it has one. If the position is inside exactly one outline, that one. If two parkings are within **30 m** of each other in distance (GPS can't tell them apart), nothing starts and both are listed. |

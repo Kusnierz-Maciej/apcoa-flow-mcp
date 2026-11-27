@@ -99,13 +99,23 @@ public sealed class Sessions(IApcoaFlowApi api, Pricing pricing, TimeProvider ti
                     $"{maxCostPln.ToString("0.00", CultureInfo.InvariantCulture)} PLN. Nothing was started. Use start_expensive_session " +
                     "only if the user explicitly accepts this cost.");
             if (confirmedCostPln is null)
+            {
+                // Same price, longer stay? Suggest it (the user picks; never stretched silently).
+                var longest = await Phase("apcoa.same_price", () =>
+                    pricing.LongestAtSamePriceAsync(parking.Id, vehicle.Id, duration.Value, cost, parking.MaxDuration, ct));
+                var amount = cost.Amount.ToString("0.00", CultureInfo.InvariantCulture);
                 return new SessionResult(
                     $"{Text.Duration(duration.Value)} at {parking.Name} for {vehicle.LicensePlate} costs {cost}, " +
                     $"{(quote.PrepaymentMode == "autoCharge" ? "charged at start" : "charged at the end")} to {card.Method!.Type} {card.Method.Identifier}." +
                     (window is { Minutes: > 0 } w ? $" (Free for up to {Text.Duration(w.Minutes)}.)" : "") +
-                    $" Nothing was started yet: confirm with the user, then call again with durationMinutes={duration} and " +
-                    $"confirmedCostPln={cost.Amount.ToString("0.00", CultureInfo.InvariantCulture)}.",
+                    (longest is { } l
+                        ? $" For the same {cost} the stay can last up to {Text.Duration(l)} (until {Text.LocalTime(time.GetUtcNow().AddMinutes(l), time)}) — ask the user which they want."
+                        : "") +
+                    $" Nothing was started yet: confirm with the user, then call again with durationMinutes={duration}" +
+                    (longest is { } l2 ? $" (or {l2} for the longer stay at the same price)" : "") +
+                    $" and confirmedCostPln={amount}.",
                     "quote", CostPln: cost.Amount, DurationMinutes: duration);
+            }
             if (confirmedCostPln.Value != cost.Amount)
                 return Refused("cost_mismatch",
                     $"The price changed: {Text.Duration(duration.Value)} at {parking.Name} now costs {cost} (you confirmed " +

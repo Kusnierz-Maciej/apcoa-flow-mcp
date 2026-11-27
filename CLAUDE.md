@@ -63,6 +63,11 @@ Use the official MCP Inspector in CLI mode (`npx -y @modelcontextprotocol/inspec
 check the server as a client sees it: tool list, schemas, annotations, prompts, real tool calls. Run it after any
 change to tools, prompts, descriptions, parameters or auth.
 
+**Quick check: `tools/inspector-check.sh`** (add `--live` to also call `get_vehicles` with the live tests' account).
+It starts the host on a free port with throwaway dev settings, runs `tools/list --strict` (must be clean) and checks the
+expected tool and prompt names and titles; offline it needs no APCOA account. Update its expected names when tools
+or prompts change. The manual recipe below is for anything else.
+
 Start the HTTP host with dev settings (the key and secret are throwaway dev values):
 
 ```sh

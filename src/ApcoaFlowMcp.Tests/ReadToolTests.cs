@@ -112,6 +112,28 @@ public class ReadToolTests
     }
 
     [Test]
+    public async Task FindParkings_with_a_plate_says_which_results_are_free_now_and_for_how_long()
+    {
+        var api = FakeApi.Create();
+        api.SearchAsync(Arg.Any<SearchQuery>(), Arg.Any<CancellationToken>()).Returns(new SearchResponse
+        {
+            Spaces = [new SearchSpace { Id = "free", Name = "Biedronka A" }, new SearchSpace { Id = "paid", Name = "Biedronka B" }],
+        });
+        api.GetSpaceAsync("free", Arg.Any<CancellationToken>()).Returns(new SpaceDetails { Id = "free", Name = "Biedronka A", DefaultLengthOfStayInMinutes = 90 });
+        api.GetPriceAsync(Arg.Any<PriceQuery>(), Arg.Any<CancellationToken>()).Returns(ci =>
+        {
+            var q = ci.ArgAt<PriceQuery>(0);
+            var free = q.SpaceId == "free" && q.Duration <= 90 * 60;
+            return new PriceQuote { TotalPrice = free ? "PLN 0.00" : "PLN 2.00" };
+        });
+
+        var lines = (await FakeApi.Tools(api).FindParkingsAsync("Biedronka", licensePlate: "abc 12345")).Split('\n');
+
+        await Assert.That(lines[0]).IsEqualTo("[free] Biedronka A - free now for up to 1 h 30 min");
+        await Assert.That(lines[1]).IsEqualTo("[paid] Biedronka B - paid now");
+    }
+
+    [Test]
     public async Task FindParkings_near_a_position_alone_lists_the_map_pins_within_the_radius()
     {
         var api = FakeApi.Create();

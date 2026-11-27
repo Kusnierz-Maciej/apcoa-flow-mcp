@@ -47,13 +47,36 @@ public class WriteToolTests
     [Test]
     public async Task Paid_start_first_returns_the_price_and_starts_nothing()
     {
-        var api = ForStarts(_ => 5m, prepaymentMode: "none");
+        var api = ForStarts(minutes => minutes <= 60 ? 5m : 7m, prepaymentMode: "none");
 
         var text = await FakeApi.Tools(api).StartSessionAsync(ParkingId, ParkingName, "ABC12345", 60);
 
         await Assert.That(text).Contains("1 h at Targowiska Miejskie Ostrów Wlkp. III for ABC12345 costs 5.00 PLN, charged at the end to visa ****4412.");
         await Assert.That(text).Contains("durationMinutes=60 and confirmedCostPln=5.00");
         await NoStart(api);
+    }
+
+    [Test]
+    public async Task A_paid_quote_suggests_the_longest_stay_at_the_same_price()
+    {
+        // Flat PLN 4.00 up to 4 h, then more.
+        var api = ForStarts(minutes => minutes <= 240 ? 4m : 6m);
+
+        var text = await FakeApi.Tools(api).StartSessionAsync(ParkingId, ParkingName, "ABC12345", 60);
+
+        await Assert.That(text).Contains("For the same 4.00 PLN the stay can last up to 4 h (until 19:00)");
+        await Assert.That(text).Contains("durationMinutes=60 (or 240 for the longer stay at the same price) and confirmedCostPln=4.00");
+        await NoStart(api);
+    }
+
+    [Test]
+    public async Task No_same_price_suggestion_when_a_minute_more_costs_more()
+    {
+        var api = ForStarts(minutes => 1m + minutes / 60);
+
+        var text = await FakeApi.Tools(api).StartSessionAsync(ParkingId, ParkingName, "ABC12345", 59);
+
+        await Assert.That(text).DoesNotContain("For the same");
     }
 
     [Test]

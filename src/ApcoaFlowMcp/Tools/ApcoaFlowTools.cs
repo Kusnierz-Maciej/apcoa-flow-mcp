@@ -74,12 +74,14 @@ public sealed class ApcoaFlowTools(
     [Description("Find APCOA Flow parkings by name or text (shop brand like \"Biedronka\", town, street, postcode or the " +
                  "parking's location code) and/or near a position. With a position the nearest come first, measured to " +
                  "the parking's outline when it has one (\"you are inside it\" when the position is in it), else to its pin. " +
-                 "Returns one line per parking: \"[parkingId] name - distance - address (code …)\".")]
+                 "Returns one line per parking: \"[parkingId] name - distance - address (code …)\"; with a licensePlate the first " +
+                 "results also say \"free now for up to …\" or \"paid now\" for that vehicle.")]
     public Task<string> FindParkingsAsync(
         [Description("Name or text to search for: brand, town, street, postcode or location code. Optional when a position is given.")] string? query = null,
         [Description("Latitude of the position to search around (decimal degrees). Give it with longitude.")] double? latitude = null,
         [Description("Longitude of the position to search around (decimal degrees).")] double? longitude = null,
         [Description("Without a query: the radius in metres around the position (default 2000). With a query the nearest matches anywhere are listed.")] double? radiusMeters = null,
+        [Description("Optional: one of the account's vehicles. Then the first 5 results also say whether they're free for it right now, and for how long (e.g. a shop's free time). Makes the search slower (~20 s): pass it only when free parking matters.")] string? licensePlate = null,
         CancellationToken ct = default)
         => ToolErrors.GuardAsync("find_parkings", logger, async () =>
     {
@@ -107,6 +109,15 @@ public sealed class ApcoaFlowTools(
                 ? FormattableString.Invariant($"No APCOA Flow parking within {radius:0} m.")
                 : $"No APCOA Flow parking matches \"{text}\".";
 
+        Dictionary<string, string> freeNotes = [];
+        if (!string.IsNullOrWhiteSpace(licensePlate))
+        {
+            var vehicle = Plates.Find(await api.GetVehiclesAsync(ct), licensePlate);
+            if (vehicle is null)
+                return $"\"{licensePlate}\" isn't one of the account's vehicles. Call get_vehicles for the plates.";
+            freeNotes = await FreeNotesAsync(found.Take(FreeCheckCount), vehicle.Id, ct);
+        }
+
         var sb = new StringBuilder();
         foreach (var p in found)
         {
@@ -115,10 +126,45 @@ public sealed class ApcoaFlowTools(
                 sb.Append(p.Inside ? " - you are inside it" : $" - {Text.Meters(m)}{(p.FromOutline ? " (to its edge)" : "")}");
             if (p.Address is not null) sb.Append($" - {p.Address}");
             if (p.Code is not null) sb.Append($" (code {p.Code})");
+            if (freeNotes.TryGetValue(p.Id, out var free)) sb.Append($" - {free}");
             sb.AppendLine();
         }
         return sb.ToString().TrimEnd();
     });
+
+    /// <summary>How many search results <c>find_parkings</c> checks for free time when given a plate.</summary>
+    public const int FreeCheckCount = 5;
+
+    /// <summary>
+    /// "free now for up to …" / "free now" / "paid now" per parking, for one vehicle: a 1-minute quote each, and for
+    /// the free ones the parking's preselected duration (a shop's free window) checked with two more quotes.
+    /// </summary>
+    private async Task<Dictionary<string, string>> FreeNotesAsync(IEnumerable<FoundParking> parkings, string vehicleId, CancellationToken ct)
+    {
+        var notes = new Dictionary<string, string>();
+        foreach (var p in parkings)
+        {
+            try
+            {
+                if (!(await pricing.QuoteAsync(p.Id, vehicleId, 1, ct)).Total.IsZero)
+                {
+                    notes[p.Id] = "paid now";
+                    continue;
+                }
+                var hint = (await api.GetSpaceAsync(p.Id, ct)).DefaultLengthOfStayInMinutes;
+                var window = hint is > 1
+                    && (await pricing.QuoteAsync(p.Id, vehicleId, hint.Value, ct)).Total.IsZero
+                    && !(await pricing.QuoteAsync(p.Id, vehicleId, hint.Value + 1, ct)).Total.IsZero
+                    ? hint : null;
+                notes[p.Id] = window is { } w ? $"free now for up to {Text.Duration(w)}" : "free now (get_price says for how long)";
+            }
+            catch (Exception ex) when (ex is not OperationCanceledException && ToolErrors.Map(ex) is not null)
+            {
+                logger.LogInformation("find_parkings: no free-time check for {Parking} ({Error})", p.Id, ex.Message);
+            }
+        }
+        return notes;
+    }
 
     [McpServerTool(Name = "get_parking_details", Title = "Get parking details", ReadOnly = true, Idempotent = true)]
     [Description("Everything about one parking: name and location code, location (address, coordinates, whether it has " +
