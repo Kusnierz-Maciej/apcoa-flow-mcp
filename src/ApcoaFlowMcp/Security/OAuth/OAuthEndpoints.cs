@@ -292,14 +292,21 @@ public static class OAuthEndpoints
             <link rel="icon" href="/icon-192.png" type="image/png" sizes="192x192">
             <link rel="apple-touch-icon" href="/apple-touch-icon.png">
             <style>
+              /* Service brand colours — the only per-service part of this page (framework guideline §5.2).
+                 APCOA Flow green from the official app icon (#79b52a). White text on it is only 2.5:1, so
+                 filled buttons use a dark ink (6.4:1) and brand-coloured text on light surfaces uses a
+                 darker shade (--brand-text, 5.5:1). */
+              :root{--brand:#79b52a;--brand-hover:#6aa023;--brand-ink:#14260a;--brand-text:#4a7516;
+                    --brand-tint:rgba(121,181,42,.12)}
               body{font-family:system-ui,sans-serif;background:#f4f5f7;margin:0;padding:2rem;color:#1a1a2e}
               .card{max-width:24rem;margin:3rem auto;background:#fff;border-radius:12px;padding:1.75rem;
                     box-shadow:0 2px 12px rgba(0,0,0,.08)}
               h1{font-size:1.2rem;margin:0 0 1rem} label{display:block;margin:.75rem 0 .25rem;font-size:.85rem;font-weight:600}
               input{width:100%;box-sizing:border-box;padding:.6rem;border:1px solid #cbd0d8;border-radius:8px;font-size:1rem;
                     background:#fff;color:#1a1a2e}
-              button{margin-top:1.25rem;width:100%;padding:.7rem;border:0;border-radius:8px;background:#2d6cdf;color:#fff;
-                     font-size:1rem;font-weight:600;cursor:pointer} button:hover{background:#245bc0}
+              button{margin-top:1.25rem;width:100%;padding:.7rem;border:0;border-radius:8px;background:var(--brand);
+                     color:var(--brand-ink);font-size:1rem;font-weight:600;cursor:pointer}
+              button:hover{background:var(--brand-hover)}
               button:disabled{opacity:.65;cursor:progress} input:read-only{opacity:.65}
               .error{background:#fde8e8;color:#9b1c1c;padding:.6rem .75rem;border-radius:8px;font-size:.85rem}
               .field-hint{color:#667085;font-size:.72rem;margin:.3rem 0 0}
@@ -309,7 +316,7 @@ public static class OAuthEndpoints
                 .card{background:#1a1d27;box-shadow:0 2px 12px rgba(0,0,0,.4)}
                 input{background:#0f1117;color:#e6e8ee;border-color:#3a3f4b}
                 input::placeholder{color:#8b90a0}
-                button{background:#3b7bf0} button:hover{background:#5590f5}
+                :root{--brand:#79b52a;--brand-hover:#8cc63f;--brand-text:#9bd157;--brand-tint:rgba(121,181,42,.18)}
                 .error{background:#3a1b1d;color:#f3b4b4}
                 .field-hint,.hint{color:#9aa0b0}
               }
