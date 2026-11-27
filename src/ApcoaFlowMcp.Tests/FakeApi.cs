@@ -62,12 +62,19 @@ internal static class FakeApi
             defaultMethod ?? new PaymentMethod { Id = CardId, Type = "visa", Identifier = "****4412", IsDefault = true, Flow = "saved", RequiredAction = "none", Availability = "available" },
             new PaymentMethod { Id = "hosted-checkout", Type = "unknown", Flow = "hostedCheckout", RequiredAction = "none", Availability = "available" },
         ]);
-        api.GetSessionsAsync(Arg.Any<CancellationToken>()).Returns([]);
+        // No session before the start; the new one is listed after it.
+        api.GetSessionsAsync(Arg.Any<CancellationToken>()).Returns([], [StartedSession()]);
         Quotes(api, price, prepaymentMode);
         api.StartParkingAsync(Arg.Any<StartParkingRequest>(), Arg.Any<string>(), Arg.Any<CancellationToken>())
             .Returns(new StartParkingResponse { Id = "new-session" });
         return api;
     }
+
+    public static Session StartedSession(string id = "new-session") => new()
+    {
+        Id = id, Status = "active", StartDate = Now, EndDate = Now.AddMinutes(30), SessionCanBeStopped = true, SessionCanBeExtended = true,
+        Space = new SessionSpace { Id = ParkingId, Name = ParkingName }, Vehicle = new SessionVehicle { Id = VehicleId, LicensePlate = LicensePlate },
+    };
 
     public sealed class FixedTime(DateTimeOffset now) : TimeProvider
     {

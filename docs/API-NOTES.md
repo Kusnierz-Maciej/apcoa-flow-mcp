@@ -111,10 +111,14 @@ Amounts are strings: `"PLN 5.00"` (currency, space, invariant decimal); large am
 
 - **Start**: `POST /api/v1/sessions/startParking {spaceId, licensePlateId, startDate, endDate, paymentMethodId,
   paymentChoice: null, extendedSessionId: null, promoCode: null, priceRequestIdentifier: null, tariffPeriodId: null,
-  companyBillingAddressId: null, isPreBooked: false}` + `idempotency-key` → `200 {id, status: null, pendingId: null,
-  clientSecret: null, prepaymentMode: null, publishableKey: null}`: running at once (free, pre-pay and post-pay
-  starts with a saved card alike, 2026-11-27). `paymentMethodId` is needed even for a free start (the app sends the
-  default method). A `pendingId` / `clientSecret` would mean the payment needs an interactive step.
+  companyBillingAddressId: null, isPreBooked: false}` + `idempotency-key`. `paymentMethodId` is needed even for a
+  free start (the app sends the default method). Two answers seen (2026-11-27):
+  - free starts and a post-pay saved-card start: `200 {id, status: null, pendingId: null, clientSecret: null, …}` —
+    running at once;
+  - a **paid pre-pay** start with a saved card: `200 {id: null, pendingId}` — processed **asynchronously**. Poll
+    `GET /api/v1/sessions/pending/{pendingId}` → `{status, sessionId, failureReason}`; it said
+    `{"status":"completed","sessionId":…}` within seconds. The session runs (and is charged) even if you never poll.
+  - A `clientSecret` would mean the card payment needs an interactive step (Stripe / 3-D Secure); not seen yet.
 - **Running sessions**: `GET /api/v1/sessions` → `[{id, type: "Parking", status: "active", startDate, endDate,
   sessionCanBeStopped, sessionCanBeExtended, space: {id, name, tariffCode, countryCode, …}, vehicle: {id,
   licensePlate, …}, details: [{title: "Total", subTitle: "0", footer: "PLN"}], extensionType: "flexible", promoCode,
@@ -183,6 +187,8 @@ Behaviours relied on without a live test, because testing them costs money or ca
 
 | Behaviour | Observed |
 |---|---|
-| A paid start with a saved card runs at once, no interactive step | 2026-11-27, post-pay space (Czarny Dunajec), stopped after 19 s |
+| A paid post-pay start with a saved card runs at once, no interactive step | 2026-11-27, Czarny Dunajec, stopped after 19 s |
+| A paid pre-pay start with a saved card is pending, then `completed`; the card is charged at start (PLN 1.00, visa, history `status: paid`, `state: billed`) | 2026-11-27, Markinvest Warszawa al. Wilanowska 363 |
+| A pre-pay session stopped early is **not** refunded (stopped after ~30 s, billed the full PLN 1.00) | 2026-11-27, same session |
 | A post-pay session stopped within seconds is billed PLN 0.00 | 2026-11-27, same session |
 | Biedronka free time is once per 4 h per space, and shows in the quote | 2026-11-27, Biedronka Żyrardów |

@@ -10,6 +10,7 @@ public static class ScenarioRegistry
         new FindParkingsScenario(),
         new QuotesScenario(),
         new ExpiredTokenScenario(),
+        new PaidCandidatesScenario(),
     ];
 
     public static IScenario? Find(string name) =>

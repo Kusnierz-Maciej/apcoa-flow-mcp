@@ -91,9 +91,14 @@ public sealed class StartParkingRequest
 }
 
 /// <summary>
-/// <c>startParking</c> answer. Free, prePay and postPay starts with a saved card all came back as <c>{id}</c> with
-/// every other field null: the session is active at once. A non-null <see cref="PendingId"/> /
-/// <see cref="ClientSecret"/> means the payment needs an action (Stripe), which the MCP can't do.
+/// <c>startParking</c> answer. Two shapes seen (2026-11-27):
+/// <list type="bullet">
+/// <item>free starts (and a post-pay saved-card start): <c>{id}</c>, everything else null — running at once;</item>
+/// <item>a paid <b>pre-pay</b> start with a saved card: <c>{id: null, pendingId}</c> — the start is processed
+/// asynchronously; poll <c>GET sessions/pending/{pendingId}</c> until <c>status: "completed"</c> with the session id.</item>
+/// </list>
+/// A <see cref="ClientSecret"/> would mean the card payment needs an interactive step (Stripe, e.g. 3-D Secure), which
+/// the MCP can't do.
 /// </summary>
 public sealed class StartParkingResponse
 {
@@ -104,7 +109,30 @@ public sealed class StartParkingResponse
     public string? PrepaymentMode { get; set; }
     public string? PublishableKey { get; set; }
 
-    public bool NeedsPaymentAction => PendingId is not null || ClientSecret is not null;
+    /// <summary>The payment needs an interactive step (Stripe client secret).</summary>
+    public bool NeedsPaymentAction => !string.IsNullOrEmpty(ClientSecret);
+
+    /// <summary>The start is processed asynchronously: poll <see cref="PendingId"/>.</summary>
+    public bool IsPending => string.IsNullOrEmpty(Id) && !string.IsNullOrEmpty(PendingId);
+}
+
+/// <summary>
+/// <c>GET /api/v1/sessions/pending/{pendingId}</c>: <c>{status, sessionId, failureReason}</c>. Seen: <c>status:
+/// "completed"</c> with the new session id (2026-11-27). Other values (in progress, failed) not seen yet.
+/// </summary>
+public sealed class PendingStartStatus
+{
+    public string? Status { get; set; }
+    public string? SessionId { get; set; }
+    public string? FailureReason { get; set; }
+
+    public bool IsCompleted => string.Equals(Status, "completed", StringComparison.OrdinalIgnoreCase) && !string.IsNullOrEmpty(SessionId);
+
+    /// <summary>Settled without a session: a failure reason, or a status that says so.</summary>
+    public bool IsFailed => !string.IsNullOrEmpty(FailureReason) ||
+                            Status is { } s && (s.Contains("fail", StringComparison.OrdinalIgnoreCase) ||
+                                                s.Contains("cancel", StringComparison.OrdinalIgnoreCase) ||
+                                                s.Contains("reject", StringComparison.OrdinalIgnoreCase));
 }
 
 /// <summary><c>POST /api/v1/sessions/updateParkingDuration</c> body → 200 with an empty body; same session id.</summary>

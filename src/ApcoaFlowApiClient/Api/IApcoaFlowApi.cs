@@ -74,6 +74,10 @@ public interface IApcoaFlowApi
     Task<StartParkingResponse> StartParkingAsync([Body] StartParkingRequest request,
         [Header("idempotency-key")] string idempotencyKey, CancellationToken ct = default);
 
+    /// <summary>The state of an asynchronous start (a paid pre-pay start answers with a <c>pendingId</c>).</summary>
+    [Get("/api/v1/sessions/pending/{pendingId}")]
+    Task<PendingStartStatus> GetPendingStartAsync(string pendingId, CancellationToken ct = default);
+
     /// <summary>Extend → 200, empty body. Error: <c>400 ParkingSessionInvalidArgument</c> on a stopped session.</summary>
     [Post("/api/v1/sessions/updateParkingDuration")]
     Task UpdateParkingDurationAsync([Body] UpdateParkingDurationRequest request, CancellationToken ct = default);

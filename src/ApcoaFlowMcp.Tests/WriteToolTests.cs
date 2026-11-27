@@ -72,7 +72,7 @@ public class WriteToolTests
         await Assert.That(normal).Contains("more than this server's limit of 100.00 PLN");
         await NoStart(api);
 
-        var expensive = await FakeApi.Tools(api).StartExpensiveSessionAsync(ParkingId, ParkingName, "ABC12345", 60, confirmedCostPln: 150m);
+        var expensive = await FakeApi.Tools(ForStarts(_ => 150m)).StartExpensiveSessionAsync(ParkingId, ParkingName, "ABC12345", 60, confirmedCostPln: 150m);
         await Assert.That(expensive).StartsWith("Started:");
     }
 
@@ -131,16 +131,62 @@ public class WriteToolTests
     }
 
     [Test]
-    public async Task A_start_that_needs_a_payment_action_is_ended_at_once()
+    public async Task A_start_that_needs_a_payment_action_ends_whatever_began()
     {
         var api = ForStarts(_ => 5m);
         api.StartParkingAsync(Arg.Any<StartParkingRequest>(), Arg.Any<string>(), Arg.Any<CancellationToken>())
-            .Returns(new StartParkingResponse { Id = "pending-1", PendingId = "p", ClientSecret = "secret" });
+            .Returns(new StartParkingResponse { ClientSecret = "secret", PendingId = "p" });
 
         var text = await FakeApi.Tools(api).StartSessionAsync(ParkingId, ParkingName, "ABC12345", 60, confirmedCostPln: 5m);
 
         await Assert.That(text).Contains("needs a confirmation step");
-        await api.Received(1).StopParkingAsync("pending-1", Arg.Any<CancellationToken>());
+        await Assert.That(text).Contains("(new-session) was ended at once");
+        await api.Received(1).StopParkingAsync("new-session", Arg.Any<CancellationToken>());
+    }
+
+    [Test]
+    public async Task A_pending_paid_start_is_followed_until_it_completes()
+    {
+        // A paid pre-pay start answers {id: null, pendingId} and starts asynchronously (2026-11-27).
+        var api = ForStarts(_ => 1m);
+        api.StartParkingAsync(Arg.Any<StartParkingRequest>(), Arg.Any<string>(), Arg.Any<CancellationToken>())
+            .Returns(new StartParkingResponse { PendingId = "pend-1" });
+        api.GetPendingStartAsync("pend-1", Arg.Any<CancellationToken>())
+            .Returns(new PendingStartStatus { Status = "completed", SessionId = "new-session" });
+
+        var text = await FakeApi.Tools(api).StartSessionAsync(ParkingId, ParkingName, "ABC12345", 15, confirmedCostPln: 1m);
+
+        await Assert.That(text).StartsWith("Started: [new-session]");
+        await Assert.That(text).Contains("1.00 PLN, charged at start");
+        await api.DidNotReceive().StopParkingAsync(Arg.Any<string>(), Arg.Any<CancellationToken>());
+    }
+
+    [Test]
+    public async Task A_failed_pending_start_says_nothing_is_running()
+    {
+        var api = ForStarts(_ => 1m);
+        api.GetSessionsAsync(Arg.Any<CancellationToken>()).Returns([]);
+        api.StartParkingAsync(Arg.Any<StartParkingRequest>(), Arg.Any<string>(), Arg.Any<CancellationToken>())
+            .Returns(new StartParkingResponse { PendingId = "pend-1" });
+        api.GetPendingStartAsync("pend-1", Arg.Any<CancellationToken>())
+            .Returns(new PendingStartStatus { Status = "failed", FailureReason = "card declined" });
+
+        var text = await FakeApi.Tools(api).StartSessionAsync(ParkingId, ParkingName, "ABC12345", 15, confirmedCostPln: 1m);
+
+        await Assert.That(text).Contains("didn't start the session");
+        await Assert.That(text).Contains("card declined");
+        await Assert.That(text).Contains("Nothing is running.");
+    }
+
+    [Test]
+    public async Task A_start_answer_without_a_running_session_is_never_reported_as_started()
+    {
+        var api = ForStarts(_ => 0m);
+        api.GetSessionsAsync(Arg.Any<CancellationToken>()).Returns([]);
+
+        var text = await FakeApi.Tools(api).StartFreeSessionAsync(ParkingId, ParkingName, "ABC12345", 15);
+
+        await Assert.That(text).Contains("isn't running yet");
     }
 
     [Test]

@@ -111,26 +111,61 @@ public sealed class Sessions(IApcoaFlowApi api, Pricing pricing, TimeProvider ti
             StartDate = start, EndDate = start.AddMinutes(duration.Value),
         }, Guid.NewGuid().ToString(), ct);
 
+        var sessionId = started.Id;
+        string? failure = null;
         if (started.NeedsPaymentAction)
+            failure = "payment_action_required";
+        else if (started.IsPending)
         {
-            logger.LogWarning("start at {Space} needed a payment action (pendingId {Pending}, clientSecret {HasSecret}); ending it.",
-                space.Id, started.PendingId, started.ClientSecret is not null);
-            if (started.Id is { } toEnd)
-            {
-                try { await api.StopParkingAsync(toEnd, ct); }
-                catch (ApiException ex) { logger.LogWarning(ex, "could not end session {Id} after a payment action was needed", toEnd); }
-            }
-            return Refused("payment_action_required",
-                $"The card payment at {space.Name} needs a confirmation step (e.g. 3-D Secure) that this server can't do, " +
-                "so the session was not started (anything begun was ended at once). Try another parking, or start it in the APCOA Flow app.");
+            var pending = await WaitForPendingAsync(started.PendingId!, ct);
+            if (pending?.IsCompleted == true) sessionId = pending.SessionId;
+            else if (pending?.IsFailed == true) failure = $"failed: {pending.FailureReason ?? pending.Status}";
+            else failure = "still_pending";
         }
 
-        var session = (await api.GetSessionsAsync(ct)).FirstOrDefault(s => s.Id == started.Id);
-        ApcoaTelemetry.Tag(ApcoaTelemetry.Tags.SessionId, started.Id);
+        // Whatever the answer said, the running list is the truth: never report "not started" while one runs.
+        var runningNow = (await api.GetSessionsAsync(ct)).FirstOrDefault(s =>
+            (sessionId is not null && s.Id == sessionId) ||
+            (Plates.Normalize(s.Vehicle?.LicensePlate) == Plates.Normalize(vehicle.LicensePlate) && s.Space?.Id == space.Id));
+
+        if (failure == "payment_action_required")
+        {
+            logger.LogWarning("start at {Space} needs an interactive payment step; ending anything that started.", space.Id);
+            if (runningNow is not null)
+                await api.StopParkingAsync(runningNow.Id, ct);
+            return Refused("payment_action_required",
+                $"The card payment at {space.Name} needs a confirmation step (e.g. 3-D Secure) that this server can't do. " +
+                (runningNow is null ? "Nothing was started." : $"The session that began ({runningNow.Id}) was ended at once.") +
+                " Try another parking, or start it in the APCOA Flow app.");
+        }
+        if (runningNow is null)
+        {
+            logger.LogWarning("start at {Space} didn't produce a running session ({Failure}, pendingId {Pending}).", space.Id, failure, started.PendingId);
+            return Refused(failure is null or "still_pending" ? "start_unconfirmed" : "start_failed",
+                failure is null or "still_pending"
+                    ? $"APCOA accepted the start at {space.Name} but the session isn't running yet. Check get_active_sessions in a moment before trying again."
+                    : $"APCOA didn't start the session at {space.Name} ({failure}). Nothing is running.");
+        }
+
+        ApcoaTelemetry.Tag(ApcoaTelemetry.Tags.SessionId, runningNow.Id);
         var what = cost.IsZero ? "free" : $"{cost}, {(quote.PrepaymentMode == "autoCharge" ? "charged at start" : "charged at the end")}";
-        return new SessionResult(
-            $"Started: {(session is null ? $"[{started.Id}] {space.Name} - {vehicle.LicensePlate}" : Describe(session))} ({what}).",
-            "started", SessionId: started.Id, CostPln: cost.Amount, DurationMinutes: duration);
+        return new SessionResult($"Started: {Describe(runningNow)} ({what}).", "started",
+            SessionId: runningNow.Id, CostPln: cost.Amount, DurationMinutes: duration);
+    }
+
+    /// <summary>Polls an asynchronous start for up to ~30 s; null if it never settled.</summary>
+    private async Task<PendingStartStatus?> WaitForPendingAsync(string pendingId, CancellationToken ct)
+    {
+        PendingStartStatus? last = null;
+        for (var attempt = 0; attempt < 15; attempt++)
+        {
+            if (attempt > 0) await Task.Delay(TimeSpan.FromSeconds(2), time, ct);
+            last = await api.GetPendingStartAsync(pendingId, ct);
+            if (last.IsCompleted || last.IsFailed)
+                return last;
+        }
+        logger.LogWarning("pending start {Pending} didn't settle (last status {Status})", pendingId, last?.Status);
+        return last;
     }
 
     public async Task<SessionResult> ExtendAsync(string sessionId, int minutes, decimal? confirmedCostPln, decimal maxCostPln, CancellationToken ct)
