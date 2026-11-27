@@ -38,10 +38,10 @@ path at the end — read the `.http` files there to analyse the issue.
   clear when the API last behaved that way. All read-only so far: `login` (password + refresh grants, e-mail and phone),
   `account` (profile, vehicles, payment methods, sessions, history), `find-spaces` (search, bounding box, space
   details, polygons).
-- **When the web app knows a flow we haven't seen**, drive it in the MCP Chrome (log in with
-  `~/GitPersonal/apcoa-nucleus-recon/tools/web/chrome/login-inject.sh`, see that repo's `docs/web-capture.md`),
-  capture the calls, then write a sandbox scenario that replays them through the client. The scenario is what we
-  keep.
+- **When the web app knows a flow we haven't seen**, drive it in the Chrome DevTools MCP: sign in with
+  `tools/chrome/login-inject.sh` (manual sign-in there fails on the bot check; the script's header has the steps),
+  turn on `guard.js` (blocks writes), capture the calls, then write a sandbox scenario that replays them through
+  the client. The scenario is what we keep.
 - The dump handler is attached as the innermost handler on both the BFF and the auth-server clients via the
   optional `configureClient` hook on `AddApcoaFlowApiClient`, so it captures each physical send — including logins,
   refreshes and the auth handler's retry after a refused token.
