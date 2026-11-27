@@ -376,4 +376,6 @@ CI against the latest release, and an issue is opened (or updated) when they fai
 - make one wrong-password login per run.
 
 Pull requests run only the unit + offline tests — including the whole OAuth sign-in flow against an in-memory
-server with a mocked APCOA (`OAuthFlowTests`).
+server with a mocked APCOA (`OAuthFlowTests`) — plus `tools/inspector-check.sh` in its offline mode: the official MCP
+Inspector against the real host (`tools/list --strict`, the expected tools, prompts and titles; Inspector version
+pinned in the workflow).

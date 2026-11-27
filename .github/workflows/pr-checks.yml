@@ -29,3 +29,25 @@ jobs:
 
       - name: Tests (excluding LiveApi)
         run: dotnet test --solution src/ApcoaFlowMcp.slnx -c Release --no-build --treenode-filter '/**[Category!=LiveApi]'
+
+  inspector-check:
+    name: MCP Inspector check (offline)
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v7
+
+      - uses: actions/setup-dotnet@v6
+        with:
+          dotnet-version: '10.0.x'
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+
+      # The server as a client sees it: tools/list --strict (schema portability), the expected tools, prompts and
+      # titles. Offline: fake APCOA credentials, no APCOA call, no secrets. Bump the pin deliberately.
+      - name: Inspector check
+        env:
+          INSPECTOR_VERSION: '2.17.0'
+        run: tools/inspector-check.sh

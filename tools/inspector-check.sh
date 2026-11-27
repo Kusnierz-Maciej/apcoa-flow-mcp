@@ -6,7 +6,7 @@
 #                                        apcoa-flow-api-tests, or env ApcoaFlow__Email / ApcoaFlow__Password)
 #
 # Checks: tools/list --strict is clean (schema portability: exit 0, empty stderr), the expected tool and prompt names,
-# every tool has a title. Starts the HTTP host on a free port with throwaway dev settings and stops it afterwards.
+# every tool has a title. Env INSPECTOR_VERSION pins the Inspector version. Starts the HTTP host on a free port with throwaway dev settings and stops it afterwards.
 # Read-only: never calls a tool that starts, extends or ends a session.
 set -eu
 cd "$(dirname "$0")/.."
@@ -40,7 +40,8 @@ print(base64.b64encode((d["ApcoaFlow:Email"]+":"+d["ApcoaFlow:Password"]).encode
 else
   basic=$(printf 'nobody@example.com:not-used' | base64)
 fi
-I() { npx -y @modelcontextprotocol/inspector --cli "http://127.0.0.1:$port/mcp" --header "X-Api-Key: check-key" --header "Authorization: Basic $basic" "$@"; }
+# INSPECTOR_VERSION pins the Inspector (CI does); unset = latest.
+I() { npx -y "@modelcontextprotocol/inspector${INSPECTOR_VERSION:+@$INSPECTOR_VERSION}" --cli "http://127.0.0.1:$port/mcp" --header "X-Api-Key: check-key" --header "Authorization: Basic $basic" "$@"; }
 
 fail=0
 I --method tools/list --strict >"$work/tools.json" 2>"$work/strict.err" || { echo "FAIL tools/list --strict exited non-zero"; fail=1; }

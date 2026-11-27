@@ -65,8 +65,9 @@ change to tools, prompts, descriptions, parameters or auth.
 
 **Quick check: `tools/inspector-check.sh`** (add `--live` to also call `get_vehicles` with the live tests' account).
 It starts the host on a free port with throwaway dev settings, runs `tools/list --strict` (must be clean) and checks the
-expected tool and prompt names and titles; offline it needs no APCOA account. Update its expected names when tools
-or prompts change. The manual recipe below is for anything else.
+expected tool and prompt names and titles; offline it needs no APCOA account. **PR checks run it offline** (job
+"MCP Inspector check", Inspector pinned with `INSPECTOR_VERSION`), so update its expected names when tools or prompts
+change. The manual recipe below is for anything else.
 
 Start the HTTP host with dev settings (the key and secret are throwaway dev values):
 
