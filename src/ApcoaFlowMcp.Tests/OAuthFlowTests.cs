@@ -196,11 +196,28 @@ public class OAuthFlowTests
 
         await Assert.That(wrong.StatusCode).IsEqualTo(HttpStatusCode.Unauthorized);
         await Assert.That(wrong.Content.Headers.ContentType!.MediaType).IsEqualTo("application/json");
-        await Assert.That(JsonDocument.Parse(body).RootElement.GetProperty("error").GetString()!)
-            .Contains("APCOA rejected these credentials");
+        var json = JsonDocument.Parse(body).RootElement;
+        await Assert.That(json.GetProperty("error").GetString()!).Contains("APCOA rejected these credentials");
+        await Assert.That(json.GetProperty("field").GetString()).IsEqualTo("credentials");
         await Assert.That(body).DoesNotContain("wrong");
         await Assert.That(body).DoesNotContain("key-a");
         await Assert.That(body).DoesNotContain(Email);
+    }
+
+    [Test]
+    public async Task BackgroundSignIn_WrongApiKey_PointsAtTheApiKeyField()
+    {
+        await using var server = Server();
+        var (_, challenge) = NewPkce();
+        var form = SignInForm(challenge, Password);
+        form["api_key"] = "not-a-key";
+
+        var response = await PostFormAsJson(Client(server), form);
+        var json = await Json(response);
+
+        await Assert.That(response.StatusCode).IsEqualTo(HttpStatusCode.Unauthorized);
+        await Assert.That(json.GetProperty("field").GetString()).IsEqualTo("api_key");
+        await Assert.That(json.GetProperty("error").GetString()!).Contains("API key");
     }
 
     [Test]

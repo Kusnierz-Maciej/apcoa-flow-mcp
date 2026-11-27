@@ -116,8 +116,10 @@ public static class OAuthEndpoints
         // sent back. A plain form POST (JavaScript off) gets the HTML form again, with only the email kept.
         var wantsJson = ctx.Request.Headers.Accept.Any(a => a?.Contains("application/json", StringComparison.OrdinalIgnoreCase) == true);
 
-        IResult Fail(string message, int status) => wantsJson
-            ? Results.Json(new Dictionary<string, string> { ["error"] = message }, statusCode: status)
+        // field: which part of the form the error belongs to, so the page shows it under that field —
+        // "api_key", "credentials" (email + password: APCOA doesn't say which is wrong) or none (whole form).
+        IResult Fail(string message, int status, string? field = null) => wantsJson
+            ? Results.Json(new Dictionary<string, string?> { ["error"] = message, ["field"] = field }, statusCode: status)
             : Html(RenderForm(clientId, redirectUri!, state, codeChallenge!, allowlist.RequireApiKey, message, email), status);
 
         if (string.IsNullOrWhiteSpace(redirectUri) || string.IsNullOrWhiteSpace(codeChallenge))
@@ -129,19 +131,19 @@ public static class OAuthEndpoints
         if (!allowlist.IsAllowed(apiKey))
         {
             logger.LogWarning("OAuth authorize denied: API key not in allowlist.");
-            return Fail("Invalid API key.", StatusCodes.Status401Unauthorized);
+            return Fail("This API key isn't valid for this server.", StatusCodes.Status401Unauthorized, "api_key");
         }
 
         // 2. Validate the APCOA credentials by a real login — classify bad-creds vs API error.
         if (string.IsNullOrWhiteSpace(email) || string.IsNullOrWhiteSpace(password))
-            return Fail("APCOA email and password are required.", StatusCodes.Status400BadRequest);
+            return Fail("APCOA email and password are required.", StatusCodes.Status400BadRequest, "credentials");
 
         var outcome = await loginValidator.ValidateAsync(email, password, ct);
         switch (outcome.Kind)
         {
             case LoginOutcomeKind.BadCredentials:
                 logger.LogInformation("OAuth authorize: APCOA credentials rejected.");
-                return Fail("APCOA rejected these credentials. Check your email and password.", StatusCodes.Status401Unauthorized);
+                return Fail("APCOA rejected these credentials. Check your email and password.", StatusCodes.Status401Unauthorized, "credentials");
             case LoginOutcomeKind.ApiError:
                 logger.LogWarning("OAuth authorize: APCOA API error during validation ({Detail}).", outcome.Detail);
                 return Fail("APCOA service is temporarily unavailable. Please try again.", StatusCodes.Status503ServiceUnavailable);
@@ -309,6 +311,7 @@ public static class OAuthEndpoints
                   <button type="button" class="reveal" aria-controls="mcp-api-key" aria-pressed="false"
                           data-what="API key" aria-label="Show API key">Show</button>
                 </div>
+                <p class="field-error" id="mcp-api-key-error" hidden></p>
                 <p class="field-hint">Provided by whoever runs this MCP server (not your APCOA password).</p>
             """
             : "";
@@ -345,7 +348,9 @@ public static class OAuthEndpoints
                             color:var(--brand-text);border-radius:6px}
               button.reveal:hover{background:var(--brand-tint)}
               button.reveal:focus-visible{outline:2px solid var(--brand);outline-offset:1px}
-              .error[hidden]{display:none}
+              .error[hidden],.field-error[hidden]{display:none}
+              .field-error{color:#b42318;font-size:.78rem;font-weight:500;margin:.35rem 0 0}
+              input[aria-invalid=true]{border-color:#d92d20;box-shadow:0 0 0 1px #d92d20}
               .error{background:#fde8e8;color:#9b1c1c;padding:.6rem .75rem;border-radius:8px;font-size:.85rem}
               .field-hint{color:#667085;font-size:.72rem;margin:.3rem 0 0}
               .hint{color:#667085;font-size:.78rem;margin-top:1rem}
@@ -356,6 +361,8 @@ public static class OAuthEndpoints
                 input::placeholder{color:#8b90a0}
                 :root{--brand:#79b52a;--brand-hover:#8cc63f;--brand-text:#9bd157;--brand-tint:rgba(121,181,42,.18)}
                 .error{background:#3a1b1d;color:#f3b4b4}
+                .field-error{color:#f3b4b4}
+                input[aria-invalid=true]{border-color:#f97066;box-shadow:0 0 0 1px #f97066}
                 .field-hint,.hint{color:#9aa0b0}
               }
             </style></head>
@@ -379,6 +386,7 @@ public static class OAuthEndpoints
                   <button type="button" class="reveal" aria-controls="apcoa_password" aria-pressed="false"
                           data-what="password" aria-label="Show password">Show</button>
                 </div>
+                <p class="field-error" id="apcoa_password-error" hidden></p>
             {{apiKeyBlock}}
                 <button id="submit" type="submit">Sign in</button>
               </form>
@@ -394,10 +402,31 @@ public static class OAuthEndpoints
               const form = document.getElementById('login');
               const button = document.getElementById('submit');
               const errorBox = document.getElementById('error');
-              const showError = message => {
-                errorBox.textContent = message;
-                errorBox.hidden = false;
-                errorBox.focus();
+              // Where a server error goes: under a field (with the fields outlined) or, with no field, the box on top.
+              const errorTargets = {
+                api_key: { slot: 'mcp-api-key-error', inputs: ['mcp-api-key'] },
+                credentials: { slot: 'apcoa_password-error', inputs: ['apcoa_email', 'apcoa_password'] },
+              };
+              // Replaces whatever was shown with the result of the latest attempt (null = clear). Errors stay on
+              // screen while a new attempt runs, so re-submitting never makes the layout jump.
+              const showError = (message, field) => {
+                const target = message ? errorTargets[field] : null;
+                errorBox.hidden = !message || !!target;
+                if (message && !target) errorBox.textContent = message;
+                for (const [key, t] of Object.entries(errorTargets)) {
+                  const slot = document.getElementById(t.slot);
+                  const active = target === t;
+                  if (slot) { slot.hidden = !active; slot.textContent = active ? message : ''; }
+                  for (const id of t.inputs) {
+                    const input = document.getElementById(id);
+                    if (!input) continue;
+                    if (active) { input.setAttribute('aria-invalid', 'true'); if (slot) input.setAttribute('aria-describedby', t.slot); }
+                    else { input.removeAttribute('aria-invalid'); input.removeAttribute('aria-describedby'); }
+                  }
+                }
+                if (!message) return;
+                const first = target && document.getElementById(target.inputs[target.inputs.length - 1]);
+                (first || errorBox).focus();
               };
               const fields = form.querySelectorAll('input:not([type=hidden])');
               const reveals = form.querySelectorAll('button.reveal');
@@ -427,8 +456,7 @@ public static class OAuthEndpoints
                 if (button.disabled) return; // swallow double submits
                 reveals.forEach(t => setRevealed(t, false)); // never leave secrets shown as plain text
                 const body = new URLSearchParams(new FormData(form));
-                errorBox.hidden = true;
-                setBusy(true);
+                setBusy(true); // the previous error stays visible until this attempt's answer replaces it
                 try {
                   const response = await fetch(form.action, {
                     method: 'POST', body, cache: 'no-store', credentials: 'same-origin',
@@ -441,9 +469,10 @@ public static class OAuthEndpoints
                     window.location.assign(data.redirect); // hand the code back to the MCP client
                     return; // stay locked while the browser navigates
                   }
-                  showError((data && data.error) || `Sign-in failed (HTTP ${response.status}). Please try again.`);
+                  showError((data && data.error) || `Sign-in failed (HTTP ${response.status}). Please try again.`,
+                            data && data.field);
                 } catch {
-                  showError('Could not reach the server. Check your connection and try again.');
+                  showError('Could not reach the server. Check your connection and try again.', null);
                 }
                 setBusy(false);
               });
