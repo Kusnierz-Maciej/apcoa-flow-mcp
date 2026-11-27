@@ -59,8 +59,8 @@ public sealed class ApcoaFlowAuthHandler(
     }
 
     /// <summary>
-    /// No or invalid token: <c>403 {"code":"Unauthenticated"}</c> (probed 2026-11-27, not 401). 401 is treated the same,
-    /// in case an expired token answers differently (not observed yet).
+    /// No, invalid or expired token: <c>403 {"code":"Unauthenticated"}</c> (not 401; an expired token checked at 65 min,
+    /// 2026-11-27). 401 is treated the same, defensively.
     /// </summary>
     internal static async Task<bool> IsAuthFailureAsync(HttpResponseMessage response, CancellationToken ct)
     {

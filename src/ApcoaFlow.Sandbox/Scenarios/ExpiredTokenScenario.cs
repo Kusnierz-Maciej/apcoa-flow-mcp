@@ -12,6 +12,8 @@ namespace ApcoaFlow.Sandbox.Scenarios;
 /// ~66 minutes: run it in the background.
 /// WHY: the auth handler treats <c>403 Unauthenticated</c> and 401 as "token refused"; this shows which one an
 /// expired token gets, and whether the server allows any clock skew.
+/// FOUND (2026-11-27): fresh 200; at 59.5 min 200; at 65 min <c>403 {"code":"Unauthenticated","message":"An error
+/// has occurred."}</c>, no WWW-Authenticate: the same answer as no token at all.
 /// </summary>
 public sealed class ExpiredTokenScenario : IScenario
 {

@@ -30,8 +30,10 @@ winter). `sessions/startParking` also carries `idempotency-key: <uuid>`.
   access token and a **rotated** refresh token; the old refresh token was still accepted right after. Its lifetime
   is unknown, so the client signs in again whenever a refresh fails.
 - **Access token**: RS256 JWT (`typ at+jwt`), 1 h. The refresh token is encrypted (opaque).
-- **No or invalid token on the API**: `403 {"code":"Unauthenticated","message":"An error has occurred."}` (not 401).
-  What an *expired* token returns hasn't been seen yet; the client treats 401 the same way.
+- **No, invalid or expired token on the API**: `403 {"code":"Unauthenticated","message":"An error has occurred."}`
+  (not 401, no `WWW-Authenticate`). An expired token was checked 2026-11-27 (sandbox `expired-token`): still 200 at
+  59.5 min, this 403 at 65 min. The client renews the token before expiry anyway, and on this 403 renews and retries
+  once; it treats 401 the same, defensively.
 
 ## Errors
 
@@ -207,6 +209,7 @@ Behaviours relied on without a live test, because testing them costs money or ca
 
 | Behaviour | Observed |
 |---|---|
+| An expired access token gets the same `403 Unauthenticated` as no token (needs > 1 h, so not in the nightly run) | 2026-11-27, sandbox `expired-token` |
 | A paid post-pay start with a saved card runs at once, no interactive step | 2026-11-27, Czarny Dunajec, stopped after 19 s |
 | A paid pre-pay start with a saved card is pending, then `completed`; the card is charged at start (PLN 1.00, visa, history `status: paid`, `state: billed`) | 2026-11-27, Markinvest Warszawa al. Wilanowska 363 |
 | A pre-pay session stopped early is **not** refunded (stopped after ~30 s, billed the full PLN 1.00) | 2026-11-27, same session |
