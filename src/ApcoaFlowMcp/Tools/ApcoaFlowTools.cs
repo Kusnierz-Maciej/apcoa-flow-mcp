@@ -286,7 +286,7 @@ public sealed class ApcoaFlowTools(
         ApcoaTelemetry.Tag(ApcoaTelemetry.Tags.LicensePlate, vehicle.LicensePlate);
 
         var parking = await pricing.DetailsWithCurveAsync(parkingId.Trim(), ct);
-        var zone = ParkingTime.Zone(parking.CountryCode);
+        var zone = ParkingTime.Zone(parking.Coordinates);
         DateTimeOffset? end = null;
         if (until is not null)
         {

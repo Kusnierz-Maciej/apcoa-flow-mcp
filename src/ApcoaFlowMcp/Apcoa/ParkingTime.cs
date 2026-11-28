@@ -7,25 +7,24 @@ namespace ApcoaFlowMcp.Apcoa;
 
 /// <summary>
 /// Times are about the parking, so they're read and shown in the parking's time zone, wherever the user is (someone
-/// may start a session for a car on the other side of the world). The API gives times in UTC and no zone, only a
-/// parking's <c>countryCode</c> (<see cref="CountryTimeZones"/>). A parking's country doesn't change, so its zone is
-/// kept in memory, learnt <b>whenever a parking is seen</b>: every details call (<see cref="GetParkingAsync"/>) and
-/// every search result. Sessions carry the parking's id but not its country: <see cref="GetZoneAsync"/> fills a gap
+/// may start a session for a car on the other side of the world). The API gives times in UTC and no zone; the zone
+/// comes from the parking's coordinates (<see cref="ParkingTimeZones"/>, offline). A parking doesn't move, so its zone
+/// is kept in memory, learnt <b>whenever a parking is seen</b>: every details call (<see cref="GetParkingAsync"/>),
+/// search result and map pin. Sessions carry the parking's id but no position: <see cref="GetZoneAsync"/> fills a gap
 /// with one details call.
 /// </summary>
 public static class ParkingTime
 {
     private static readonly ConcurrentDictionary<string, TimeZoneInfo> Known = new();
 
-    /// <summary>The time zone of a parking in <paramref name="countryCode"/> (Warsaw when unknown).</summary>
-    public static TimeZoneInfo Zone(string? countryCode) => CountryTimeZones.For(countryCode);
+    /// <summary>The time zone of a parking at <paramref name="coordinates"/> (Warsaw when unknown).</summary>
+    public static TimeZoneInfo Zone(Coordinates? coordinates) => ParkingTimeZones.For(coordinates);
 
-    /// <summary>Notes the zone of the parking <paramref name="parkingId"/> and returns it.</summary>
-    public static TimeZoneInfo Remember(string? parkingId, string? countryCode)
+    /// <summary>Notes the zone of the parking <paramref name="parkingId"/> at <paramref name="coordinates"/> and returns it.</summary>
+    public static TimeZoneInfo Remember(string? parkingId, Coordinates? coordinates)
     {
-        var zone = Zone(countryCode);
-        if (!string.IsNullOrEmpty(parkingId) && countryCode is not null) Known[parkingId] = zone;
-        return zone;
+        if (string.IsNullOrEmpty(parkingId) || coordinates is null) return Zone(coordinates);
+        return Known.GetOrAdd(parkingId, _ => Zone(coordinates));
     }
 
     /// <summary>
@@ -36,7 +35,7 @@ public static class ParkingTime
         IEnumerable<int>? priceOptions, CancellationToken ct)
     {
         var details = await api.GetSpaceAsync(parkingId, priceOptions, ct);
-        Remember(details.Id ?? parkingId, details.CountryCode);
+        Remember(details.Id ?? parkingId, details.Coordinates);
         return details;
     }
 
@@ -45,7 +44,7 @@ public static class ParkingTime
     {
         if (string.IsNullOrEmpty(parkingId)) return ApcoaFlowEndpoints.AppTimeZone;
         if (Known.TryGetValue(parkingId, out var zone)) return zone;
-        try { return Zone((await api.GetParkingAsync(parkingId, null, ct)).CountryCode); }
+        try { return Zone((await api.GetParkingAsync(parkingId, null, ct)).Coordinates); }
         catch (Exception ex) when (ex is not OperationCanceledException) { return ApcoaFlowEndpoints.AppTimeZone; }
     }
 

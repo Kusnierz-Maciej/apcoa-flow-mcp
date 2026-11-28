@@ -163,31 +163,22 @@ public class FreeOptionsContractTests
     }
 
     [Test]
-    public async Task Every_country_on_the_map_has_a_time_zone()
+    public async Task Every_parking_on_the_map_has_a_time_zone()
     {
         // The map answers every pin in a box (zoom doesn't matter): all of Europe in one call (~5,500 pins, 2026-11-28).
-        // Pins carry no country, so read one parking's details per 2° cell (~80 calls) and check each country it finds
-        // is in CountryTimeZones — times are shown in the parking's zone.
-        var api = LiveApi.Api;
-        var pins = await api.GetSpacesByBoundingBoxAsync(new BoundingBoxQuery
+        // Each pin's zone comes from its coordinates, offline — times are shown in the parking's zone.
+        var pins = await LiveApi.Api.GetSpacesByBoundingBoxAsync(new BoundingBoxQuery
         {
             SwLatitude = 34, SwLongitude = -25, NeLatitude = 72, NeLongitude = 45, Zoom = 3,
         });
-        var samples = pins.Where(p => p.Coordinates is not null)
-            .GroupBy(p => ((int)Math.Floor(p.Coordinates!.Latitude / 2), (int)Math.Floor(p.Coordinates.Longitude / 2)))
-            .Select(g => g.First().Id).ToList();
-        await Assert.That(samples.Count).IsGreaterThan(10).Because("the map should cover many areas");
+        var located = pins.Where(p => p.Coordinates is not null).ToList();
+        await Assert.That(located.Count).IsGreaterThan(1000).Because("the Europe-wide map holds thousands of parkings");
 
-        var countries = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
-        foreach (var id in samples)
-        {
-            try { if ((await api.GetSpaceAsync(id)).CountryCode is { } country) countries.Add(country); }
-            catch (Refit.ApiException ex) when (ex.StatusCode == System.Net.HttpStatusCode.NotFound) { } // pins without a tariff
-        }
+        var zones = located.Select(p => (p.Name, Zone: ParkingTimeZones.At(p.Coordinates!.Latitude, p.Coordinates.Longitude))).ToList();
+        var unresolved = zones.Where(z => z.Zone is null).Select(z => z.Name).Take(10).ToList();
 
-        await Assert.That(countries).Contains("PL");
-        var missing = countries.Where(c => !CountryTimeZones.TryGet(c, out _)).ToList();
-        await Assert.That(missing).IsEmpty().Because($"add these countries to CountryTimeZones (seen: {string.Join(", ", countries.Order())})");
+        await Assert.That(unresolved).IsEmpty().Because("every parking needs a zone this system knows");
+        await Assert.That(zones.Select(z => z.Zone!.Id)).Contains("Europe/Warsaw");
     }
 
     // The price section's rows as money, found by shape (every row a price), not by name.

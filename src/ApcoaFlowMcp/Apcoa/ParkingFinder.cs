@@ -34,6 +34,8 @@ public sealed class ParkingFinder(IApcoaFlowApi api)
         {
             SwLatitude = swLat, SwLongitude = swLon, NeLatitude = neLat, NeLongitude = neLon, Zoom = 16, // zoom changes nothing
         }, ct);
+        foreach (var pin in pins)
+            ParkingTime.Remember(pin.Id, pin.Coordinates);
 
         return pins
             .Select(p => (Pin: p, Distance: Geo.To(lat, lon, p.Coordinates, p.GeoBorder)))
@@ -69,7 +71,7 @@ public sealed class ParkingFinder(IApcoaFlowApi api)
         }
 
         foreach (var s in response.Spaces)
-            ParkingTime.Remember(s.Id, s.CountryCode); // every parking seen: remember its time zone
+            ParkingTime.Remember(s.Id, s.Coordinates); // every parking seen: remember its time zone
         var found = response.Spaces.Take(MaxResults).Select(s =>
         {
             var code = string.IsNullOrWhiteSpace(s.TariffCode) ? null : s.TariffCode;

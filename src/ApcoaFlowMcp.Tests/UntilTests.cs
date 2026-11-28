@@ -116,14 +116,14 @@ public class UntilTests
         // A UK parking: 18:00 there is 18:00 UTC in November, 4 h after the fake clock (not 3 h as in Warsaw).
         var api = Create();
         var london = ReadToolTests.Curve("uk", "London Bridge", [3m]);
-        london.CountryCode = "GB";
+        london.Coordinates = new Coordinates(51.5045, -0.0865);
         api.GetSpaceAsync("uk", Arg.Any<IEnumerable<int>?>(), Arg.Any<CancellationToken>()).Returns(london);
         Quotes(api, _ => 3m);
 
         var text = await FakeApi.Tools(api).GetPriceAsync("uk", LicensePlate, until: "18:00");
 
         await Assert.That(text).Contains("4 h from now (until 18:00 (Europe/London time))");
-        await Assert.That(ParkingTime.Zone("PL").Id).IsEqualTo("Europe/Warsaw");
+        await Assert.That(ParkingTime.Zone(new Coordinates(51.65, 17.84)).Id).IsEqualTo("Europe/Warsaw"); // Ostrów
         await Assert.That(ParkingTime.Zone(null).Id).IsEqualTo("Europe/Warsaw");
     }
 
@@ -132,7 +132,7 @@ public class UntilTests
     {
         // The API gives session times in UTC; a UK parking's session reads in London time (UTC in November).
         var api = Create();
-        var details = new SpaceDetails { Id = "uk-park", Name = "London Bridge", CountryCode = "GB" };
+        var details = new SpaceDetails { Id = "uk-park", Name = "London Bridge", Coordinates = new Coordinates(51.5045, -0.0865) };
         api.GetSpaceAsync("uk-park", Arg.Any<IEnumerable<int>?>(), Arg.Any<CancellationToken>()).Returns(details);
         api.GetSessionsAsync(Arg.Any<CancellationToken>()).Returns([new Session
         {
@@ -151,7 +151,7 @@ public class UntilTests
         var api = Create();
         api.SearchAsync(Arg.Any<SearchQuery>(), Arg.Any<CancellationToken>()).Returns(new SearchResponse
         {
-            Spaces = [new SearchSpace { Id = "dk-park", Name = "Copenhagen Central", CountryCode = "DK" }],
+            Spaces = [new SearchSpace { Id = "dk-park", Name = "Copenhagen Central", Coordinates = new Coordinates(55.6725, 12.5646) }],
         });
         api.GetSessionsAsync(Arg.Any<CancellationToken>()).Returns([new Session
         {

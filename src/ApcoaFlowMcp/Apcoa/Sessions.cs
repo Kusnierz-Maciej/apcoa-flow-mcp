@@ -72,7 +72,7 @@ public sealed class Sessions(IApcoaFlowApi api, Pricing pricing, TimeProvider ti
         if (card.Refusal is { } noMethod)
             return noMethod;
 
-        var zone = ParkingTime.Zone(parking.CountryCode);
+        var zone = ParkingTime.Zone(parking.Coordinates);
         string At(DateTimeOffset utc) => Text.LocalTime(utc, time, zone) + ParkingTime.Suffix(zone);
         DateTimeOffset? end = null;
         if (until is not null)
@@ -271,7 +271,7 @@ public sealed class Sessions(IApcoaFlowApi api, Pricing pricing, TimeProvider ti
             try
             {
                 var details = await Phase("apcoa.parking", () => pricing.DetailsWithCurveAsync(spaceId, ct));
-                zone = ParkingTime.Zone(details.CountryCode);
+                zone = ParkingTime.Zone(details.Coordinates);
                 curve = TariffTable.Read(details);
             }
             catch (Exception ex) when (ex is not OperationCanceledException)

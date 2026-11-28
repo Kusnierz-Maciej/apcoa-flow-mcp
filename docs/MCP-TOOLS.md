@@ -176,8 +176,8 @@ where the car is, wherever the user is; other zones are named, "18:00 (Europe/Lo
 end. Give minutes or `until`, not both. A paid quote then says to call again with the same `until`.
 
 **Times** are the parking's local time. The API gives times in UTC and no zone; a parking's zone comes from its
-`countryCode` (`CountryTimeZones`; a live test checks every country on the map is listed) and is kept in memory
-whenever the server sees that parking (any details call, any search result). A running session whose parking wasn't
+coordinates through an offline time-zone map (GeoTimeZone; a live test checks every parking on the map resolves) and
+is kept in memory whenever the server sees that parking (any details call, search result or map pin). A running session whose parking wasn't
 seen yet costs one details call. Other zones are named ("18:00 (Europe/London time)"). History entries carry only the
 parking's name, so they're shown in Polish time. (The APCOA web app shows times in the browser's own zone.)
 
