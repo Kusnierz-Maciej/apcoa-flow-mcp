@@ -101,6 +101,29 @@ public class WriteToolTests
     }
 
     [Test]
+    public async Task An_extension_runs_to_the_longest_stay_the_tariff_prices_the_same()
+    {
+        // Chorzów-like: 3 PLN the first hour, +4 PLN per started hour, 30 PLN cap from 8 h. A session at 8 h extended by
+        // 1 h costs nothing more, and neither does running to 23 h (the curve's last mark), checked with one quote.
+        var api = ForStarts(_ => 0m);
+        api.GetSpaceAsync(ParkingId, Arg.Any<IEnumerable<int>?>(), Arg.Any<CancellationToken>())
+            .Returns(ReadToolTests.Curve(ParkingId, ParkingName, [3m, 7m, 11m, 15m, 19m, 23m, 27m, 30m]));
+        var end = Now.AddHours(8);
+        Session S(DateTimeOffset until) => new() { Id = "s1", StartDate = Now, EndDate = until, SessionCanBeExtended = true,
+            Space = new SessionSpace { Id = ParkingId, Name = ParkingName }, Vehicle = new SessionVehicle { LicensePlate = "ABC12345" } };
+        api.GetSessionsAsync(Arg.Any<CancellationToken>()).Returns([S(end)], [S(Now.AddHours(23))]);
+        api.GetUpdatedPriceAsync("s1", 3600, Arg.Any<CancellationToken>()).Returns(new PriceQuote { TotalPrice = "PLN 0.00", EndDate = end.AddHours(1) });
+        api.GetUpdatedPriceAsync("s1", 15 * 3600, Arg.Any<CancellationToken>()).Returns(new PriceQuote { TotalPrice = "PLN 0.00", EndDate = Now.AddHours(23) });
+
+        var text = await FakeApi.Tools(api).ExtendSessionAsync("s1", ParkingName, 60);
+
+        await Assert.That(text).StartsWith("Extended:");
+        await Assert.That(text).Contains("it cost the same");
+        await api.Received(1).UpdateParkingDurationAsync(Arg.Is<UpdateParkingDurationRequest>(r => r != null && r.NewEnd == Now.AddHours(23)), Arg.Any<CancellationToken>());
+        await api.DidNotReceive().GetUpdatedPriceAsync("s1", 2 * 3600, Arg.Any<CancellationToken>()); // the full-hour fallback wasn't needed
+    }
+
+    [Test]
     public async Task An_extension_runs_to_the_next_full_hour_when_that_costs_the_same()
     {
         // Session from 14:00 UTC to 14:30; +15 min (to 14:45) costs 0.40 and so does +30 min (to the full hour 15:00).

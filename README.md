@@ -22,7 +22,7 @@ A **parking** is the place; a **session** is parking there.
 | `start_free_session` | Start only if free for the vehicle right now (any free time included); never charges. Defaults to the whole free time. |
 | `start_expensive_session` | `start_session` without the cost limit (its own tool so it can be permissioned separately). |
 | `start_session_here` / `start_free_session_here` | The same at the parking you're at (nearest by outline or pin); lists the candidates when GPS can't tell two apart. |
-| `extend_session` | Make a running session longer (to the next full hour when that costs the same); same price confirmation and limit. |
+| `extend_session` | Make a running session longer (to the longest end at the same price, e.g. up to a day cap); same price confirmation and limit. |
 | `end_session` | End a running session and report the final cost. |
 
 Tools that act on a parking or session id also take the parking's name (`parkingName`). It isn't sent to APCOA — it

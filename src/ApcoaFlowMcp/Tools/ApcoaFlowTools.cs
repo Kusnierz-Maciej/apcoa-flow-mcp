@@ -454,8 +454,8 @@ public sealed class ApcoaFlowTools(
     [McpServerTool(Name = "extend_session", Title = "Extend parking session", ReadOnly = false, Destructive = false, Idempotent = false)]
     [Description("Make a running session longer (session id from get_active_sessions). MAY COST MONEY: free extensions " +
                  "happen at once; a paid one first returns the price, then call again with confirmedCostPln after the " +
-                 "user agrees. Runs to the next full hour of the session when that costs the same (the quote and the result " +
-                 "say so). Charged to the default saved card, up to this server's cost limit.")]
+                 "user agrees. Runs to the longest end at the same price (from the parking's hourly prices, e.g. up to a day " +
+                 "cap; else the next full hour), checked with a quote; the quote and the result say so. Charged to the default saved card, up to this server's cost limit.")]
     public Task<string> ExtendSessionAsync(
         [Description("The session id (from get_active_sessions)")] string sessionId,
         [Description("The session's parking name as get_active_sessions shows it. Shown in the permission prompt; not sent to the API.")] string parkingName,

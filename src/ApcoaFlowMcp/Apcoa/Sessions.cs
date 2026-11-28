@@ -247,8 +247,9 @@ public sealed class Sessions(IApcoaFlowApi api, Pricing pricing, TimeProvider ti
 
     /// <param name="until">Instead of <paramref name="minutes"/>: the new end of the session, in the parking's local time.</param>
     /// <remarks>
-    /// The extension is stretched to the next full hour of the session when that costs the same (most tariffs bill per
-    /// started hour from the session's start), checked with one quote; the quote says so and the result reports it.
+    /// The extension is stretched to the longest end at the same price — guessed from the parking's hourly prices (the
+    /// session's whole length from its start), else the next full hour of the session — and checked with a quote; the
+    /// quote says so and the result reports it.
     /// </remarks>
     public async Task<SessionResult> ExtendAsync(string sessionId, int minutes, decimal? confirmedCostPln, decimal maxCostPln, CancellationToken ct,
         string? until = null)
@@ -259,10 +260,17 @@ public sealed class Sessions(IApcoaFlowApi api, Pricing pricing, TimeProvider ti
         var session = (await Phase("apcoa.running_sessions", () => api.GetSessionsAsync(ct))).FirstOrDefault(s => s.Id == sessionId.Trim());
         if (session is null)
             return Refused("session_not_found", "No running session has that id. Call get_active_sessions for the current ones.");
+        // The parking's details with its hourly prices: its time zone, and the shape of its tariff for the stretch below.
         var zone = ApcoaFlowEndpoints.AppTimeZone;
+        var curve = TariffTable.Curve.None;
         if (session.Space?.Id is { } spaceId)
         {
-            try { zone = ParkingTime.Zone((await Phase("apcoa.parking", () => api.GetSpaceAsync(spaceId, ct: ct))).CountryCode); }
+            try
+            {
+                var details = await Phase("apcoa.parking", () => pricing.DetailsWithCurveAsync(spaceId, ct));
+                zone = ParkingTime.Zone(details.CountryCode);
+                curve = TariffTable.Read(details);
+            }
             catch (Exception ex) when (ex is not OperationCanceledException)
             {
                 logger.LogInformation("no details for {Parking} ({Error}); times in the app's zone", spaceId, ex.Message);
@@ -294,19 +302,28 @@ public sealed class Sessions(IApcoaFlowApi api, Pricing pricing, TimeProvider ti
         var requestedEnd = quote.EndDate ?? (session.EndDate ?? time.GetUtcNow()).AddMinutes(minutes);
         var newEnd = requestedEnd;
 
-        // Same price, longer: the next full hour of the session, when one quote says it costs the same.
+        // Same price, longer: guess from the tariff, then check with a quote (no searching). The session is priced by
+        // its whole length from its start, so read the parking's hourly prices as "a stay of N hours" and take the
+        // longest length that costs the same as the requested one (e.g. up to a day cap); else the next full hour of
+        // the session (per-started-hour tariffs). At most two quotes; the first one that costs the same wins.
         (int Minutes, DateTimeOffset End)? stretch = null;
         try
         {
             if (session.EndDate is { } oldEnd)
             {
-                var hours = Math.Ceiling((requestedEnd - session.StartDate).TotalMinutes / 60 - 1e-9);
-                var candidate = EndTime.MinutesFrom(oldEnd, session.StartDate.AddHours(hours));
-                if (candidate > minutes)
+                var requestedLength = EndTime.MinutesFrom(session.StartDate, requestedEnd);
+                var candidates = new List<int>();
+                if (curve.Marks.FirstOrDefault(m => m.Minutes >= requestedLength) is { Minutes: > 0 } atRequested
+                    && TariffTable.LongestAtPrice(curve.Marks, requestedLength, atRequested.Price) is { } longestLength)
+                    candidates.Add(EndTime.MinutesFrom(oldEnd, session.StartDate.AddMinutes(longestLength)));
+                var hours = Math.Ceiling(requestedLength / 60.0 - 1e-9);
+                candidates.Add(EndTime.MinutesFrom(oldEnd, session.StartDate.AddHours(hours)));
+                foreach (var candidate in candidates.Where(c => c > minutes).Distinct().OrderDescending())
                 {
                     var longer = await Phase("apcoa.same_price", () => api.GetUpdatedPriceAsync(session.Id, candidate * 60, ct));
-                    if (longer.Total.Amount == cost.Amount)
-                        stretch = (candidate, longer.EndDate ?? oldEnd.AddMinutes(candidate));
+                    if (longer.Total.Amount != cost.Amount) continue;
+                    stretch = (candidate, longer.EndDate ?? oldEnd.AddMinutes(candidate));
+                    break;
                 }
             }
         }
