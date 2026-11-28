@@ -10,7 +10,35 @@ Unofficial MCP server for [APCOA Flow](https://www.apcoa.pl/krotkotrwale-parkowa
 > This server (1.x) works with the **current APCOA Flow app and its API**, which APCOA is retiring on
 > **26 December 2026**. It does **not** support the **new APCOA Flow app** (a new API and new accounts), which
 > replaces it ([APCOA announcement](https://www.apcoa.pl/migracja-do-nowej-aplikacji-flow)).
-> Support for the new app is in progress and will ship as 2.0.0.
+> Support for the new app is **already implemented** (2.0.0, branch `nucleus-api-adoption`) and will be released
+> just before 26 December, as soon as all parkings have moved to the new app.
+>
+> **Coming in 2.0.0** (new API, new accounts; some tools are renamed):
+> - **`find_parkings`** (was `find_parking`): APCOA's own search — brand ("Biedronka"), town, street, postcode or
+>   location code — and/or near a position. Nearest first, measured to the **parking's outline** on the map when it has
+>   one ("you are inside it"). Each of the first results gets a **short price summary**: its free time, then the prices
+>   as the app shows them (`Up to 1 hour PLN 3.00 · Up to 2 hours PLN 7.00 · Max day price PLN 30.00`); with a plate, the
+>   free time is checked for that car.
+> - **`get_parking_details`** (new): address, coordinates and outline, how sessions work there (app or plate
+>   recognition), usual and longest stay, the prices as the app shows them plus **hour by hour if you start now**, the
+>   operator's rules, amenities (EV charging, season tickets, pre-booking) and payment.
+> - **`get_price`** (new): the price of a stay for your car without starting anything, free time included, and how
+>   long it can be free.
+> - **End times, not just lengths**: every price, start and extend tool takes `until: "18:00"` (its next occurrence,
+>   in the **parking's local time**).
+> - **Same price, longer stay — automatically**: a free stay runs to the end of its free time; a paid one to the
+>   longest stay at the same price (e.g. the full started hour, or up to a day cap). Checked with a quote first and
+>   announced before you confirm.
+> - **`extend_session`** (new): make a running session longer, by minutes or `until`, with the same price confirmation
+>   and cost limit.
+> - **Free means free for your car**: free tariffs, shops' free time (e.g. Biedronka's 1.5 h), any free period — as
+>   APCOA quotes it. `start_free_session` never charges.
+> - **Starts and stops you can trust**: paid starts wait until APCOA confirms them, and every write reads back the
+>   real state before reporting; `end_session` reports the final cost.
+> - **`get_vehicles`** (was `get_registered_cars`), **`start_session_here` / `start_free_session_here`** (were
+>   `…_current_location`): the parking you're at, by its outline, listing both when two are too close to tell apart by
+>   GPS.
+> - Running sessions shown in the parking's local time; paid stays charged to the account's default saved card.
 
 ## MCP tools
 
