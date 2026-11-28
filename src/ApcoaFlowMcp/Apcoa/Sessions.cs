@@ -34,8 +34,9 @@ public sealed class Sessions(IApcoaFlowApi api, Pricing pricing, TimeProvider ti
     /// <summary>When the user gives no duration and the stay isn't free: the parking's preselected duration, else this.</summary>
     public const int DefaultDurationMinutes = 60;
 
+    /// <param name="until">Instead of <paramref name="durationMinutes"/>: when the stay should end (UTC, in the future).</param>
     public async Task<SessionResult> StartAsync(string parkingId, string licensePlate, int? durationMinutes,
-        decimal? confirmedCostPln, StartMode mode, decimal maxCostPln, CancellationToken ct)
+        decimal? confirmedCostPln, StartMode mode, decimal maxCostPln, CancellationToken ct, DateTimeOffset? until = null)
     {
         var vehicle = Plates.Find(await Phase("apcoa.vehicles", () => api.GetVehiclesAsync(ct)), licensePlate);
         if (vehicle is null)
@@ -63,9 +64,13 @@ public sealed class Sessions(IApcoaFlowApi api, Pricing pricing, TimeProvider ti
         if (card.Refusal is { } noMethod)
             return noMethod;
 
+        if (until is { } end)
+            durationMinutes = EndTime.MinutesFrom(Minute(time.GetUtcNow()), end);
         if (durationMinutes is < 1)
             return Refused("bad_duration", "The duration must be at least 1 minute.");
         var duration = durationMinutes;
+        var untilText = until is { } u ? $" (until {Text.LocalTime(u, time)})" : "";
+        var repeat = until is { } u2 ? $"until=\"{Text.LocalTime(u2, time)}\"" : $"durationMinutes={duration}";
         Pricing.FreeWindow? window = null;
         if (duration is null || mode == StartMode.FreeOnly)
             window = await Phase("apcoa.free_window", () => pricing.FreeWindowAsync(parking, vehicle.Id, ct));
@@ -116,14 +121,14 @@ public sealed class Sessions(IApcoaFlowApi api, Pricing pricing, TimeProvider ti
                 }
                 var amount = cost.Amount.ToString("0.00", CultureInfo.InvariantCulture);
                 return new SessionResult(
-                    $"{Text.Duration(duration.Value)} at {parking.Name} for {vehicle.LicensePlate} costs {cost}, " +
+                    $"{Text.Duration(duration.Value)}{untilText} at {parking.Name} for {vehicle.LicensePlate} costs {cost}, " +
                     $"{(quote.PrepaymentMode == "autoCharge" ? "charged at start" : "charged at the end")} to {card.Method!.Type} {card.Method.Identifier}." +
                     (window is { Minutes: > 0 } w ? $" (Free for up to {Text.Duration(w.Minutes)}.)" : "") +
                     (longest is { } l
                         ? $" For the same {cost} the stay can last up to {Text.Duration(l)} (until about {Text.LocalTime(Minute(time.GetUtcNow()).AddMinutes(l), time)} if started now) — ask the user which they want."
                         : "") +
-                    $" Nothing was started yet: confirm with the user, then call again with durationMinutes={duration}" +
-                    (longest is { } l2 ? $" (or {l2} for the longer stay at the same price)" : "") +
+                    $" Nothing was started yet: confirm with the user, then call again with {repeat}" +
+                    (longest is { } l2 ? $" (or durationMinutes={l2} for the longer stay at the same price)" : "") +
                     $" and confirmedCostPln={amount}.",
                     "quote", CostPln: cost.Amount, DurationMinutes: duration);
             }
@@ -209,14 +214,24 @@ public sealed class Sessions(IApcoaFlowApi api, Pricing pricing, TimeProvider ti
         return last;
     }
 
-    public async Task<SessionResult> ExtendAsync(string sessionId, int minutes, decimal? confirmedCostPln, decimal maxCostPln, CancellationToken ct)
+    /// <param name="until">Instead of <paramref name="minutes"/>: the new end of the session (UTC, in the future).</param>
+    public async Task<SessionResult> ExtendAsync(string sessionId, int minutes, decimal? confirmedCostPln, decimal maxCostPln, CancellationToken ct,
+        DateTimeOffset? until = null)
     {
         ApcoaTelemetry.Tag(ApcoaTelemetry.Tags.SessionId, sessionId);
-        if (minutes < 1)
+        if (until is null && minutes < 1)
             return Refused("bad_duration", "Extend by at least 1 minute.");
         var session = (await Phase("apcoa.running_sessions", () => api.GetSessionsAsync(ct))).FirstOrDefault(s => s.Id == sessionId.Trim());
         if (session is null)
             return Refused("session_not_found", "No running session has that id. Call get_active_sessions for the current ones.");
+        if (until is { } newEndWanted)
+        {
+            if (session.EndDate is not { } currentEnd)
+                return Refused("bad_duration", $"{Describe(session)} has no end time to extend from; give minutes instead.");
+            minutes = EndTime.MinutesFrom(currentEnd, newEndWanted);
+            if (minutes < 1)
+                return Refused("bad_duration", $"{Describe(session)} already runs until {Text.LocalTime(currentEnd, time)}; nothing to extend.");
+        }
         if (!session.SessionCanBeExtended)
             return Refused("not_extendable", $"{Describe(session)} can't be extended.");
 

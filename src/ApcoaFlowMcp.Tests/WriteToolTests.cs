@@ -67,7 +67,7 @@ public class WriteToolTests
         var text = await FakeApi.Tools(api).StartSessionAsync(ParkingId, ParkingName, "ABC12345", 15);
 
         await Assert.That(text).Contains("For the same 0.40 PLN the stay can last up to 1 h (until about 16:00 if started now)");
-        await Assert.That(text).Contains("durationMinutes=15 (or 60 for the longer stay at the same price) and confirmedCostPln=0.40");
+        await Assert.That(text).Contains("durationMinutes=15 (or durationMinutes=60 for the longer stay at the same price) and confirmedCostPln=0.40");
         await NoStart(api);
     }
 
