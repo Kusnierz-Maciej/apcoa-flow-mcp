@@ -15,10 +15,13 @@ public static class Text
     };
 
     /// <summary>Warsaw time; "HH:mm" today, else with the date.</summary>
-    public static string LocalTime(DateTimeOffset utc, TimeProvider time)
+    public static string LocalTime(DateTimeOffset utc, TimeProvider time) => LocalTime(utc, time, ApcoaFlowEndpoints.AppTimeZone);
+
+    /// <summary>The time in <paramref name="zone"/> (a parking's, see <see cref="ParkingTime"/>); "HH:mm" today, else with the date.</summary>
+    public static string LocalTime(DateTimeOffset utc, TimeProvider time, TimeZoneInfo zone)
     {
-        var local = TimeZoneInfo.ConvertTime(utc, ApcoaFlowEndpoints.AppTimeZone);
-        var today = TimeZoneInfo.ConvertTime(time.GetUtcNow(), ApcoaFlowEndpoints.AppTimeZone).Date;
+        var local = TimeZoneInfo.ConvertTime(utc, zone);
+        var today = TimeZoneInfo.ConvertTime(time.GetUtcNow(), zone).Date;
         return local.Date == today
             ? local.ToString("HH:mm", CultureInfo.InvariantCulture)
             : local.ToString("yyyy-MM-dd HH:mm", CultureInfo.InvariantCulture);

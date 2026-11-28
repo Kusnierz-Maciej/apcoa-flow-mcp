@@ -18,11 +18,11 @@ A **parking** is the place; a **session** is parking there.
 | `get_price` | The price of a stay starting now for one of your vehicles (free time included), and how long it can be free. Give a length or an end time (`until`: "18:00"); the start and extend tools take `until` too. |
 | `get_active_sessions` | Running sessions with time left. |
 | `get_session_history` | Recent sessions with cost. |
-| `start_session` | Start a session. **May cost money**: free starts at once; paid returns the price first (and how long the same price would last) and starts on a second call with the exact `confirmedCostPln`. Under a cost limit; paid only with the account's default saved card. |
+| `start_session` | Start a session. **May cost money**: free starts at once; paid returns the price first (a stay always runs to the longest one at the same price, and says so) and starts on a second call with the exact `confirmedCostPln`. Under a cost limit; paid only with the account's default saved card. |
 | `start_free_session` | Start only if free for the vehicle right now (any free time included); never charges. Defaults to the whole free time. |
 | `start_expensive_session` | `start_session` without the cost limit (its own tool so it can be permissioned separately). |
 | `start_session_here` / `start_free_session_here` | The same at the parking you're at (nearest by outline or pin); lists the candidates when GPS can't tell two apart. |
-| `extend_session` | Make a running session longer; same price confirmation and limit. |
+| `extend_session` | Make a running session longer (to the next full hour when that costs the same); same price confirmation and limit. |
 | `end_session` | End a running session and report the final cost. |
 
 Tools that act on a parking or session id also take the parking's name (`parkingName`). It isn't sent to APCOA — it

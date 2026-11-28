@@ -162,17 +162,24 @@ still starts only if that quote is 0.00.
 
 | Tool | Inputs | Does |
 |---|---|---|
-| `start_session` | `parkingId`, `parkingName`, `licensePlate`, `durationMinutes?` or `until?`, `confirmedCostPln?` | Free → starts at once. Paid → the first call returns the price and starts nothing (and, when the parking's tariff table shows a longer stay at the same price — its marks are 1 h, 2 h and a day, e.g. PLN 0.40 per started hour — says how long the same price lasts, checked with one quote, so the user can choose; never stretched by itself); call again with the same `durationMinutes` and the exact `confirmedCostPln` after the user agrees. Refuses above `ApcoaFlow__MaxSessionCostPln` (default 100). Without a duration: the whole free window when free, else the parking's usual duration (60 min if it has none). |
+| `start_session` | `parkingId`, `parkingName`, `licensePlate`, `durationMinutes?` or `until?`, `confirmedCostPln?` | Free → starts at once. Paid → the first call returns the price and starts nothing; call again with the same `durationMinutes` (or `until`) and the exact `confirmedCostPln` after the user agrees. **Same price, longer stay:** when a longer stay costs the same (read off the parking's hourly prices, checked with one quote — e.g. PLN 0.40 per started hour: 15 min → the full hour), the session runs that long; the quote says so ("so the session will run until …") and the result reports it. Refuses above `ApcoaFlow__MaxSessionCostPln` (default 100). Without a duration: the whole free window when free, else the parking's usual duration (60 min if it has none). |
 | `start_free_session` | `parkingId`, `parkingName`, `licensePlate`, `durationMinutes?` or `until?` | Only if free for the whole stay; never charges. Without a duration: the whole free window. |
 | `start_expensive_session` | as `start_session` | `start_session` without the cost limit. |
 | `start_session_here` / `start_free_session_here` | `latitude`, `longitude`, `licensePlate`, `durationMinutes?` or `until?`, (`confirmedCostPln?`), `radiusMeters?` | The same at the nearest parking within the radius (default `ApcoaFlow__CurrentLocationRadiusMeters`, 300 m), measured to its outline when it has one. If the position is inside exactly one outline, that one. If two parkings are within **30 m** of each other in distance (GPS can't tell them apart), nothing starts and both are listed. |
-| `extend_session` | `sessionId`, `parkingName`, `minutes` or `until` (the new end), `confirmedCostPln?` | Quotes the extension; free → extends at once, paid → price first, then with `confirmedCostPln`. The cost limit is for the **whole session**: what it already costs plus the extension. A paid extension answers "awaiting payment" with a pending id, which is followed like a paid start's (a failed payment is reported). Reports "Extended" only once the end has moved past the old one and reached the new one (it waits up to ~20 s; an extension APCOA processes later is reported as accepted, not to be repeated). |
+| `extend_session` | `sessionId`, `parkingName`, `minutes` or `until` (the new end), `confirmedCostPln?` | Quotes the extension (stretched to the next full hour of the session when that costs the same); free → extends at once, paid → price first, then with `confirmedCostPln`. The cost limit is for the **whole session**: what it already costs plus the extension. A paid extension answers "awaiting payment" with a pending id, which is followed like a paid start's (a failed payment is reported). Reports "Extended" only once the end has moved past the old one and reached the new one (it waits up to ~20 s; an extension APCOA processes later is reported as accepted, not to be repeated). |
 | `end_session` | `sessionId`, `parkingName` | Stops the session, then reads the final cost from the history. |
 
-**`until`** — an end time instead of a length, the way people say it ("park until 18:00"): a clock time in Polish
-time, meaning its next occurrence ("8:00" late in the evening is tomorrow morning), or a date and time
+**`until`** — an end time instead of a length, the way people say it ("park until 18:00"): a clock time in the
+**parking's** local time (its country's zone, from `countryCode`; Polish time when unknown — what matters is the time
+where the car is, wherever the user is; other zones are named, "18:00 (Europe/London time)"), meaning its next occurrence ("8:00" late in the evening is tomorrow morning), or a date and time
 ("2026-12-05 18:00"). It becomes the minutes from now (rounded up), or for `extend_session` from the session's current
 end. Give minutes or `until`, not both. A paid quote then says to call again with the same `until`.
+
+**Same price, longer stay** (every mode — minutes, `until`, free and paid starts, extensions): a free stay runs to the
+end of the free window; a paid start to the longest stay at the same price from the parking's hourly prices; an
+extension to the next full hour of the session (from its start). Each is checked with one quote first, announced in the
+quote ("…so the session will run until 16:00") and reported in the result ("It runs until 16:00: 1 h cost the same as
+the 15 min asked for.").
 
 Refusals are normal results (not errors): a parking where sessions can't be started (plate recognition), unknown plate, a running session for that plate (it's named, with its
 id), not free, over the free window, over the cost limit, price changed since the quote, default payment method not

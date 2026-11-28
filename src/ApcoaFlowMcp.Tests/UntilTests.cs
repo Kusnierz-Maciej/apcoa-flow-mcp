@@ -109,4 +109,21 @@ public class UntilTests
         await Assert.That(text).Contains("already runs until 18:00");
         await api.DidNotReceive().GetUpdatedPriceAsync(Arg.Any<string>(), Arg.Any<int>(), Arg.Any<CancellationToken>());
     }
+
+    [Test]
+    public async Task Until_is_read_in_the_parkings_time_zone()
+    {
+        // A UK parking: 18:00 there is 18:00 UTC in November, 4 h after the fake clock (not 3 h as in Warsaw).
+        var api = Create();
+        var london = ReadToolTests.Curve("uk", "London Bridge", [3m]);
+        london.CountryCode = "GB";
+        api.GetSpaceAsync("uk", Arg.Any<IEnumerable<int>?>(), Arg.Any<CancellationToken>()).Returns(london);
+        Quotes(api, _ => 3m);
+
+        var text = await FakeApi.Tools(api).GetPriceAsync("uk", LicensePlate, until: "18:00");
+
+        await Assert.That(text).Contains("4 h from now (until 18:00 (Europe/London time))");
+        await Assert.That(ParkingTime.Zone("PL").Id).IsEqualTo("Europe/Warsaw");
+        await Assert.That(ParkingTime.Zone(null).Id).IsEqualTo("Europe/Warsaw");
+    }
 }

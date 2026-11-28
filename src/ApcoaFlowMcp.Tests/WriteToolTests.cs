@@ -66,9 +66,60 @@ public class WriteToolTests
 
         var text = await FakeApi.Tools(api).StartSessionAsync(ParkingId, ParkingName, "ABC12345", 15);
 
-        await Assert.That(text).Contains("For the same 0.40 PLN the stay can last up to 1 h (until about 16:00 if started now)");
-        await Assert.That(text).Contains("durationMinutes=15 (or durationMinutes=60 for the longer stay at the same price) and confirmedCostPln=0.40");
+        await Assert.That(text).Contains("The same 0.40 PLN covers up to 1 h, so the session will run until about 16:00");
+        await Assert.That(text).Contains("call again with durationMinutes=15 and confirmedCostPln=0.40");
         await NoStart(api);
+    }
+
+    [Test]
+    public async Task A_confirmed_paid_start_runs_to_the_longest_stay_at_the_same_price()
+    {
+        var api = ForStarts(minutes => minutes <= 60 ? 0.40m : minutes <= 120 ? 0.80m : 5m);
+        api.GetSpaceAsync(ParkingId, Arg.Any<IEnumerable<int>?>(), Arg.Any<CancellationToken>()).Returns(ReadToolTests.Curve(ParkingId, ParkingName, [0.40m, 0.80m, 1.20m]));
+
+        var text = await FakeApi.Tools(api).StartSessionAsync(ParkingId, ParkingName, "ABC12345", 15, confirmedCostPln: 0.40m);
+
+        await Assert.That(text).StartsWith("Started:");
+        await Assert.That(text).Contains("It runs until 16:00: 1 h cost the same as the 15 min asked for.");
+        await api.Received(1).StartParkingAsync(Arg.Is<StartParkingRequest>(r => r != null && r.EndDate - r.StartDate == TimeSpan.FromHours(1)),
+            Arg.Any<string>(), Arg.Any<CancellationToken>());
+    }
+
+    [Test]
+    public async Task A_free_start_runs_to_the_end_of_the_free_window()
+    {
+        // A shop's free 1 h 30 min: 30 minutes asked, the whole free time taken.
+        var api = ForStarts(minutes => minutes <= 90 ? 0m : 2m);
+        api.GetSpaceAsync(ParkingId, Arg.Any<IEnumerable<int>?>(), Arg.Any<CancellationToken>())
+            .Returns(ReadToolTests.Curve(ParkingId, ParkingName, [0m, 2m, 6m], hint: 90));
+
+        var text = await FakeApi.Tools(api).StartFreeSessionAsync(ParkingId, ParkingName, "ABC12345", 30);
+
+        await Assert.That(text).Contains("It runs until 16:30: 1 h 30 min cost the same as the 30 min asked for.");
+        await api.Received(1).StartParkingAsync(Arg.Is<StartParkingRequest>(r => r != null && r.EndDate - r.StartDate == TimeSpan.FromMinutes(90)),
+            Arg.Any<string>(), Arg.Any<CancellationToken>());
+    }
+
+    [Test]
+    public async Task An_extension_runs_to_the_next_full_hour_when_that_costs_the_same()
+    {
+        // Session from 14:00 UTC to 14:30; +15 min (to 14:45) costs 0.40 and so does +30 min (to the full hour 15:00).
+        var api = ForStarts(_ => 0m);
+        var end = Now.AddMinutes(30);
+        Session S(DateTimeOffset until) => new() { Id = "s1", StartDate = Now, EndDate = until, SessionCanBeExtended = true,
+            Space = new SessionSpace { Id = ParkingId, Name = ParkingName }, Vehicle = new SessionVehicle { LicensePlate = "ABC12345" } };
+        api.GetSessionsAsync(Arg.Any<CancellationToken>()).Returns([S(end)], [S(end.AddMinutes(30))]);
+        api.GetUpdatedPriceAsync("s1", 900, Arg.Any<CancellationToken>()).Returns(new PriceQuote { TotalPrice = "PLN 0.40", EndDate = end.AddMinutes(15) });
+        api.GetUpdatedPriceAsync("s1", 1800, Arg.Any<CancellationToken>()).Returns(new PriceQuote { TotalPrice = "PLN 0.40", EndDate = end.AddMinutes(30) });
+
+        var quote = await FakeApi.Tools(api).ExtendSessionAsync("s1", ParkingName, 15);
+        await Assert.That(quote).Contains("The same 0.40 PLN covers until 16:00, so it will be extended until then");
+
+        api.GetSessionsAsync(Arg.Any<CancellationToken>()).Returns([S(end)], [S(end.AddMinutes(30))]);
+        var text = await FakeApi.Tools(api).ExtendSessionAsync("s1", ParkingName, 15, confirmedCostPln: 0.40m);
+
+        await Assert.That(text).Contains("Extended until 16:00 instead of 15:45: it cost the same.");
+        await api.Received(1).UpdateParkingDurationAsync(Arg.Is<UpdateParkingDurationRequest>(r => r != null && r.NewEnd == end.AddMinutes(30)), Arg.Any<CancellationToken>());
     }
 
     [Test]

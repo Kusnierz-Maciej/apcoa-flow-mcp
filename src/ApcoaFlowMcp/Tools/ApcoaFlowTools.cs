@@ -267,14 +267,12 @@ public sealed class ApcoaFlowTools(
     {
         using var _ = logger.BeginScope("{Tool}", "get_price");
         ApcoaTelemetry.Tag(ApcoaTelemetry.Tags.ParkingId, parkingId);
-        if (Until(durationMinutes, until, required: true) is { Error: { } untilError })
+        if (Until(durationMinutes, until, required: true) is { } pairError)
         {
-            ApcoaTelemetry.Fail("bad_duration", untilError);
-            return untilError;
+            ApcoaTelemetry.Fail("bad_duration", pairError);
+            return pairError;
         }
-        DateTimeOffset? end = until is null ? null : Until(null, until).End;
-        int minutes = end is { } e ? EndTime.MinutesFrom(MinuteNow(), e) : durationMinutes!.Value;
-        if (minutes < 1)
+        if (durationMinutes is < 1)
         {
             ApcoaTelemetry.Fail("bad_duration", "duration < 1 min");
             return "The duration must be at least 1 minute.";
@@ -288,11 +286,23 @@ public sealed class ApcoaFlowTools(
         ApcoaTelemetry.Tag(ApcoaTelemetry.Tags.LicensePlate, vehicle.LicensePlate);
 
         var parking = await pricing.DetailsWithCurveAsync(parkingId.Trim(), ct);
+        var zone = ParkingTime.Zone(parking.CountryCode);
+        DateTimeOffset? end = null;
+        if (until is not null)
+        {
+            if (!EndTime.TryParse(until, time, zone, out var parsed, out var untilError))
+            {
+                ApcoaTelemetry.Fail("bad_duration", untilError);
+                return untilError;
+            }
+            end = parsed;
+        }
+        var minutes = end is { } e ? EndTime.MinutesFrom(MinuteNow(), e) : durationMinutes!.Value;
         var quote = await pricing.QuoteAsync(parking.Id, vehicle.Id, minutes, ct);
         var total = quote.Total;
         ApcoaTelemetry.Tag(ApcoaTelemetry.Tags.CostPln, (double)total.Amount);
 
-        var untilText = end is { } shown ? $" (until {Text.LocalTime(shown, time)})" : "";
+        var untilText = end is { } shown ? $" (until {Text.LocalTime(shown, time, zone)}{ParkingTime.Suffix(zone)})" : "";
         var sb = new StringBuilder($"{parking.Name}, {vehicle.LicensePlate}, {Text.Duration(minutes)} from now{untilText}: {total}");
         sb.Append(quote.PrepaymentMode == "autoCharge" ? " (charged at start)" : " (charged at the end)");
         sb.AppendLine(".");
@@ -367,7 +377,9 @@ public sealed class ApcoaFlowTools(
     [McpServerTool(Name = "start_session", Title = "Start parking session", ReadOnly = false, Destructive = false, Idempotent = false)]
     [Description("Start parking at a parking (from find_parkings) for one of the account's vehicles. MAY COST MONEY. " +
                  "Free (as APCOA quotes it, free time included) → starts at once. Paid → the first call only returns the " +
-                 "price; after the user agrees, call again with the same durationMinutes and confirmedCostPln. Paid stays " +
+                 "price; after the user agrees, call again with the same durationMinutes (or until) and confirmedCostPln. " +
+                 "A stay always runs to the longest one at the same price (the whole free time; per started hour, the full " +
+                 "hour): the quote and the result say so — tell the user. Paid stays " +
                  "are charged to the account's default saved card, up to this server's cost limit. Always confirm the " +
                  "parking and plate with the user first.")]
     public Task<string> StartSessionAsync(
@@ -442,13 +454,14 @@ public sealed class ApcoaFlowTools(
     [McpServerTool(Name = "extend_session", Title = "Extend parking session", ReadOnly = false, Destructive = false, Idempotent = false)]
     [Description("Make a running session longer (session id from get_active_sessions). MAY COST MONEY: free extensions " +
                  "happen at once; a paid one first returns the price, then call again with confirmedCostPln after the " +
-                 "user agrees. Charged to the default saved card, up to this server's cost limit.")]
+                 "user agrees. Runs to the next full hour of the session when that costs the same (the quote and the result " +
+                 "say so). Charged to the default saved card, up to this server's cost limit.")]
     public Task<string> ExtendSessionAsync(
         [Description("The session id (from get_active_sessions)")] string sessionId,
         [Description("The session's parking name as get_active_sessions shows it. Shown in the permission prompt; not sent to the API.")] string parkingName,
         [Description("How many minutes to add.")] int? minutes = null,
         [Description(ConfirmedCostDescription)] decimal? confirmedCostPln = null,
-        [Description("Instead of minutes: the new end of the session, in Polish time — \"18:00\" (the next 18:00) or \"2026-12-05 18:00\". Give one of the two.")] string? until = null,
+        [Description("Instead of minutes: the new end of the session, in the parking's local time — \"18:00\" (the next 18:00) or \"2026-12-05 18:00\". Give one of the two.")] string? until = null,
         CancellationToken ct = default)
         => RunAsync("extend_session", parkingName, minutes, until, end =>
             sessions.ExtendAsync(sessionId, minutes ?? 0, confirmedCostPln, _options.MaxSessionCostPln, ct, end), confirmedCostPln, untilRequired: true);
@@ -464,22 +477,20 @@ public sealed class ApcoaFlowTools(
 
     /// <summary><see cref="RunAsync(string, string?, Func{Task{SessionResult}}, decimal?)"/> with a duration given as minutes or as an end time.</summary>
     private Task<string> RunAsync(string tool, string? parkingName, int? minutes, string? until,
-        Func<DateTimeOffset?, Task<SessionResult>> body, decimal? confirmedCostPln, bool untilRequired = false)
-        => Until(minutes, until, untilRequired) is { Error: { } error }
+        Func<string?, Task<SessionResult>> body, decimal? confirmedCostPln, bool untilRequired = false)
+        => Until(minutes, until, untilRequired) is { } error
             ? RunAsync(tool, parkingName, () => Task.FromResult(new SessionResult(error, "bad_duration", Error: true)), confirmedCostPln)
-            : RunAsync(tool, parkingName, () => body(Until(minutes, until).End), confirmedCostPln);
+            : RunAsync(tool, parkingName, () => body(string.IsNullOrWhiteSpace(until) ? null : until.Trim()), confirmedCostPln);
 
     /// <summary>
-    /// The end time from <c>until</c>, or an error: both given, an unreadable or past time, or (when
-    /// <paramref name="required"/>) neither given.
+    /// Why the minutes / <c>until</c> pair can't be used (both given, or neither when <paramref name="required"/>); null
+    /// if fine. The time itself is read later, in the parking's time zone.
     /// </summary>
-    private (DateTimeOffset? End, string? Error) Until(int? minutes, string? until, bool required = false)
+    private static string? Until(int? minutes, string? until, bool required = false)
     {
         if (string.IsNullOrWhiteSpace(until))
-            return required && minutes is null ? (null, "Give the length of the stay (minutes) or when it should end (until).") : (null, null);
-        if (minutes is not null)
-            return (null, "Give either the minutes or until, not both.");
-        return EndTime.TryParse(until, time, out var end, out var error) ? (end, null) : (null, error);
+            return required && minutes is null ? "Give the length of the stay (minutes) or when it should end (until)." : null;
+        return minutes is not null ? "Give either the minutes or until, not both." : null;
     }
 
     private DateTimeOffset MinuteNow()

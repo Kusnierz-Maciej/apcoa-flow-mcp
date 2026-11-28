@@ -4,8 +4,8 @@ using ApcoaFlowApiClient;
 namespace ApcoaFlowMcp.Apcoa;
 
 /// <summary>
-/// "Until when" for a stay, the way people say it: a clock time in the app's time zone (Europe/Warsaw), or a full date
-/// and time. A bare clock time means its next occurrence ("until 8:00" at 23:00 is tomorrow morning).
+/// "Until when" for a stay, the way people say it: a clock time in the parking's time zone (<see cref="ParkingTime"/>),
+/// or a full date and time. A bare clock time means its next occurrence ("until 8:00" at 23:00 is tomorrow morning).
 /// </summary>
 public static class EndTime
 {
@@ -15,16 +15,19 @@ public static class EndTime
 
     /// <summary>Description shared by the tools' <c>until</c> parameter.</summary>
     public const string ParameterDescription =
-        "Instead of durationMinutes: when the stay should end, in Polish time — \"18:00\" (the next 18:00, so \"8:00\" late " +
-        "in the evening means tomorrow morning) or a date and time \"2026-12-05 18:00\". Give one of the two, not both.";
+        "Instead of durationMinutes: when the stay should end, in the parking's local time — \"18:00\" (the next 18:00, so " +
+        "\"8:00\" late in the evening means tomorrow morning) or a date and time \"2026-12-05 18:00\". Give one of the two, not both.";
 
     /// <summary>Parses <paramref name="text"/> into a UTC end strictly after now, or says why it can't.</summary>
-    public static bool TryParse(string text, TimeProvider time, out DateTimeOffset endUtc, out string error)
+    public static bool TryParse(string text, TimeProvider time, out DateTimeOffset endUtc, out string error) =>
+        TryParse(text, time, ApcoaFlowEndpoints.AppTimeZone, out endUtc, out error);
+
+    /// <summary>Parses <paramref name="text"/> in <paramref name="zone"/> (the parking's) into a UTC end strictly after now.</summary>
+    public static bool TryParse(string text, TimeProvider time, TimeZoneInfo zone, out DateTimeOffset endUtc, out string error)
     {
         endUtc = default;
         error = "";
         var s = text.Trim();
-        var zone = ApcoaFlowEndpoints.AppTimeZone;
         var now = time.GetUtcNow();
 
         if (TimeOnly.TryParseExact(s, ClockFormats, CultureInfo.InvariantCulture, DateTimeStyles.None, out var clock))
@@ -40,12 +43,12 @@ public static class EndTime
             endUtc = withOffset.ToUniversalTime();
         else
         {
-            error = $"\"{text}\" isn't a time. Use a clock time like \"18:00\" or a date and time like \"2026-12-05 18:00\" (Polish time).";
+            error = $"\"{text}\" isn't a time. Use a clock time like \"18:00\" or a date and time like \"2026-12-05 18:00\" (the parking's local time).";
             return false;
         }
         if (endUtc <= now)
         {
-            error = $"{Text.LocalTime(endUtc, time)} is already past.";
+            error = $"{Text.LocalTime(endUtc, time, zone)} is already past.";
             return false;
         }
         return true;
