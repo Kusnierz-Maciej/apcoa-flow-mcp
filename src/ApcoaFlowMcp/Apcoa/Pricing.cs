@@ -29,9 +29,7 @@ public sealed class Pricing(IApcoaFlowApi api, TimeProvider time)
     /// </summary>
     public async Task<SpaceDetails> DetailsWithCurveAsync(string parkingId, CancellationToken ct)
     {
-        var details = await api.GetSpaceAsync(parkingId, TariffTable.CurveHours, ct);
-        ParkingTime.Remember(details.Id ?? parkingId, details.CountryCode);
-        return details;
+        return await api.GetParkingAsync(parkingId, TariffTable.CurveHours, ct);
     }
 
     /// <summary>

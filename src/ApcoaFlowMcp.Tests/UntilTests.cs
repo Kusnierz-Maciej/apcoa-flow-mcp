@@ -144,4 +144,26 @@ public class UntilTests
 
         await Assert.That(text).Contains("from 14:00 (Europe/London time) until 16:00 (Europe/London time)");
     }
+
+    [Test]
+    public async Task A_parking_seen_in_a_search_needs_no_lookup_for_its_time_zone()
+    {
+        var api = Create();
+        api.SearchAsync(Arg.Any<SearchQuery>(), Arg.Any<CancellationToken>()).Returns(new SearchResponse
+        {
+            Spaces = [new SearchSpace { Id = "dk-park", Name = "Copenhagen Central", CountryCode = "DK" }],
+        });
+        api.GetSessionsAsync(Arg.Any<CancellationToken>()).Returns([new Session
+        {
+            Id = "s1", StartDate = Now, EndDate = Now.AddHours(1), Space = new SessionSpace { Id = "dk-park", Name = "Copenhagen Central" },
+            Vehicle = new SessionVehicle { LicensePlate = LicensePlate },
+        }]);
+
+        await FakeApi.Tools(api).FindParkingsAsync("Copenhagen");
+        api.ClearReceivedCalls();
+        var text = await FakeApi.Tools(api).GetActiveSessionsAsync();
+
+        await Assert.That(text).Contains("from 15:00 (Europe/Copenhagen time) until 16:00 (Europe/Copenhagen time)");
+        await api.DidNotReceive().GetSpaceAsync("dk-park", Arg.Any<IEnumerable<int>?>(), Arg.Any<CancellationToken>());
+    }
 }

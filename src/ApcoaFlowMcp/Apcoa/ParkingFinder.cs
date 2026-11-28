@@ -68,6 +68,8 @@ public sealed class ParkingFinder(IApcoaFlowApi api)
             }, ct)).GroupBy(p => p.Id).ToDictionary(g => g.Key, g => g.First());
         }
 
+        foreach (var s in response.Spaces)
+            ParkingTime.Remember(s.Id, s.CountryCode); // every parking seen: remember its time zone
         var found = response.Spaces.Take(MaxResults).Select(s =>
         {
             var code = string.IsNullOrWhiteSpace(s.TariffCode) ? null : s.TariffCode;

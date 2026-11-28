@@ -342,7 +342,7 @@ public sealed class ApcoaFlowTools(
 
         // The API gives UTC; each session is shown in its parking's local time (the zone looked up once per parking).
         foreach (var spaceId in sessions.Select(s => s.Space?.Id).Distinct())
-            await ParkingTime.OfAsync(api, spaceId, ct);
+            await ParkingTime.GetZoneAsync(api, spaceId, ct);
         var now = time.GetUtcNow();
         var sb = new StringBuilder();
         foreach (var s in sessions)

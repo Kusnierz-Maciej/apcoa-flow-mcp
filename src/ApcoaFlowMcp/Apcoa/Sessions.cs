@@ -52,7 +52,7 @@ public sealed class Sessions(IApcoaFlowApi api, Pricing pricing, TimeProvider ti
             .FirstOrDefault(s => Plates.Normalize(s.Vehicle?.LicensePlate) == Plates.Normalize(vehicle.LicensePlate));
         if (running is not null)
         {
-            await ParkingTime.OfAsync(api, running.Space?.Id, ct); // its times in its parking's local time
+            await ParkingTime.GetZoneAsync(api, running.Space?.Id, ct); // its times in its parking's local time
             return Refused("session_already_active",
                 $"{vehicle.LicensePlate} already has a running session: {Describe(running)}. End it with end_session (or " +
                 "extend it with extend_session) before starting another one.", running.Id);
@@ -450,7 +450,7 @@ public sealed class Sessions(IApcoaFlowApi api, Pricing pricing, TimeProvider ti
         var session = (await Phase("apcoa.running_sessions", () => api.GetSessionsAsync(ct))).FirstOrDefault(s => s.Id == id);
         if (session is null)
             return Refused("session_not_found", "No running session has that id (it may have ended already). Call get_active_sessions for the current ones.");
-        await ParkingTime.OfAsync(api, session.Space?.Id, ct);
+        await ParkingTime.GetZoneAsync(api, session.Space?.Id, ct);
         if (!session.SessionCanBeStopped)
             return Refused("not_stoppable", $"{Describe(session)} can't be stopped early; it ends by itself at its end time.");
 

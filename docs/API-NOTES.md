@@ -206,6 +206,7 @@ Free options, read-only (`FreeOptionsContractTests`):
 | Map pins carry closed outlines | `Map_pins_carry_closed_outlines` |
 | Search `distance` is in kilometres | `Search_distance_is_in_kilometres` |
 | `spaces/{id}?priceOptions=…`: one row per distinct hour asked, in the asked order, each = the dated quote for that stay | `Price_options_rows_come_in_the_asked_order_and_equal_the_quotes` |
+| Every country on the map has a time zone in `CountryTimeZones` (pins carry no country: one details call per 2° cell of the Europe-wide map) | `Every_country_on_the_map_has_a_time_zone` |
 | The display labels still look as expected: "…hour…" for hours 1–2, "…day…" for hour 24 (loose: catches a wording change; nothing is computed from them) | `Price_row_labels_still_read_as_hours_and_a_day` |
 
 One free cycle per run (`SessionContractTests.Free_session_lifecycle`, on Ostrów or a Biedronka with a dated 0.00
