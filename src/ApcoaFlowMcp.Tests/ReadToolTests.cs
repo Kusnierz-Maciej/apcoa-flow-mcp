@@ -130,8 +130,8 @@ public class ReadToolTests
 
         var lines = (await FakeApi.Tools(api).FindParkingsAsync("Biedronka", licensePlate: "abc 12345")).Split('\n');
 
-        await Assert.That(lines[0]).IsEqualTo("[free] Biedronka A - free now for up to 1 h 30 min · 1 h 0.00 / 2 h 2.00 PLN · day max today 2.00 PLN");
-        await Assert.That(lines[1]).IsEqualTo("[paid] Biedronka B - paid now · 1 h 2.00 / 2 h 2.00 PLN · day max today 2.00 PLN");
+        await Assert.That(lines[0]).IsEqualTo("[free] Biedronka A - free now for up to 1 h 30 min · Up to 1 hour PLN 0.00 · Up to 2 hours PLN 2.00 · Max day price PLN 2.00");
+        await Assert.That(lines[1]).IsEqualTo("[paid] Biedronka B - paid now · Up to 1 hour PLN 2.00 · Up to 2 hours PLN 2.00 · Max day price PLN 2.00");
     }
 
     [Test]
@@ -147,8 +147,8 @@ public class ReadToolTests
 
         var lines = (await FakeApi.Tools(api).FindParkingsAsync("x")).Split('\n');
 
-        await Assert.That(lines[0]).IsEqualTo("[bied] Biedronka A - free up to 1 h 30 min (any car) · 1 h 0.00 / 2 h 2.00 PLN · day max today 90.00 PLN");
-        await Assert.That(lines[1]).IsEqualTo("[chorzow] Chorzów - 1 h 3.00 / 2 h 7.00 PLN · day max today 30.00 PLN");
+        await Assert.That(lines[0]).IsEqualTo("[bied] Biedronka A - free up to 1 h 30 min (any car) · Up to 1 hour PLN 0.00 · Up to 2 hours PLN 2.00 · Max day price PLN 90.00");
+        await Assert.That(lines[1]).IsEqualTo("[chorzow] Chorzów - Up to 1 hour PLN 3.00 · Up to 2 hours PLN 7.00 · Max day price PLN 30.00");
         await Assert.That(api.ReceivedCalls().Count(c => c.GetMethodInfo().Name == nameof(IApcoaFlowApi.GetPriceAsync))).IsEqualTo(0)
             .Because("without a vehicle nothing is quoted");
     }
@@ -169,7 +169,7 @@ public class ReadToolTests
         var withPlate = await FakeApi.Tools(api).FindParkingsAsync("Ostrów", licensePlate: "ABC12345");
         var typo = await FakeApi.Tools(api).FindParkingsAsync("Ostrów", licensePlate: "XYZ999");
 
-        await Assert.That(withPlate).IsEqualTo("[ostrow] Targowiska Ostrów - free now for at least 5 h · 1 h 0.00 / 2 h 0.00 PLN · day max today 3.00 PLN");
+        await Assert.That(withPlate).IsEqualTo("[ostrow] Targowiska Ostrów - free now for at least 5 h · Up to 1 hour PLN 0.00 · Up to 2 hours PLN 0.00 · Max day price PLN 3.00");
         await Assert.That(typo).Contains("isn't one of the account's vehicles, so free time wasn't checked");
         await Assert.That(typo).Contains("[ostrow] Targowiska Ostrów");
     }
@@ -257,7 +257,8 @@ public class ReadToolTests
                 SectionName = "Parking",
                 Prices = TariffTable.CurveHours.Where(h => max is null || h * 60 <= max).Select(h => new PriceItem
                 {
-                    Label = $"row {h}",
+                    // Labels as the server writes them; the code shows them but never reads hours from them.
+                    Label = h == 24 ? "Max day price" : h == 1 ? "Up to 1 hour" : $"Up to {h} hours",
                     Price = FormattableString.Invariant($"PLN {(h == 24 ? dayMax ?? hourly[^1] : hourly[Math.Min(h, hourly.Length) - 1]):0.00}"),
                 }).ToList(),
             },
@@ -430,8 +431,10 @@ public class ReadToolTests
             "  Usual stay: 1 h 30 min\n" +
             "  Longest stay: 1 day\n" +
             "Pricing:\n" +
-            "  Price if you start now (any vehicle; get_price checks yours): up to 1 h: 0.00 PLN, 2 h: 2.00 PLN, 3 h–23 h: 6.00 PLN\n" +
-            "  day max today 50.00 PLN (a stay of 24 h or more is priced by get_price)\n" +
+            "  Up to 1 hour: PLN 0.00\n" +
+            "  Up to 2 hours: PLN 2.00\n" +
+            "  Max day price: PLN 50.00\n" +
+            "  Hour by hour if you start now (any vehicle; get_price checks yours): up to 1 h: 0.00 PLN, 2 h: 2.00 PLN, 3 h–23 h: 6.00 PLN\n" +
             "  Rules: 1,5 godziny parkowania za darmo\n" +
             "  Parking fees: Prices include convenience fees\n" +
             "Amenities: EV charging, season tickets\n" +

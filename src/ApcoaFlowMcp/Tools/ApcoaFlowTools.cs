@@ -75,9 +75,10 @@ public sealed class ApcoaFlowTools(
                  "parking's location code) and/or near a position. With a position the nearest come first, measured to " +
                  "the parking's outline when it has one (\"you are inside it\" when the position is in it), else to its pin. " +
                  "Returns one line per parking: \"[parkingId] name - distance - address (code …)\"; the first 5 also get a " +
-                 "short summary: free time, the 1 h / 2 h prices and today's day max (e.g. \"free up to 1 h 30 min (any car) · " +
-                 "1 h 0.00 / 2 h 2.00 PLN · day max today 90.00 PLN\"). With a licensePlate the free time is checked for that " +
-                 "vehicle (\"free now for up to …\" or \"paid now\").")]
+                 "short summary: the free time, then the prices as the APCOA Flow app shows them (e.g. \"free up to 1 h 30 min " +
+                 "(any car) · Up to 1 hour PLN 0.00 · Up to 2 hours PLN 2.00 · Max day price PLN 90.00\"; \"Max day price\" is the " +
+                 "current day's maximum, not the price of a 24 h stay: get_price prices any stay). With a licensePlate the free " +
+                 "time is checked for that vehicle (\"free now for up to …\" or \"paid now\").")]
     public Task<string> FindParkingsAsync(
         [Description("Name or text to search for: brand, town, street, postcode or location code. Optional when a position is given.")] string? query = null,
         [Description("Latitude of the position to search around (decimal degrees). Give it with longitude.")] double? latitude = null,
@@ -169,11 +170,8 @@ public sealed class ApcoaFlowTools(
                 else if (TariffTable.FreeGuess(curve, details.DefaultLengthOfStayInMinutes) is { } free && curve.Marks.Count > 0)
                     parts.Add($"free {(free.Exact ? "up to" : "for at least")} {Text.Duration(free.Minutes)} (any car)");
 
-                var hourly = new[] { 1, 2 }.Select(h => (h, price: curve.At(h))).Where(x => x.price is not null).ToList();
-                if (hourly.Count > 0)
-                    parts.Add(string.Join(" / ", hourly.Select(x => $"{x.h} h {x.price!.Value.Amount.ToString("0.00", CultureInfo.InvariantCulture)}")) + " PLN");
-                if (curve.DayMax is { } dayMax)
-                    parts.Add(DayMaxNote(dayMax));
+                // The rows the APCOA Flow app shows, as the server wrote them.
+                parts.AddRange(curve.Shown.Select(r => $"{r.Label} {r.Price}"));
                 if (parts.Count > 0)
                     notes[p.Id] = string.Join(" · ", parts);
             }
@@ -185,15 +183,13 @@ public sealed class ApcoaFlowTools(
         return notes;
     }
 
-    /// <summary>The "Max day price" row: the current day's maximum (not the price of a 24 h stay).</summary>
-    internal static string DayMaxNote(Money dayMax) => $"day max today {dayMax}";
-
     [McpServerTool(Name = "get_parking_details", Title = "Get parking details", ReadOnly = true, Idempotent = true)]
     [Description("Everything about one parking: name and location code, location (address, coordinates, whether it has " +
                  "an outline on the map), status, how sessions work there (started in the app, or automatically by plate " +
-                 "recognition), the longest and the usual stay, the pricing as the operator writes it (tariff table and " +
-                 "rules), and amenities (EV charging, season tickets, pre-booking, payment). For the price of a specific " +
-                 "stay for your vehicle use get_price.")]
+                 "recognition), the longest and the usual stay, the pricing (the price rows as the APCOA Flow app shows them — " +
+                 "\"Max day price\" is the current day's maximum, not a 24 h stay — the hour-by-hour price of a stay starting " +
+                 "now, and the operator's rules), and amenities (EV charging, season tickets, pre-booking, payment). For the " +
+                 "price of a specific stay for your vehicle use get_price.")]
     public Task<string> GetParkingDetailsAsync(
         [Description("Parking id (from find_parkings)")] string parkingId,
         CancellationToken ct = default)
@@ -232,10 +228,10 @@ public sealed class ApcoaFlowTools(
 
         sb.AppendLine("Pricing:");
         var curve = TariffTable.Read(p);
+        foreach (var row in curve.Shown)
+            sb.AppendLine($"  {row.Label}: {row.Price}"); // as the APCOA Flow app shows them
         if (curve.Marks.Count > 0)
-            sb.AppendLine($"  Price if you start now (any vehicle; get_price checks yours): {Curve(curve.Marks)}");
-        if (curve.DayMax is { } dayMax)
-            sb.AppendLine($"  {DayMaxNote(dayMax)} (a stay of 24 h or more is priced by get_price)");
+            sb.AppendLine($"  Hour by hour if you start now (any vehicle; get_price checks yours): {Curve(curve.Marks)}");
         foreach (var section in p.Prices)
         {
             if (!string.IsNullOrWhiteSpace(section.Description))

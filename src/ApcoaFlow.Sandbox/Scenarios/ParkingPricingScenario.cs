@@ -23,6 +23,7 @@ namespace ApcoaFlow.Sandbox.Scenarios;
 /// for that stay (Chorzów 23/25/30/48 h = 30/34/54/60, the quote for 24 h 1 min = 34). Hour 24 = "Max day price" =
 /// the CURRENT DAY's maximum, not a dated 24 h stay: Ostrów Saturday 19:07 → 5.00 while 23 h, 25 h and the 1440-min
 /// quote are 0.00; Saturday 00:08 local (Friday 23:08 UTC) → 0.00, so the day is probably the UTC day.
+/// RULE (user, 2026-11-28): probe within 24 hours only (priceOptions 1–24); never ask for hundreds of hours again.
 /// FOUND (2026-11-28): prices/lengthOfStayPresets still hangs; prices/preBooking with a quote's query → 400
 /// ValidationError; a quote's startDate/endDate are null and its priceItems are display rows (Cost, Convenience fee).
 /// FOUND (2026-11-28, web app in Chrome, recon docs/captures/0011): details without priceOptions; the duration picker

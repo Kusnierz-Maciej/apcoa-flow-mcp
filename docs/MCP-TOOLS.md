@@ -44,8 +44,9 @@ Find parkings by name or text and/or near a position. Read-only, idempotent.
 - Results are always parkings on the map: a position-less API search returns unmapped duplicates (no coordinates, no
   address), so a name-only query is searched around the middle of Poland.
 - **The first 5 results get a short summary** from the parking's hourly prices (one details call each): the free time
-  (for any car, or checked for the given vehicle), the 1 h / 2 h prices, and `day max today` — the parking's
-  "Max day price", the current day's maximum (not the price of a 24 h stay: `get_price` gives that).
+  (for any car, or checked for the given vehicle), then the price rows exactly as the APCOA Flow app shows them
+  ("Up to 1 hour", "Up to 2 hours", "Max day price" — the server writes these labels; "Max day price" is the current
+  day's maximum, not the price of a 24 h stay: `get_price` gives that).
 
 ```
 [3f6f0269-d77a-4ff6-bc88-8ac41c7b7e3f] SPP Czarny Dunajec - you are inside it - Czarny Dunajec, 34-470 Poland (code 26397)
@@ -54,8 +55,8 @@ Find parkings by name or text and/or near a position. Read-only, idempotent.
 ```
 
 ```
-[c78e0ce2-64af-4592-b01b-4372e341f687] Biedronka Jelenia Góra ul. Sobieskiego 58 - ul. Sobieskiego 58, Jelenia Góra, 58-500 Poland (code 25898) - free up to 1 h 30 min (any car) · 1 h 0.00 / 2 h 2.00 PLN · day max today 90.00 PLN
-[1303023a-d5d8-4174-b0e3-c8e406e33a9b] Chorzów ul. Moniuszki 4 - 18.96 km - ul. Moniuszki 4, Chorzów, 41-500 Poland (code 22919) - 1 h 3.00 / 2 h 7.00 PLN · day max today 30.00 PLN
+[c78e0ce2-64af-4592-b01b-4372e341f687] Biedronka Jelenia Góra ul. Sobieskiego 58 - ul. Sobieskiego 58, Jelenia Góra, 58-500 Poland (code 25898) - free up to 1 h 30 min (any car) · Up to 1 hour PLN 0.00 · Up to 2 hours PLN 2.00 · Max day price PLN 90.00
+[1303023a-d5d8-4174-b0e3-c8e406e33a9b] Chorzów ul. Moniuszki 4 - 18.96 km - ul. Moniuszki 4, Chorzów, 41-500 Poland (code 22919) - Up to 1 hour PLN 3.00 · Up to 2 hours PLN 7.00 · Max day price PLN 30.00
 ```
 
 ## `get_parking_details`
@@ -66,8 +67,9 @@ Everything about one parking. Read-only, idempotent. Input: `parkingId`.
 - **Sessions**: status ("Open", "AutoPay"), whether you start sessions (in this server or the app) or the parking
   recognises plates and starts and ends them by itself, the usual stay (shop parkings: their free window) and the
   longest stay.
-- **Pricing**: what a stay starting now costs, hour by hour for the next day (from the parking's own price curve, the
-  same for every vehicle), and the rules as the operator writes them. For your vehicle (a shop's free time may be used
+- **Pricing**: the price rows exactly as the APCOA Flow app shows them (labels written by the server), what a stay
+  starting now costs hour by hour for the next day (from the parking's own price curve, the same for every vehicle),
+  and the rules as the operator writes them. For your vehicle (a shop's free time may be used
   up), use `get_price`.
 - **Amenities**: EV charging, season tickets, pre-booking, flexi permits, municipal parking; payment (card, Stripe).
 
@@ -81,8 +83,10 @@ Sessions:
   Status: Open
   You start and end a session (start_session / start_free_session, or in the APCOA Flow app).
 Pricing:
-  Price if you start now (any vehicle; get_price checks yours): up to 1 h: 0.00 PLN, 2 h: 1.00 PLN, 3 h–23 h: 2.00 PLN
-  day max today 22.00 PLN (a stay of 24 h or more is priced by get_price)
+  Up to 1 hour: PLN 0.00
+  Up to 2 hours: PLN 1.00
+  Max day price: PLN 22.00
+  Hour by hour if you start now (any vehicle; get_price checks yours): up to 1 h: 0.00 PLN, 2 h: 1.00 PLN, 3 h–23 h: 2.00 PLN
   Rules: Parking dostępny 24h. Płatny: Poniedziałek - Piątek 8:00 - 16:00. Sobota 8:00 - 13:00. 1 PLN za pierwszą rozpoczętą godzinę. …
   Parking fees: Prices include convenience fees
 Amenities: season tickets

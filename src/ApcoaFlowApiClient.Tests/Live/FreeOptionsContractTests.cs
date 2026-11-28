@@ -148,18 +148,18 @@ public class FreeOptionsContractTests
     }
 
     [Test]
-    public async Task Price_options_the_tariff_does_not_sell_are_left_out_at_the_end()
+    public async Task Price_row_labels_still_read_as_hours_and_a_day()
     {
-        // Chorzów ul. Moniuszki 4 (found by its location code; paid, read-only here) sells stays up to 720 h
-        // (2026-11-28). Pricing maps the n rows it gets to the first n hours it asked (ascending).
-        var api = LiveApi.Api;
-        var car = LiveApi.FirstRegisteredCar(await api.GetVehiclesAsync());
-        var parking = (await api.SearchAsync(new SearchQuery { Query = "22919", Latitude = 52.0, Longitude = 19.0, IsParking = true, IsCharging = false })).Spaces.Single();
+        // Loose canary, not a contract the code computes from: the tools show these labels to the user as the server
+        // writes them ("Up to 1 hour", "Up to 2 hours", "Max day price", 2026-11-28). If it fails, the wording changed:
+        // check that find_parkings / get_parking_details still read well.
+        var labels = (await LiveApi.Api.GetSpaceAsync(LiveApi.Ostrow, [1, 2, 24])).Prices
+            .SelectMany(s => s.Prices).Where(i => Money.TryParse(i.Price, out _)).Select(i => i.Label ?? "").ToList();
 
-        var rows = PriceRows(await api.GetSpaceAsync(parking.Id, [1, 720, 721]));
-
-        await Assert.That(rows.Count).IsEqualTo(2);
-        await Assert.That(rows[0].Amount).IsEqualTo((await LiveApi.QuoteAsync(api, parking.Id, car.Id, 60)).Amount);
+        await Assert.That(labels.Count).IsEqualTo(3);
+        await Assert.That(labels[0]).Contains("hour", StringComparison.OrdinalIgnoreCase);
+        await Assert.That(labels[1]).Contains("hour", StringComparison.OrdinalIgnoreCase);
+        await Assert.That(labels[2]).Contains("day", StringComparison.OrdinalIgnoreCase);
     }
 
     // The price section's rows as money, found by shape (every row a price), not by name.

@@ -25,10 +25,19 @@ public static class TariffTable
     /// <summary>A price mark: a stay of up to <see cref="Minutes"/> starting now costs <see cref="Price"/>.</summary>
     public readonly record struct Mark(int Minutes, Money Price);
 
-    /// <summary>The dated marks (hours 1–23, shortest first) and the current day's maximum, when known.</summary>
-    public sealed record Curve(List<Mark> Marks, Money? DayMax)
+    /// <summary>A row as the server writes it, label and price untouched (e.g. "Up to 2 hours", "PLN 7.00").</summary>
+    public readonly record struct Row(string Label, string Price);
+
+    /// <summary>The hours whose rows the APCOA Flow app shows on the details screen: 1, 2 and 24 ("Max day price").</summary>
+    private static readonly int[] ShownHours = [1, 2, DayMaxHour];
+
+    /// <summary>
+    /// The dated marks (hours 1–23, shortest first), the current day's maximum when known, and the rows the app shows
+    /// (hours 1, 2, 24) exactly as the server wrote them — to show to the user as-is, never to compute from.
+    /// </summary>
+    public sealed record Curve(List<Mark> Marks, Money? DayMax, List<Row> Shown)
     {
-        public static readonly Curve None = new([], null);
+        public static readonly Curve None = new([], null, []);
 
         /// <summary>The price of a stay of up to <paramref name="hours"/> hours starting now, when on the curve.</summary>
         public Money? At(int hours) => Marks.FirstOrDefault(m => m.Minutes == hours * 60) is { Minutes: > 0 } m ? m.Price : null;
@@ -54,13 +63,16 @@ public static class TariffTable
                 continue;
 
             var marks = new List<Mark>();
+            var shown = new List<Row>();
             Money? dayMax = null;
             for (var i = 0; i < prices.Count; i++)
             {
                 if (CurveHours[i] == DayMaxHour) dayMax = prices[i];
                 else marks.Add(new Mark(CurveHours[i] * 60, prices[i]));
+                if (ShownHours.Contains(CurveHours[i]))
+                    shown.Add(new Row(section.Prices[i].Label?.Trim() ?? "", section.Prices[i].Price!.Trim()));
             }
-            return new Curve(marks, dayMax);
+            return new Curve(marks, dayMax, shown);
         }
         return Curve.None;
     }
