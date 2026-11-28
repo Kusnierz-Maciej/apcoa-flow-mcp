@@ -26,6 +26,9 @@ internal static class FakeApi
         [
             new Vehicle { Id = VehicleId, LicensePlate = LicensePlate, Description = VehicleDescription, IsDefault = true },
         ]);
+        // Any parking without its own setup: bare details (no prices), as for a parking without a tariff table.
+        api.GetSpaceAsync(Arg.Any<string>(), Arg.Any<IEnumerable<int>?>(), Arg.Any<CancellationToken>())
+            .Returns(ci => new SpaceDetails { Id = ci.ArgAt<string>(0), Name = ci.ArgAt<string>(0) });
         return api;
     }
 

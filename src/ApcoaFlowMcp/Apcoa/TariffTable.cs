@@ -1,40 +1,68 @@
-using System.Globalization;
-using System.Text.RegularExpressions;
 using ApcoaFlowApiClient.Models;
 
 namespace ApcoaFlowMcp.Apcoa;
 
 /// <summary>
-/// The price marks in a parking's tariff table (<c>spaces/{id}</c> → <c>prices</c>, section "Parking"): "Up to N hours"
-/// rows, the price of a stay of up to N hours starting now. With <see cref="CurveHours"/> as <c>priceOptions</c> the
-/// table has one row per hour — the price curve of the next day (2026-11-28). "Max day price" (the plain table's last
-/// row) is the general day cap, not dated, so it's left out. Not plate-specific: verify a deduction with one quote.
+/// A parking's hourly prices, read from its details asked with <c>priceOptions</c> = <see cref="CurveHours"/>
+/// (2026-11-28, sandbox <c>parking-pricing</c>):
+/// <list type="bullet">
+/// <item>The API answers one row per hour asked, <b>in the asked order</b>; duplicates are merged (we ask distinct hours)
+/// and hours the tariff doesn't sell (the longest) are left out. So a row's hour comes from its <b>position</b>. Row
+/// labels ("Up to 2 hours", "Max day price") are display text and are never read.</item>
+/// <item>Every hour except 24 is the dated price of a stay of up to that many hours starting now (= the quote).</item>
+/// <item>Hour 24 is the "Max day price": the current day's maximum, not a dated 24 h stay (Ostrów on a Saturday evening:
+/// 5.00 while a 24 h stay quotes 0.00). It is kept apart as <see cref="Curve.DayMax"/>.</item>
+/// </list>
+/// The rows are the same for every vehicle, so a deduction from them gets one verifying quote.
 /// </summary>
-public static partial class TariffTable
+public static class TariffTable
 {
-    /// <summary>The hours asked for as <c>priceOptions</c>: the next day, hour by hour.</summary>
+    /// <summary>The hours asked for as <c>priceOptions</c>: 1–23 for the curve, 24 for the day maximum.</summary>
     public static readonly int[] CurveHours = Enumerable.Range(1, 24).ToArray();
+
+    private const int DayMaxHour = 24;
 
     /// <summary>A price mark: a stay of up to <see cref="Minutes"/> starting now costs <see cref="Price"/>.</summary>
     public readonly record struct Mark(int Minutes, Money Price);
 
-    [GeneratedRegex(@"^up to (?<n>\d+)\s*(?<unit>minutes?|mins?|hours?|h|days?)$", RegexOptions.IgnoreCase | RegexOptions.CultureInvariant)]
-    private static partial Regex UpTo();
-
-    /// <summary>The dated marks, shortest first; other rows ("Max day price", notes without a price) are skipped.</summary>
-    public static List<Mark> Marks(SpaceDetails parking)
+    /// <summary>The dated marks (hours 1–23, shortest first) and the current day's maximum, when known.</summary>
+    public sealed record Curve(List<Mark> Marks, Money? DayMax)
     {
-        var marks = new List<Mark>();
-        foreach (var item in parking.Prices.Where(s => s.SectionName is null || s.SectionName.Equals("Parking", StringComparison.OrdinalIgnoreCase))
-                                           .SelectMany(s => s.Prices))
+        public static readonly Curve None = new([], null);
+
+        /// <summary>The price of a stay of up to <paramref name="hours"/> hours starting now, when on the curve.</summary>
+        public Money? At(int hours) => Marks.FirstOrDefault(m => m.Minutes == hours * 60) is { Minutes: > 0 } m ? m.Price : null;
+    }
+
+    /// <summary>
+    /// The curve of <paramref name="parking"/>, fetched with <c>priceOptions</c> = <see cref="CurveHours"/> (ascending).
+    /// The section is found by shape (every row a price). The API leaves out hours its tariff doesn't sell, and those are
+    /// always the longest ones (Chorzów: none beyond 720 h), so the n rows are the first n hours asked. More rows than
+    /// hours asked, or no such section, gives <see cref="Curve.None"/>, and callers fall back to quotes.
+    /// </summary>
+    public static Curve Read(SpaceDetails parking)
+    {
+        foreach (var section in parking.Prices)
         {
-            if (!Money.TryParse(item.Price, out var price) || UpTo().Match(item.Label?.Trim() ?? "") is not { Success: true } m)
+            var prices = new List<Money>();
+            foreach (var item in section.Prices)
+            {
+                if (!Money.TryParse(item.Price, out var price)) break;
+                prices.Add(price);
+            }
+            if (prices.Count == 0 || prices.Count != section.Prices.Count || prices.Count > CurveHours.Length)
                 continue;
-            var n = int.Parse(m.Groups["n"].Value, CultureInfo.InvariantCulture);
-            var unit = m.Groups["unit"].Value.ToLowerInvariant();
-            marks.Add(new Mark(unit.StartsWith("min") ? n : unit.StartsWith('d') ? n * 24 * 60 : n * 60, price));
+
+            var marks = new List<Mark>();
+            Money? dayMax = null;
+            for (var i = 0; i < prices.Count; i++)
+            {
+                if (CurveHours[i] == DayMaxHour) dayMax = prices[i];
+                else marks.Add(new Mark(CurveHours[i] * 60, prices[i]));
+            }
+            return new Curve(marks, dayMax);
         }
-        return marks.OrderBy(m => m.Minutes).DistinctBy(m => m.Minutes).ToList();
+        return Curve.None;
     }
 
     /// <summary>
@@ -62,5 +90,20 @@ public static partial class TariffTable
             lastFree = mark.Minutes;
         }
         return (lastFree, null);
+    }
+
+    /// <summary>
+    /// The best guess for how long a stay starting now is free, from the curve and the parking's preselected duration
+    /// (<c>defaultLengthOfStayInMinutes</c>: shops preselect their free window, e.g. Biedronka 90 min). When the
+    /// preselected duration falls inside the last free hour, it's the exact window. Otherwise the last free hour is a
+    /// lower bound. Without a curve the preselected duration is the guess. Null when nothing suggests free time. Not
+    /// vehicle-specific: verify with a quote.
+    /// </summary>
+    public static (int Minutes, bool Exact)? FreeGuess(Curve curve, int? preselectedMinutes)
+    {
+        var (lastFree, firstPaid) = FreeRun(curve.Marks);
+        if (preselectedMinutes is > 0 and var hint && hint > (lastFree ?? 0) && (firstPaid is null || hint < firstPaid))
+            return (hint, firstPaid is not null); // no curve at all: the preselected stay is still the best guess
+        return lastFree is { } free ? (free, false) : null;
     }
 }

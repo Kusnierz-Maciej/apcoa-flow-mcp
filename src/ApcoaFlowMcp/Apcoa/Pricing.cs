@@ -37,7 +37,7 @@ public sealed class Pricing(IApcoaFlowApi api, TimeProvider time)
     /// </summary>
     public async Task<int?> LongestAtSamePriceAsync(SpaceDetails parking, string vehicleId, int minutes, Money price, CancellationToken ct)
     {
-        if (TariffTable.LongestAtPrice(TariffTable.Marks(parking), minutes, price) is not { } candidate) return null;
+        if (TariffTable.LongestAtPrice(TariffTable.Read(parking).Marks, minutes, price) is not { } candidate) return null;
         if (parking.MaxDuration is > 0 && candidate > parking.MaxDuration) candidate = parking.MaxDuration.Value;
         if (candidate <= minutes) return null;
         return (await QuoteAsync(parking.Id, vehicleId, candidate, ct)).Total.Amount == price.Amount ? candidate : null;
@@ -55,16 +55,9 @@ public sealed class Pricing(IApcoaFlowApi api, TimeProvider time)
         async Task<bool> Free(int minutes) => (await QuoteAsync(parking.Id, vehicleId, minutes, ct)).Total.IsZero;
         int Capped(int m) => parking.MaxDuration is > 0 && m > parking.MaxDuration ? parking.MaxDuration.Value : m;
 
-        var (lastFree, firstPaid) = TariffTable.FreeRun(TariffTable.Marks(parking));
-        var hint = parking.DefaultLengthOfStayInMinutes;
-        int? candidate = null;
-        var exact = false;
-        if (hint is > 0 && hint > (lastFree ?? 0) && (firstPaid is null || hint < firstPaid))
-        {
-            candidate = hint; exact = firstPaid is not null; // the parking's own free window, inside the last free hour
-        }
-        else if (lastFree is { } free)
-            candidate = free;
+        var guess = TariffTable.FreeGuess(TariffTable.Read(parking), parking.DefaultLengthOfStayInMinutes);
+        int? candidate = guess?.Minutes;
+        var exact = guess?.Exact ?? false;
 
         if (candidate is { } c && await Free(Capped(c)))
             return new FreeWindow(Capped(c), AtLeast: !exact);

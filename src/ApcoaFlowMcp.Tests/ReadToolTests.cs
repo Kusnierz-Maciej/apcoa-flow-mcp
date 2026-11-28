@@ -130,8 +130,27 @@ public class ReadToolTests
 
         var lines = (await FakeApi.Tools(api).FindParkingsAsync("Biedronka", licensePlate: "abc 12345")).Split('\n');
 
-        await Assert.That(lines[0]).IsEqualTo("[free] Biedronka A - free now for up to 1 h 30 min");
-        await Assert.That(lines[1]).IsEqualTo("[paid] Biedronka B - paid now");
+        await Assert.That(lines[0]).IsEqualTo("[free] Biedronka A - free now for up to 1 h 30 min · 1 h 0.00 / 2 h 2.00 PLN · day max today 2.00 PLN");
+        await Assert.That(lines[1]).IsEqualTo("[paid] Biedronka B - paid now · 1 h 2.00 / 2 h 2.00 PLN · day max today 2.00 PLN");
+    }
+
+    [Test]
+    public async Task FindParkings_without_a_plate_summarises_free_time_and_prices_for_any_car()
+    {
+        var api = FakeApi.Create();
+        api.SearchAsync(Arg.Any<SearchQuery>(), Arg.Any<CancellationToken>()).Returns(new SearchResponse
+        {
+            Spaces = [new SearchSpace { Id = "bied", Name = "Biedronka A" }, new SearchSpace { Id = "chorzow", Name = "Chorzów" }],
+        });
+        api.GetSpaceAsync("bied", Arg.Any<IEnumerable<int>?>(), Arg.Any<CancellationToken>()).Returns(Curve("bied", "Biedronka A", [0m, 2m, 6m], hint: 90, dayMax: 90m));
+        api.GetSpaceAsync("chorzow", Arg.Any<IEnumerable<int>?>(), Arg.Any<CancellationToken>()).Returns(Curve("chorzow", "Chorzów", [3m, 7m, 11m], dayMax: 30m));
+
+        var lines = (await FakeApi.Tools(api).FindParkingsAsync("x")).Split('\n');
+
+        await Assert.That(lines[0]).IsEqualTo("[bied] Biedronka A - free up to 1 h 30 min (any car) · 1 h 0.00 / 2 h 2.00 PLN · day max today 90.00 PLN");
+        await Assert.That(lines[1]).IsEqualTo("[chorzow] Chorzów - 1 h 3.00 / 2 h 7.00 PLN · day max today 30.00 PLN");
+        await Assert.That(api.ReceivedCalls().Count(c => c.GetMethodInfo().Name == nameof(IApcoaFlowApi.GetPriceAsync))).IsEqualTo(0)
+            .Because("without a vehicle nothing is quoted");
     }
 
     [Test]
@@ -150,7 +169,7 @@ public class ReadToolTests
         var withPlate = await FakeApi.Tools(api).FindParkingsAsync("Ostrów", licensePlate: "ABC12345");
         var typo = await FakeApi.Tools(api).FindParkingsAsync("Ostrów", licensePlate: "XYZ999");
 
-        await Assert.That(withPlate).IsEqualTo("[ostrow] Targowiska Ostrów - free now for at least 5 h");
+        await Assert.That(withPlate).IsEqualTo("[ostrow] Targowiska Ostrów - free now for at least 5 h · 1 h 0.00 / 2 h 0.00 PLN · day max today 3.00 PLN");
         await Assert.That(typo).Contains("isn't one of the account's vehicles, so free time wasn't checked");
         await Assert.That(typo).Contains("[ostrow] Targowiska Ostrów");
     }
@@ -223,15 +242,26 @@ public class ReadToolTests
     }
 
     /// <summary>Details with an hourly price curve, as <c>priceOptions=1…N</c> returns it: hour i+1 costs <paramref name="hourly"/>[i].</summary>
-    internal static SpaceDetails Curve(string id, string name, decimal[] hourly, int? hint = null, int? max = null) => new()
+    /// <summary>
+    /// Details as <c>priceOptions=1…24</c> returns them: one row per hour the API keeps (none beyond <paramref name="max"/>
+    /// minutes), hour i+1 at <paramref name="hourly"/>[i] (the last value repeats up to 23 h), hour 24 = the day maximum.
+    /// Labels are deliberately meaningless: the code maps rows by position.
+    /// </summary>
+    internal static SpaceDetails Curve(string id, string name, decimal[] hourly, int? hint = null, int? max = null, decimal? dayMax = null) => new()
     {
         Id = id, Name = name, DefaultLengthOfStayInMinutes = hint, MaxDuration = max,
         Prices =
         [
-            new SpacePriceSection { SectionName = "Parking", Prices = hourly.Select((price, i) => new PriceItem
+            new SpacePriceSection
             {
-                Label = i == 0 ? "Up to 1 hour" : $"Up to {i + 1} hours", Price = FormattableString.Invariant($"PLN {price:0.00}"),
-            }).ToList() },
+                SectionName = "Parking",
+                Prices = TariffTable.CurveHours.Where(h => max is null || h * 60 <= max).Select(h => new PriceItem
+                {
+                    Label = $"row {h}",
+                    Price = FormattableString.Invariant($"PLN {(h == 24 ? dayMax ?? hourly[^1] : hourly[Math.Min(h, hourly.Length) - 1]):0.00}"),
+                }).ToList(),
+            },
+            new SpacePriceSection { SectionName = "Parking fees", Prices = [new PriceItem { Label = "Prices include convenience fees", Price = "" }] },
         ],
     };
 
@@ -253,53 +283,69 @@ public class ReadToolTests
     [Test]
     public async Task The_tariff_table_reads_as_price_marks()
     {
-        // The plain table's "Max day price" is the general day cap, not dated: left out.
-        var plain = TariffTable.Marks(Tariff("p", 0.40m, 0.80m, 5m));
-        await Assert.That(plain.Select(m => (m.Minutes, m.Price.Amount))).IsEquivalentTo(new[] { (60, 0.40m), (120, 0.80m) },
-            TUnit.Assertions.Enums.CollectionOrdering.Matching);
+        // Rows map to the asked hours by position; hour 24 is the day maximum, kept apart.
+        var read = TariffTable.Read(Curve("p", "p", [3m, 7m, 11m, 15m, 19m, 23m, 27m, 30m], dayMax: 30m));
+        await Assert.That(read.Marks.Count).IsEqualTo(23);
+        await Assert.That(read.At(1)!.Value.Amount).IsEqualTo(3m);
+        await Assert.That(read.At(2)!.Value.Amount).IsEqualTo(7m);
+        await Assert.That(read.At(23)!.Value.Amount).IsEqualTo(30m);
+        await Assert.That(read.DayMax!.Value.Amount).IsEqualTo(30m);
+
+        // Hours the tariff doesn't sell are left out at the end: a 2 h parking has two rows and no day maximum.
+        var shortStay = TariffTable.Read(Curve("p", "p", [1m, 2m], max: 120));
+        await Assert.That(shortStay.Marks.Select(m => m.Minutes)).IsEquivalentTo(new[] { 60, 120 }, TUnit.Assertions.Enums.CollectionOrdering.Matching);
+        await Assert.That(shortStay.DayMax).IsNull();
+
+        // Without priceOptions the API answers hours 1, 2, 24 — read positionally that would be wrong, so callers
+        // always fetch with CurveHours (Pricing.DetailsWithCurveAsync); more rows than hours asked gives no curve.
+        var tooMany = Curve("p", "p", [1m]);
+        tooMany.Prices[0].Prices.Add(new PriceItem { Label = "extra", Price = "PLN 1.00" });
+        await Assert.That(TariffTable.Read(tooMany)).IsEqualTo(TariffTable.Curve.None);
 
         // Przy Ratuszu at night: +0.40 per started hour, then +1.30 from 8:00.
-        var curve = TariffTable.Marks(Curve("p", "p", [0.40m, 0.80m, 1.20m, 4m, 4m, 4m]));
+        var curve = TariffTable.Read(Curve("p", "p", [0.40m, 0.80m, 1.20m, 4m, 4m, 4m])).Marks;
         await Assert.That(TariffTable.LongestAtPrice(curve, 15, Money.Parse("PLN 0.40"))).IsEqualTo(60);
-        await Assert.That(TariffTable.LongestAtPrice(curve, 200, Money.Parse("PLN 4.00"))).IsEqualTo(360);
+        await Assert.That(TariffTable.LongestAtPrice(curve, 200, Money.Parse("PLN 4.00"))).IsEqualTo(23 * 60);
         await Assert.That(TariffTable.LongestAtPrice(curve, 15, Money.Parse("PLN 0.30"))).IsNull();
-        await Assert.That(TariffTable.FreeRun(TariffTable.Marks(Curve("p", "p", [0m, 0m, 0m, 0m, 0m, 3m, 5m])))).IsEqualTo(((int?)300, (int?)360));
+        await Assert.That(TariffTable.FreeRun(TariffTable.Read(Curve("p", "p", [0m, 0m, 0m, 0m, 0m, 3m, 5m])).Marks)).IsEqualTo(((int?)300, (int?)360));
     }
 
     [Test]
-    public async Task Free_window_without_a_hint_comes_from_the_table_verified_with_one_quote()
+    public async Task Free_window_without_a_hint_comes_from_the_curve_verified_with_one_quote()
     {
         var api = FakeApi.Create();
         FakeApi.Quotes(api, minutes => minutes <= 237 ? 0m : 3m); // the real window: 3 h 57 min
 
-        var window = await new Pricing(api, new FakeApi.FixedTime(FakeApi.Now)).FreeWindowAsync(Tariff("p", 0m, 0m, 3m), FakeApi.VehicleId, default);
+        // Free up to 3 h, paid by 4 h: only the lower bound is known, no search inside the last hour.
+        var window = await new Pricing(api, new FakeApi.FixedTime(FakeApi.Now)).FreeWindowAsync(Curve("p", "p", [0m, 0m, 0m, 3m]), FakeApi.VehicleId, default);
 
-        await Assert.That(window).IsEqualTo(new Pricing.FreeWindow(120, AtLeast: true)); // a lower bound, no search
+        await Assert.That(window).IsEqualTo(new Pricing.FreeWindow(180, AtLeast: true));
         var quotes = api.ReceivedCalls().Count(c => c.GetMethodInfo().Name == nameof(IApcoaFlowApi.GetPriceAsync));
-        await Assert.That(quotes).IsLessThanOrEqualTo(3);
+        await Assert.That(quotes).IsEqualTo(1);
     }
 
     [Test]
-    public async Task Free_window_is_at_least_a_day_when_the_table_and_the_quote_say_so()
+    public async Task Free_window_is_at_least_23_h_when_the_curve_and_the_quote_say_so()
     {
         var api = FakeApi.Create();
         FakeApi.Quotes(api, _ => 0m);
 
-        var window = await new Pricing(api, new FakeApi.FixedTime(FakeApi.Now)).FreeWindowAsync(Curve("p", "p", Enumerable.Repeat(0m, 24).ToArray()), FakeApi.VehicleId, default);
+        // Hour 24 is the day maximum, not a dated stay, so the curve ends at 23 h.
+        var window = await new Pricing(api, new FakeApi.FixedTime(FakeApi.Now)).FreeWindowAsync(Curve("p", "p", [0m], dayMax: 5m), FakeApi.VehicleId, default);
 
-        await Assert.That(window).IsEqualTo(new Pricing.FreeWindow(24 * 60, AtLeast: true));
+        await Assert.That(window).IsEqualTo(new Pricing.FreeWindow(23 * 60, AtLeast: true));
     }
 
     [Test]
-    public async Task Free_window_falls_back_to_a_shorter_mark_when_the_quote_disagrees()
+    public async Task Free_window_falls_back_to_free_now_when_the_quote_disagrees()
     {
-        // Ostrów on a Friday night: the table says free all day, but a day crosses Saturday's paid hours.
+        // The curve is the same for every car: this one's free time is shorter (e.g. a shop's free time used up).
         var api = FakeApi.Create();
-        FakeApi.Quotes(api, minutes => minutes <= 500 ? 0m : 5m);
+        FakeApi.Quotes(api, minutes => minutes <= 30 ? 0m : 5m);
 
-        var window = await new Pricing(api, new FakeApi.FixedTime(FakeApi.Now)).FreeWindowAsync(Tariff("p", 0m, 0m, 0m), FakeApi.VehicleId, default);
+        var window = await new Pricing(api, new FakeApi.FixedTime(FakeApi.Now)).FreeWindowAsync(Curve("p", "p", [0m, 0m, 2m]), FakeApi.VehicleId, default);
 
-        await Assert.That(window).IsEqualTo(new Pricing.FreeWindow(120, AtLeast: true));
+        await Assert.That(window).IsEqualTo(new Pricing.FreeWindow(1, AtLeast: true));
     }
 
     [Test]
@@ -358,7 +404,7 @@ public class ReadToolTests
             HasAvailableContracts = true, CanStartCharging = true, AllowedPSPs = ["stripe"],
             Prices =
             [
-                new SpacePriceSection { SectionName = "Parking", Prices = [new PriceItem { Label = "Up to 1 hour", Price = "PLN 0.00" }],
+                new SpacePriceSection { SectionName = "Parking", Prices = Curve("lidl", "", [0m, 2m, 6m], dayMax: 50m).Prices[0].Prices,
                     Description = "1,5 godziny parkowania za darmo" },
                 new SpacePriceSection { SectionName = "Parking fees", Prices = [new PriceItem { Label = "Prices include convenience fees", Price = "" }] },
             ],
@@ -384,7 +430,8 @@ public class ReadToolTests
             "  Usual stay: 1 h 30 min\n" +
             "  Longest stay: 1 day\n" +
             "Pricing:\n" +
-            "  Price if you start now (any vehicle; get_price checks yours): up to 1 h: 0.00 PLN\n" +
+            "  Price if you start now (any vehicle; get_price checks yours): up to 1 h: 0.00 PLN, 2 h: 2.00 PLN, 3 h–23 h: 6.00 PLN\n" +
+            "  day max today 50.00 PLN (a stay of 24 h or more is priced by get_price)\n" +
             "  Rules: 1,5 godziny parkowania za darmo\n" +
             "  Parking fees: Prices include convenience fees\n" +
             "Amenities: EV charging, season tickets\n" +

@@ -18,7 +18,8 @@ namespace ApcoaFlow.Sandbox.Scenarios;
 /// FOUND (2026-11-28, app code): the details screen sends no priceOptions (the API then answers hours 1, 2, 24); only
 /// scan &amp; pay sends 1, 2, 3, 4. Rows are {label, price} written by the server; the app has no tariff model.
 /// FOUND (2026-11-28): rows come back in the asked order ([3,1,2] → 3 h, 1 h, 2 h), duplicates merged ([5,1,5] → 5 h,
-/// 1 h), hours beyond maxDuration dropped (Chorzów 720 → a row, 721 → none). Every hour except 24 = the dated quote
+/// 1 h), hours the tariff doesn't sell left out (Chorzów 720 → a row, 721 → none; Biedronka, same maxDuration, answers
+/// 1000 h — so it's the tariff, not maxDuration). Every hour except 24 = the dated quote
 /// for that stay (Chorzów 23/25/30/48 h = 30/34/54/60, the quote for 24 h 1 min = 34). Hour 24 = "Max day price" =
 /// the CURRENT DAY's maximum, not a dated 24 h stay: Ostrów Saturday 19:07 → 5.00 while 23 h, 25 h and the 1440-min
 /// quote are 0.00; Saturday 00:08 local (Friday 23:08 UTC) → 0.00, so the day is probably the UTC day.

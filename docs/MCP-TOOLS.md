@@ -35,7 +35,7 @@ Find parkings by name or text and/or near a position. Read-only, idempotent.
 | `query` | Name or text: shop brand ("Biedronka" — shop parkings that come with free time), town, street, postcode or the parking's location code. Optional when a position is given. |
 | `latitude`, `longitude` | Position to search around. |
 | `radiusMeters` | Without a query: the radius around the position (default 2000). |
-| `licensePlate` | Optional, one of the account's vehicles: the first 5 results then also say `free now for up to …`, `free now (get_price says for how long)` or `paid now` for it. Slower (~20 s: a few quotes per result under the rate limit). |
+| `licensePlate` | Optional, one of the account's vehicles: the free time in the first 5 summaries is then checked for it with one quote each (`free now for up to …`, `free now for at least …`, `free now (get_price says for how long)` or `paid now`). A bit slower. |
 
 - **With a query** (with or without a position): APCOA's own search, which also matches addresses, towns and location
   codes. With a position the nearest come first (any distance); without one the distance is left out. Hits near the
@@ -43,6 +43,9 @@ Find parkings by name or text and/or near a position. Read-only, idempotent.
 - **Position only**: every parking on the map within the radius, nearest first, by outline or pin.
 - Results are always parkings on the map: a position-less API search returns unmapped duplicates (no coordinates, no
   address), so a name-only query is searched around the middle of Poland.
+- **The first 5 results get a short summary** from the parking's hourly prices (one details call each): the free time
+  (for any car, or checked for the given vehicle), the 1 h / 2 h prices, and `day max today` — the parking's
+  "Max day price", the current day's maximum (not the price of a 24 h stay: `get_price` gives that).
 
 ```
 [3f6f0269-d77a-4ff6-bc88-8ac41c7b7e3f] SPP Czarny Dunajec - you are inside it - Czarny Dunajec, 34-470 Poland (code 26397)
@@ -51,7 +54,8 @@ Find parkings by name or text and/or near a position. Read-only, idempotent.
 ```
 
 ```
-[c78e0ce2-64af-4592-b01b-4372e341f687] Biedronka Jelenia Góra ul. Sobieskiego 58 - ul. Sobieskiego 58, Jelenia Góra, 58-500 Poland (code 25898)
+[c78e0ce2-64af-4592-b01b-4372e341f687] Biedronka Jelenia Góra ul. Sobieskiego 58 - ul. Sobieskiego 58, Jelenia Góra, 58-500 Poland (code 25898) - free up to 1 h 30 min (any car) · 1 h 0.00 / 2 h 2.00 PLN · day max today 90.00 PLN
+[1303023a-d5d8-4174-b0e3-c8e406e33a9b] Chorzów ul. Moniuszki 4 - 18.96 km - ul. Moniuszki 4, Chorzów, 41-500 Poland (code 22919) - 1 h 3.00 / 2 h 7.00 PLN · day max today 30.00 PLN
 ```
 
 ## `get_parking_details`
@@ -78,6 +82,7 @@ Sessions:
   You start and end a session (start_session / start_free_session, or in the APCOA Flow app).
 Pricing:
   Price if you start now (any vehicle; get_price checks yours): up to 1 h: 0.00 PLN, 2 h: 1.00 PLN, 3 h–23 h: 2.00 PLN
+  day max today 22.00 PLN (a stay of 24 h or more is priced by get_price)
   Rules: Parking dostępny 24h. Płatny: Poniedziałek - Piątek 8:00 - 16:00. Sobota 8:00 - 13:00. 1 PLN za pierwszą rozpoczętą godzinę. …
   Parking fees: Prices include convenience fees
 Amenities: season tickets
@@ -141,8 +146,10 @@ starts and extensions work with any default method (its id is sent, as the app d
 
 **Free** means the dated quote for this vehicle is 0.00 — whatever the reason (a free tariff, a shop's free time, a
 one-time free period). The **free window** and the **longest stay at the same price** are read off the parking's
-own price curve (its details with hours 1–24: what a stay of up to N hours starting now costs) and verified with one
-quote for the vehicle — never searched for. The curve has whole hours, so within the last free hour the parking's
+own price curve (its details asked with `priceOptions` 1–24: one row per hour, in that order, each the price of a stay
+of up to N hours starting now; hour 24 is the day maximum and isn't used for durations) and verified with one quote for
+the vehicle — never searched for. Row labels are display text and are never read. A concrete stay (any length, also
+across days) is always priced by a quote, as in the APCOA Flow app. The curve has whole hours, so within the last free hour the parking's
 preselected duration decides (shop parkings: their free window, e.g. Biedronka's 90 min → "free for up to 1 h 30
 min"); without one it says "free for at least N h". If the curve shows no free time for the vehicle, the stay is only
 known to be free right now; a free start without a duration then uses the parking's usual duration (or 60 min) and

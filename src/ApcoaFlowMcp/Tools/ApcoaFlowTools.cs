@@ -74,14 +74,16 @@ public sealed class ApcoaFlowTools(
     [Description("Find APCOA Flow parkings by name or text (shop brand like \"Biedronka\", town, street, postcode or the " +
                  "parking's location code) and/or near a position. With a position the nearest come first, measured to " +
                  "the parking's outline when it has one (\"you are inside it\" when the position is in it), else to its pin. " +
-                 "Returns one line per parking: \"[parkingId] name - distance - address (code …)\"; with a licensePlate the first " +
-                 "results also say \"free now for up to …\" or \"paid now\" for that vehicle.")]
+                 "Returns one line per parking: \"[parkingId] name - distance - address (code …)\"; the first 5 also get a " +
+                 "short summary: free time, the 1 h / 2 h prices and today's day max (e.g. \"free up to 1 h 30 min (any car) · " +
+                 "1 h 0.00 / 2 h 2.00 PLN · day max today 90.00 PLN\"). With a licensePlate the free time is checked for that " +
+                 "vehicle (\"free now for up to …\" or \"paid now\").")]
     public Task<string> FindParkingsAsync(
         [Description("Name or text to search for: brand, town, street, postcode or location code. Optional when a position is given.")] string? query = null,
         [Description("Latitude of the position to search around (decimal degrees). Give it with longitude.")] double? latitude = null,
         [Description("Longitude of the position to search around (decimal degrees).")] double? longitude = null,
         [Description("Without a query: the radius in metres around the position (default 2000). With a query the nearest matches anywhere are listed.")] double? radiusMeters = null,
-        [Description("Optional: one of the account's vehicles. Then the first 5 results also say whether they're free for it right now, and for how long (e.g. a shop's free time). Makes the search slower (~20 s): pass it only when free parking matters.")] string? licensePlate = null,
+        [Description("Optional: one of the account's vehicles. Then the free time in the first 5 summaries is checked for it right now (e.g. a shop's free time may be used up). A bit slower: pass it when free parking matters.")] string? licensePlate = null,
         CancellationToken ct = default)
         => ToolErrors.GuardAsync("find_parkings", logger, async () =>
     {
@@ -109,19 +111,18 @@ public sealed class ApcoaFlowTools(
                 ? FormattableString.Invariant($"No APCOA Flow parking within {radius:0} m.")
                 : $"No APCOA Flow parking matches \"{text}\".";
 
-        Dictionary<string, string> freeNotes = [];
         var sb = new StringBuilder();
+        string? vehicleId = null;
         if (!string.IsNullOrWhiteSpace(licensePlate))
         {
-            var vehicle = Plates.Find(await api.GetVehiclesAsync(ct), licensePlate);
-            if (vehicle is null)
+            vehicleId = Plates.Find(await api.GetVehiclesAsync(ct), licensePlate)?.Id;
+            if (vehicleId is null)
             {
                 ApcoaTelemetry.Fail("plate_not_registered", "free-time check: unknown plate");
-                sb.AppendLine($"(\"{licensePlate}\" isn't one of the account's vehicles, so free time wasn't checked; see get_vehicles.)");
+                sb.AppendLine($"(\"{licensePlate}\" isn't one of the account's vehicles, so free time wasn't checked for it; see get_vehicles.)");
             }
-            else
-                freeNotes = await FreeNotesAsync(found.Take(FreeCheckCount), vehicle.Id, ct);
         }
+        var freeNotes = await SummariesAsync(found.Take(FreeCheckCount), vehicleId, ct);
 
         foreach (var p in found)
         {
@@ -136,36 +137,56 @@ public sealed class ApcoaFlowTools(
         return sb.ToString().TrimEnd();
     });
 
-    /// <summary>How many search results <c>find_parkings</c> checks for free time when given a plate.</summary>
+    /// <summary>How many search results <c>find_parkings</c> summarises (free time and prices).</summary>
     public const int FreeCheckCount = 5;
 
     /// <summary>
-    /// "free now for up to …" / "free now" / "paid now" per parking, for one vehicle: a 1-minute quote each, and for
-    /// the free ones the parking's preselected duration (a shop's free window) checked with two more quotes.
+    /// A short summary per parking: free time, the 1 h / 2 h prices and the day maximum, from one details call with the
+    /// hourly prices. With a vehicle the free time is verified with one quote for it ("free now for up to …" / "paid
+    /// now"); without one it's what the prices say for any car.
     /// </summary>
-    private async Task<Dictionary<string, string>> FreeNotesAsync(IEnumerable<FoundParking> parkings, string vehicleId, CancellationToken ct)
+    private async Task<Dictionary<string, string>> SummariesAsync(IEnumerable<FoundParking> parkings, string? vehicleId, CancellationToken ct)
     {
         var notes = new Dictionary<string, string>();
         foreach (var p in parkings)
         {
             try
             {
-                var window = await pricing.FreeWindowAsync(await pricing.DetailsWithCurveAsync(p.Id, ct), vehicleId, ct);
-                notes[p.Id] = window switch
+                var details = await pricing.DetailsWithCurveAsync(p.Id, ct);
+                var curve = TariffTable.Read(details);
+                var parts = new List<string>();
+                if (vehicleId is not null)
                 {
-                    { Minutes: 0 } => "paid now",
-                    { AtLeast: false } => $"free now for up to {Text.Duration(window.Minutes)}",
-                    { Minutes: > 1 } => $"free now for at least {Text.Duration(window.Minutes)}",
-                    _ => "free now (get_price says for how long)",
-                };
+                    var window = await pricing.FreeWindowAsync(details, vehicleId, ct);
+                    parts.Add(window switch
+                    {
+                        { Minutes: 0 } => "paid now",
+                        { AtLeast: false } => $"free now for up to {Text.Duration(window.Minutes)}",
+                        { Minutes: > 1 } => $"free now for at least {Text.Duration(window.Minutes)}",
+                        _ => "free now (get_price says for how long)",
+                    });
+                }
+                else if (TariffTable.FreeGuess(curve, details.DefaultLengthOfStayInMinutes) is { } free && curve.Marks.Count > 0)
+                    parts.Add($"free {(free.Exact ? "up to" : "for at least")} {Text.Duration(free.Minutes)} (any car)");
+
+                var hourly = new[] { 1, 2 }.Select(h => (h, price: curve.At(h))).Where(x => x.price is not null).ToList();
+                if (hourly.Count > 0)
+                    parts.Add(string.Join(" / ", hourly.Select(x => $"{x.h} h {x.price!.Value.Amount.ToString("0.00", CultureInfo.InvariantCulture)}")) + " PLN");
+                if (curve.DayMax is { } dayMax)
+                    parts.Add(DayMaxNote(dayMax));
+                if (parts.Count > 0)
+                    notes[p.Id] = string.Join(" · ", parts);
             }
             catch (Exception ex) when (ex is not OperationCanceledException && ToolErrors.Map(ex) is not null)
             {
-                logger.LogInformation("find_parkings: no free-time check for {Parking} ({Error})", p.Id, ex.Message);
+                logger.LogInformation("find_parkings: no summary for {Parking} ({Error})", p.Id, ex.Message);
             }
         }
         return notes;
     }
+
+    /// <summary>The "Max day price" row: the current day's maximum (not the price of a 24 h stay).</summary>
+    internal static string DayMaxNote(Money dayMax) => $"day max today {dayMax}";
 
     [McpServerTool(Name = "get_parking_details", Title = "Get parking details", ReadOnly = true, Idempotent = true)]
     [Description("Everything about one parking: name and location code, location (address, coordinates, whether it has " +
@@ -210,9 +231,11 @@ public sealed class ApcoaFlowTools(
         if (p.MaxDuration is > 0) sb.AppendLine($"  Longest stay: {Text.Duration(p.MaxDuration.Value)}");
 
         sb.AppendLine("Pricing:");
-        var curve = TariffTable.Marks(p);
-        if (curve.Count > 0)
-            sb.AppendLine($"  Price if you start now (any vehicle; get_price checks yours): {Curve(curve)}");
+        var curve = TariffTable.Read(p);
+        if (curve.Marks.Count > 0)
+            sb.AppendLine($"  Price if you start now (any vehicle; get_price checks yours): {Curve(curve.Marks)}");
+        if (curve.DayMax is { } dayMax)
+            sb.AppendLine($"  {DayMaxNote(dayMax)} (a stay of 24 h or more is priced by get_price)");
         foreach (var section in p.Prices)
         {
             if (!string.IsNullOrWhiteSpace(section.Description))

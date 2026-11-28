@@ -129,24 +129,41 @@ public class FreeOptionsContractTests
     }
 
     [Test]
-    public async Task Price_options_give_the_price_curve_hour_by_hour()
+    public async Task Price_options_rows_come_in_the_asked_order_and_equal_the_quotes()
     {
-        // Whole hours, repeated: one "Up to N hour(s)" row each — the price of a stay of up to N hours starting now
-        // (2026-11-28). Pricing reads the free window and the longest stay at the same price off this curve.
+        // One row per distinct hour asked, in the asked order (2026-11-28); each = the dated quote for that stay.
+        // Pricing maps rows by position and never reads their labels.
         var api = LiveApi.Api;
-        var details = await api.GetSpaceAsync(LiveApi.Ostrow, [1, 2, 3, 5, 8]);
-        var labels = details.Prices.Where(s => s.SectionName == "Parking").SelectMany(s => s.Prices).Select(i => i.Label).ToList();
-
-        await Assert.That(labels).Contains("Up to 1 hour");
-        foreach (var hours in new[] { 2, 3, 5, 8 })
-            await Assert.That(labels).Contains($"Up to {hours} hours");
-        await Assert.That(details.Prices.SelectMany(s => s.Prices).Where(i => i.Label!.StartsWith("Up to"))
-            .All(i => Money.TryParse(i.Price, out _))).IsTrue().Because("every row is a parseable PLN price");
-
-        // A dated row agrees with the quote for the same stay.
         var car = LiveApi.FirstRegisteredCar(await api.GetVehiclesAsync());
-        var threeHours = details.Prices.SelectMany(s => s.Prices).Single(i => i.Label == "Up to 3 hours");
-        var quote = await LiveApi.QuoteAsync(api, LiveApi.Ostrow, car.Id, 180);
-        await Assert.That(Money.Parse(threeHours.Price!).Amount).IsEqualTo(quote.Amount);
+        int[] asked = [3, 1, 2];
+        var rows = PriceRows(await api.GetSpaceAsync(LiveApi.Ostrow, asked));
+
+        await Assert.That(rows.Count).IsEqualTo(asked.Length);
+        for (var i = 0; i < asked.Length; i++)
+            await Assert.That(rows[i].Amount).IsEqualTo((await LiveApi.QuoteAsync(api, LiveApi.Ostrow, car.Id, asked[i] * 60)).Amount)
+                .Because($"row {i} is the stay of {asked[i]} h");
+
+        // Duplicates are merged: ask distinct hours.
+        await Assert.That(PriceRows(await api.GetSpaceAsync(LiveApi.Ostrow, [5, 1, 5])).Count).IsEqualTo(2);
     }
+
+    [Test]
+    public async Task Price_options_the_tariff_does_not_sell_are_left_out_at_the_end()
+    {
+        // Chorzów ul. Moniuszki 4 (found by its location code; paid, read-only here) sells stays up to 720 h
+        // (2026-11-28). Pricing maps the n rows it gets to the first n hours it asked (ascending).
+        var api = LiveApi.Api;
+        var car = LiveApi.FirstRegisteredCar(await api.GetVehiclesAsync());
+        var parking = (await api.SearchAsync(new SearchQuery { Query = "22919", Latitude = 52.0, Longitude = 19.0, IsParking = true, IsCharging = false })).Spaces.Single();
+
+        var rows = PriceRows(await api.GetSpaceAsync(parking.Id, [1, 720, 721]));
+
+        await Assert.That(rows.Count).IsEqualTo(2);
+        await Assert.That(rows[0].Amount).IsEqualTo((await LiveApi.QuoteAsync(api, parking.Id, car.Id, 60)).Amount);
+    }
+
+    // The price section's rows as money, found by shape (every row a price), not by name.
+    private static List<Money> PriceRows(SpaceDetails details) =>
+        details.Prices.Select(s => s.Prices.Select(i => Money.TryParse(i.Price, out var m) ? m : (Money?)null).ToList())
+            .First(rows => rows.Count > 0 && rows.All(m => m is not null)).Select(m => m!.Value).ToList();
 }

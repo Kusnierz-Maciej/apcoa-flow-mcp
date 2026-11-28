@@ -92,7 +92,11 @@ Parking places are **spaces**, with GUID ids. There's no offline dataset: the ap
   curve, e.g. Przy Ratuszu at night +0.40/h until 08:00 then +1.30/h; Ostrów on Saturday 00:08 free up to 5 h, 3.00
   at 6 h. With 24 hours the last row becomes "Max day price". Not plate-specific (a shop's free time used up for a
   plate isn't shown), so a deduction gets one verifying quote. `true`/words, `1,2,3`, `1.5` → 400; `0` → empty
-  table. Pricing uses hours 1–24 for the free window and the longest stay at the same price; no searching. Across 45 sampled parkings: `parkingOverview` titles "Open" and "AutoPay"
+  table. Rows come in the asked order, duplicates merged, hours the tariff doesn't sell (the longest) left out; the plain call = hours
+  1, 2, 24, and **hour 24 ("Max day price") is the current day's maximum**, not a dated stay. Labels are display text:
+  `TariffTable.Read` maps rows by position. The web app's details screen sends no `priceOptions`; its duration picker
+  quotes every change (recon `docs/captures/0011`). Pricing uses hours 1–23 for the free window and the longest stay
+  at the same price (one verifying quote each), and hour 24 only as "day max today". Across 45 sampled parkings: `parkingOverview` titles "Open" and "AutoPay"
   (plate recognition, `sessionsStartAutomatically: true`); `ctaButtonType: "none"` where sessions can't be started (e.g.
   Lidl Poznań ul. Fabryczna 23: "1.5 h free without starting a session"); season tickets on 18; some pins answer
   `404 {"code":"FaTariffNotFound","message":"No tariff available…"}`. Biedronka spaces:
@@ -200,7 +204,8 @@ Free options, read-only (`FreeOptionsContractTests`):
 | A location-code search returns exactly that parking | `A_location_code_search_returns_exactly_that_parking` |
 | Map pins carry closed outlines | `Map_pins_carry_closed_outlines` |
 | Search `distance` is in kilometres | `Search_distance_is_in_kilometres` |
-| `spaces/{id}?priceOptions=1&priceOptions=2…` lists "Up to N hours" per hour asked, dated (= the quote for that stay) | `Price_options_give_the_price_curve_hour_by_hour` |
+| `spaces/{id}?priceOptions=…`: one row per distinct hour asked, in the asked order, each = the dated quote for that stay | `Price_options_rows_come_in_the_asked_order_and_equal_the_quotes` |
+| Hours the tariff doesn't sell get no row, and they're the longest (Chorzów: none beyond 720 h; Biedronka answers 1000 h, so it isn't `maxDuration`) | `Price_options_the_tariff_does_not_sell_are_left_out_at_the_end` |
 
 One free cycle per run (`SessionContractTests.Free_session_lifecycle`, on Ostrów or a Biedronka with a dated 0.00
 quote; skipped when none is free):
@@ -222,6 +227,7 @@ Behaviours relied on without a live test, because testing them costs money or ca
 | Behaviour | Observed |
 |---|---|
 | An expired access token gets the same `403 Unauthenticated` as no token (needs > 1 h, so not in the nightly run) | 2026-11-27, sandbox `expired-token` |
+| `priceOptions` hour 24 ("Max day price") is the current day's maximum, not a dated 24 h stay; only shown as "day max today", never used for durations (it differs from the quote only on parkings whose days differ, at certain times) | 2026-11-28, Ostrów: 5.00 at 19:07 Saturday while the 1440-min quote was 0.00; 0.00 at 00:04 Saturday (Friday UTC). Probably the UTC day; checks scheduled at 00:37 / 01:37 |
 | A paid post-pay start with a saved card runs at once, no interactive step | 2026-11-27, Czarny Dunajec, stopped after 19 s |
 | A paid pre-pay start with a saved card is pending, then `completed`; the card is charged at start (PLN 1.00, visa, history `status: paid`, `state: billed`) | 2026-11-27, Markinvest Warszawa al. Wilanowska 363 |
 | A paid (pre-pay) extension answers `{status: "awaitingPayment", pendingId}` and is charged; the new end shows in `sessions` within seconds (PLN 0.40 start + 0.40 extension = 0.80 billed) | 2026-11-27, Przy Ratuszu Warszawa, through `start_session` + `extend_session` |
