@@ -340,6 +340,9 @@ public sealed class ApcoaFlowTools(
         if (sessions.Count == 0)
             return "No parking session is running.";
 
+        // The API gives UTC; each session is shown in its parking's local time (the zone looked up once per parking).
+        foreach (var spaceId in sessions.Select(s => s.Space?.Id).Distinct())
+            await ParkingTime.OfAsync(api, spaceId, ct);
         var now = time.GetUtcNow();
         var sb = new StringBuilder();
         foreach (var s in sessions)
@@ -557,11 +560,11 @@ public sealed class ApcoaFlowTools(
 
     internal string DescribeSession(Session s, DateTimeOffset now)
     {
-        var sb = new StringBuilder($"[{s.Id}] {s.Space?.Name ?? "unknown parking"} - {s.Vehicle?.LicensePlate}, from {Text.LocalTime(s.StartDate, time)}");
+        var sb = new StringBuilder($"[{s.Id}] {s.Space?.Name ?? "unknown parking"} - {s.Vehicle?.LicensePlate}, from {ParkingTime.At(s.StartDate, time, s.Space?.Id)}");
         if (s.EndDate is { } end)
         {
             var left = end - now;
-            sb.Append($" until {Text.LocalTime(end, time)}");
+            sb.Append($" until {ParkingTime.At(end, time, s.Space?.Id)}");
             sb.Append(left > TimeSpan.Zero ? $" ({Text.Duration((int)Math.Ceiling(left.TotalMinutes))} left)" : " (overdue)");
         }
         sb.Append(s.PaymentFlow switch

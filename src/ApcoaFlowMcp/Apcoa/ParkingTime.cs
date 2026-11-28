@@ -1,4 +1,6 @@
+using System.Collections.Concurrent;
 using ApcoaFlowApiClient;
+using ApcoaFlowApiClient.Api;
 
 namespace ApcoaFlowMcp.Apcoa;
 
@@ -29,6 +31,38 @@ public static class ParkingTime
             catch (TimeZoneNotFoundException) { }
         }
         return ApcoaFlowEndpoints.AppTimeZone;
+    }
+
+    // Parking id → zone, learnt from every details call (a parking's country doesn't change). Sessions carry the
+    // parking's id but not its country, and the API gives their times in UTC.
+    private static readonly ConcurrentDictionary<string, TimeZoneInfo> Known = new();
+
+    /// <summary>Notes the zone of the parking <paramref name="spaceId"/> (from its details) and returns it.</summary>
+    public static TimeZoneInfo Remember(string? spaceId, string? countryCode)
+    {
+        var zone = Zone(countryCode);
+        if (!string.IsNullOrEmpty(spaceId)) Known[spaceId] = zone;
+        return zone;
+    }
+
+    /// <summary>The zone of a parking seen before; the app's zone otherwise.</summary>
+    public static TimeZoneInfo Of(string? spaceId) =>
+        spaceId is not null && Known.TryGetValue(spaceId, out var zone) ? zone : ApcoaFlowEndpoints.AppTimeZone;
+
+    /// <summary>The zone of a parking, from its details when not seen yet (one call); the app's zone if that fails.</summary>
+    public static async Task<TimeZoneInfo> OfAsync(IApcoaFlowApi api, string? spaceId, CancellationToken ct)
+    {
+        if (string.IsNullOrEmpty(spaceId)) return ApcoaFlowEndpoints.AppTimeZone;
+        if (Known.TryGetValue(spaceId, out var zone)) return zone;
+        try { return Remember(spaceId, (await api.GetSpaceAsync(spaceId, ct: ct)).CountryCode); }
+        catch (Exception ex) when (ex is not OperationCanceledException) { return ApcoaFlowEndpoints.AppTimeZone; }
+    }
+
+    /// <summary>The time in the zone of the parking <paramref name="spaceId"/>, named when it isn't Polish time.</summary>
+    public static string At(DateTimeOffset utc, TimeProvider time, string? spaceId)
+    {
+        var zone = Of(spaceId);
+        return Text.LocalTime(utc, time, zone) + Suffix(zone);
     }
 
     /// <summary>The zone's name when it isn't the app's (Polish) one, for "18:00 (Europe/Berlin time)"; else empty.</summary>

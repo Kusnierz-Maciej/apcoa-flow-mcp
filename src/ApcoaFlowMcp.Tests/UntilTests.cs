@@ -126,4 +126,22 @@ public class UntilTests
         await Assert.That(ParkingTime.Zone("PL").Id).IsEqualTo("Europe/Warsaw");
         await Assert.That(ParkingTime.Zone(null).Id).IsEqualTo("Europe/Warsaw");
     }
+
+    [Test]
+    public async Task Running_sessions_show_their_parkings_local_time()
+    {
+        // The API gives session times in UTC; a UK parking's session reads in London time (UTC in November).
+        var api = Create();
+        var details = new SpaceDetails { Id = "uk-park", Name = "London Bridge", CountryCode = "GB" };
+        api.GetSpaceAsync("uk-park", Arg.Any<IEnumerable<int>?>(), Arg.Any<CancellationToken>()).Returns(details);
+        api.GetSessionsAsync(Arg.Any<CancellationToken>()).Returns([new Session
+        {
+            Id = "s1", StartDate = Now, EndDate = Now.AddHours(2), Space = new SessionSpace { Id = "uk-park", Name = "London Bridge" },
+            Vehicle = new SessionVehicle { LicensePlate = LicensePlate },
+        }]);
+
+        var text = await FakeApi.Tools(api).GetActiveSessionsAsync();
+
+        await Assert.That(text).Contains("from 14:00 (Europe/London time) until 16:00 (Europe/London time)");
+    }
 }

@@ -51,9 +51,12 @@ public sealed class Sessions(IApcoaFlowApi api, Pricing pricing, TimeProvider ti
         var running = (await Phase("apcoa.running_sessions", () => api.GetSessionsAsync(ct)))
             .FirstOrDefault(s => Plates.Normalize(s.Vehicle?.LicensePlate) == Plates.Normalize(vehicle.LicensePlate));
         if (running is not null)
+        {
+            await ParkingTime.OfAsync(api, running.Space?.Id, ct); // its times in its parking's local time
             return Refused("session_already_active",
                 $"{vehicle.LicensePlate} already has a running session: {Describe(running)}. End it with end_session (or " +
                 "extend it with extend_session) before starting another one.", running.Id);
+        }
 
         // The details with the hourly price curve: name, rules, usual/longest stay and the prices of a stay starting now.
         var parking = await Phase("apcoa.parking", () => pricing.DetailsWithCurveAsync(parkingId.Trim(), ct));
@@ -447,6 +450,7 @@ public sealed class Sessions(IApcoaFlowApi api, Pricing pricing, TimeProvider ti
         var session = (await Phase("apcoa.running_sessions", () => api.GetSessionsAsync(ct))).FirstOrDefault(s => s.Id == id);
         if (session is null)
             return Refused("session_not_found", "No running session has that id (it may have ended already). Call get_active_sessions for the current ones.");
+        await ParkingTime.OfAsync(api, session.Space?.Id, ct);
         if (!session.SessionCanBeStopped)
             return Refused("not_stoppable", $"{Describe(session)} can't be stopped early; it ends by itself at its end time.");
 
@@ -509,10 +513,12 @@ public sealed class Sessions(IApcoaFlowApi api, Pricing pricing, TimeProvider ti
         m.Flow == "saved" && m.RequiredAction == "none" && m.Availability == "available" &&
         m.Type is not ("applePay" or "googlePay" or "unknown");
 
+    /// <summary>A session in one line, its times in its parking's local time (see <see cref="ParkingTime"/>).</summary>
     private string Describe(Session s)
     {
-        var end = s.EndDate is { } e ? $" until {Text.LocalTime(e, time)}" : "";
-        return $"[{s.Id}] {s.Space?.Name ?? "unknown parking"} - {s.Vehicle?.LicensePlate}, from {Text.LocalTime(s.StartDate, time)}{end}";
+        var spaceId = s.Space?.Id;
+        var end = s.EndDate is { } e ? $" until {ParkingTime.At(e, time, spaceId)}" : "";
+        return $"[{s.Id}] {s.Space?.Name ?? "unknown parking"} - {s.Vehicle?.LicensePlate}, from {ParkingTime.At(s.StartDate, time, spaceId)}{end}";
     }
 
     /// <summary>

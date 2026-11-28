@@ -27,8 +27,12 @@ public sealed class Pricing(IApcoaFlowApi api, TimeProvider time)
     /// A parking's details WITH its price curve (the next day, hour by hour, starting now): one call that serves as the
     /// details too (same fields). Pass the result to <see cref="FreeWindowAsync"/> and <see cref="LongestAtSamePriceAsync"/>.
     /// </summary>
-    public Task<SpaceDetails> DetailsWithCurveAsync(string parkingId, CancellationToken ct) =>
-        api.GetSpaceAsync(parkingId, TariffTable.CurveHours, ct);
+    public async Task<SpaceDetails> DetailsWithCurveAsync(string parkingId, CancellationToken ct)
+    {
+        var details = await api.GetSpaceAsync(parkingId, TariffTable.CurveHours, ct);
+        ParkingTime.Remember(details.Id ?? parkingId, details.CountryCode);
+        return details;
+    }
 
     /// <summary>
     /// The longest stay starting now that costs the same as <paramref name="minutes"/> did (<paramref name="price"/>),

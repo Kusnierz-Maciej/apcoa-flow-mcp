@@ -175,6 +175,10 @@ where the car is, wherever the user is; other zones are named, "18:00 (Europe/Lo
 ("2026-12-05 18:00"). It becomes the minutes from now (rounded up), or for `extend_session` from the session's current
 end. Give minutes or `until`, not both. A paid quote then says to call again with the same `until`.
 
+**Times** are the parking's local time. The API gives session times in UTC; running sessions are shown in their
+parking's zone (looked up once per parking from its `countryCode`, named when it isn't Polish time). History entries
+carry only the parking's name, so they're shown in Polish time.
+
 **Same price, longer stay** (every mode — minutes, `until`, free and paid starts, extensions): a free stay runs to the
 end of the free window; a paid start to the longest stay at the same price from the parking's hourly prices; an
 extension to the longest end at the same price, from the same hourly prices read as the session's whole length since
