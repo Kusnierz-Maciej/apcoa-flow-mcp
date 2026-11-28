@@ -15,6 +15,18 @@ namespace ApcoaFlow.Sandbox.Scenarios;
 /// Ostrów free 1–5 h then 3.00 (Saturday 06:00), Biedronka 1 h 0.00 / 2 h 2.00. Not plate-specific (shop free time
 /// used up for a plate isn't shown). "true"/"all"/words, "1,2,3" and "1.5" → 400; 0 → empty table. The plain table's
 /// "Max day price" is the general day cap, not dated (Ostrów 0.00 while a dated day costs 5.00).
+/// FOUND (2026-11-28, app code): the details screen sends no priceOptions (the API then answers hours 1, 2, 24); only
+/// scan &amp; pay sends 1, 2, 3, 4. Rows are {label, price} written by the server; the app has no tariff model.
+/// FOUND (2026-11-28): rows come back in the asked order ([3,1,2] → 3 h, 1 h, 2 h), duplicates merged ([5,1,5] → 5 h,
+/// 1 h), hours beyond maxDuration dropped (Chorzów 720 → a row, 721 → none). Every hour except 24 = the dated quote
+/// for that stay (Chorzów 23/25/30/48 h = 30/34/54/60, the quote for 24 h 1 min = 34). Hour 24 = "Max day price" =
+/// the CURRENT DAY's maximum, not a dated 24 h stay: Ostrów Saturday 19:07 → 5.00 while 23 h, 25 h and the 1440-min
+/// quote are 0.00; Saturday 00:08 local (Friday 23:08 UTC) → 0.00, so the day is probably the UTC day.
+/// FOUND (2026-11-28): prices/lengthOfStayPresets still hangs; prices/preBooking with a quote's query → 400
+/// ValidationError; a quote's startDate/endDate are null and its priceItems are display rows (Cost, Convenience fee).
+/// FOUND (2026-11-28, web app in Chrome, recon docs/captures/0011): details without priceOptions; the duration picker
+/// (+30 min / +1 h / +5 h / +1 d / end date) sends one dated quote per change (prices + StartDate), preselects
+/// defaultLengthOfStayInMinutes (Biedronka 90 → 0.00), never shows "free until" or "same price until".
 /// </summary>
 public sealed class ParkingPricingScenario : IScenario
 {
